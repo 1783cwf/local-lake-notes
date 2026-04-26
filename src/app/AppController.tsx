@@ -186,6 +186,7 @@ export function AppController() {
       setWorkspace(payload);
       if (currentDocument?.entry.path === document.path) {
         setCurrentDocument(null);
+        setSaveStatus(emptySaveStatus);
       }
       setAppError(null);
     } catch (error) {
@@ -234,6 +235,7 @@ export function AppController() {
       setWorkspace(payload);
       if (currentDocument?.entry.path.startsWith(`${directory.path}/`)) {
         setCurrentDocument(null);
+        setSaveStatus(emptySaveStatus);
       }
       setAppError(null);
     } catch (error) {

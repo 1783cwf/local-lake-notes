@@ -30,6 +30,65 @@ test("contentchange 后 debounce 保存最新 Lake 内容", async () => {
   vi.useRealTimers();
 });
 
+test("禁用自动保存时取消待执行的保存", async () => {
+  vi.useFakeTimers();
+  const saveContent = vi.fn(async () => undefined);
+  const { result, rerender } = renderHook(
+    ({ enabled }) =>
+      useLakeAutosave({
+        enabled,
+        delayMs: 100,
+        readContent: () => "<p>deleted</p>",
+        saveContent,
+      }),
+    { initialProps: { enabled: true } },
+  );
+
+  act(() => {
+    result.current.scheduleSave();
+  });
+
+  rerender({ enabled: false });
+
+  await act(async () => {
+    vi.advanceTimersByTime(100);
+  });
+
+  expect(saveContent).not.toHaveBeenCalled();
+  expect(result.current.status).toEqual({ state: "clean" });
+  vi.useRealTimers();
+});
+
+test("保存上下文变化时取消旧的待执行保存", async () => {
+  vi.useFakeTimers();
+  const saveOldContent = vi.fn(async () => undefined);
+  const saveNewContent = vi.fn(async () => undefined);
+  const { result, rerender } = renderHook(
+    ({ saveContent }) =>
+      useLakeAutosave({
+        enabled: true,
+        delayMs: 100,
+        readContent: () => "<p>content</p>",
+        saveContent,
+      }),
+    { initialProps: { saveContent: saveOldContent } },
+  );
+
+  act(() => {
+    result.current.scheduleSave();
+  });
+
+  rerender({ saveContent: saveNewContent });
+
+  await act(async () => {
+    vi.advanceTimersByTime(100);
+  });
+
+  expect(saveOldContent).not.toHaveBeenCalled();
+  expect(saveNewContent).not.toHaveBeenCalled();
+  vi.useRealTimers();
+});
+
 test("手动保存失败时保留错误状态", async () => {
   const { result } = renderHook(() =>
     useLakeAutosave({

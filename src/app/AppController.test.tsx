@@ -1,40 +1,58 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import type { MoveWorkspaceItemInput, WorkspacePayload } from "../features/workspace/workspaceStore";
+import type {
+  CreateDocumentPayload,
+  MoveWorkspaceItemInput,
+  WorkspacePayload,
+} from "../features/workspace/workspaceStore";
 import { AppController } from "./AppController";
 
+const createLakeDocument = vi.fn<(title: string, parentPath?: string) => Promise<CreateDocumentPayload>>();
+const deleteLakeDocument = vi.fn<(path: string) => Promise<WorkspacePayload>>();
 const getRecentWorkspace = vi.fn<() => Promise<WorkspacePayload | null>>(async () => null);
 const moveWorkspaceItem = vi.fn<(input: MoveWorkspaceItemInput) => Promise<WorkspacePayload>>();
 const readLakeDocument = vi.fn<(path: string) => Promise<string>>(async () => "<p>hello</p>");
 const setWorkspaceRoot = vi.fn<(path: string) => Promise<WorkspacePayload>>();
+const writeLakeDocument = vi.fn<(path: string, content: string) => Promise<void>>();
 
 vi.mock("../components/DocumentSidebar", () => ({
   DocumentSidebar: ({
     workspaceRoot,
     documents,
     currentPath,
+    onCreateDocument,
     onOpenDocument,
+    onDeleteDocument,
     onMoveNode,
   }: {
     workspaceRoot: string | null;
     documents: Array<{ path: string; name: string; parentPath: string; size: number }>;
     currentPath: string | null;
+    onCreateDocument: (parentPath: string) => void;
     onOpenDocument: (document: { path: string; name: string; parentPath: string; size: number }) => void;
+    onDeleteDocument: (document: { path: string; name: string; parentPath: string; size: number }) => void;
     onMoveNode: (sourceId: string, intent: { placement: "inside"; targetId: string }) => void;
   }) => (
     <div>
       <div>{workspaceRoot ? workspaceRoot.split("/").pop() : "未选择目录"}</div>
       <div data-testid="current-path">{currentPath ?? ""}</div>
+      <button type="button" onClick={() => onCreateDocument("")}>
+        侧栏新建文档
+      </button>
       {documents.map((document) => (
-        <button
-          key={document.path}
-          type="button"
-          role="treeitem"
-          onClick={() => onOpenDocument(document)}
-        >
-          {document.name}
-        </button>
+        <div key={document.path}>
+          <button
+            type="button"
+            role="treeitem"
+            onClick={() => onOpenDocument(document)}
+          >
+            {document.name}
+          </button>
+          <button type="button" onClick={() => onDeleteDocument(document)}>
+            删除 {document.name}
+          </button>
+        </div>
       ))}
       <button
         type="button"
@@ -49,9 +67,9 @@ vi.mock("../components/DocumentSidebar", () => ({
 vi.mock("../lib/tauri", () => ({
   chooseWorkspaceDirectory: vi.fn(async () => "/tmp/kb"),
   createLakeDirectory: vi.fn(),
-  createLakeDocument: vi.fn(),
+  createLakeDocument: (title: string, parentPath?: string) => createLakeDocument(title, parentPath),
   deleteLakeDirectory: vi.fn(),
-  deleteLakeDocument: vi.fn(),
+  deleteLakeDocument: (path: string) => deleteLakeDocument(path),
   getOssSettings: vi.fn(async () => null),
   getRecentWorkspace: () => getRecentWorkspace(),
   moveWorkspaceItem: (input: MoveWorkspaceItemInput) => moveWorkspaceItem(input),
@@ -65,14 +83,21 @@ vi.mock("../lib/tauri", () => ({
   setWorkspaceRoot: (path: string) => setWorkspaceRoot(path),
   uploadFile: vi.fn(),
   uploadImage: vi.fn(),
-  writeLakeDocument: vi.fn(),
+  writeLakeDocument: (path: string, content: string) => writeLakeDocument(path, content),
 }));
 
 beforeEach(() => {
+  createLakeDocument.mockReset();
+  deleteLakeDocument.mockReset();
   getRecentWorkspace.mockResolvedValue(null);
   moveWorkspaceItem.mockReset();
   readLakeDocument.mockResolvedValue("<p>hello</p>");
   setWorkspaceRoot.mockReset();
+  writeLakeDocument.mockResolvedValue(undefined);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 test("选择目录后展示 workspace 文档", async () => {
@@ -152,5 +177,48 @@ test("后端移动失败时回滚 workspace 并展示错误", async () => {
     expect(screen.getByText("目标位置已存在同名项目：notes/a.lake")).toBeInTheDocument();
     expect(screen.getByTestId("current-path")).toHaveTextContent("a.lake");
     expect(screen.getByRole("treeitem", { name: "a" })).toBeInTheDocument();
+  });
+});
+
+test("删除当前新建文档后仍可打开已有文档", async () => {
+  const user = userEvent.setup();
+  const initialWorkspace: WorkspacePayload = {
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "old.lake", path: "old.lake", name: "old", parentPath: "", size: 1 }],
+    order: ["document:old.lake"],
+  };
+  const createdWorkspace: CreateDocumentPayload = {
+    ...initialWorkspace,
+    documents: [
+      initialWorkspace.documents[0],
+      { id: "未命名文档.lake", path: "未命名文档.lake", name: "未命名文档", parentPath: "", size: 1 },
+    ],
+    order: ["document:old.lake", "document:未命名文档.lake"],
+    createdDocument: { id: "未命名文档.lake", path: "未命名文档.lake", name: "未命名文档", parentPath: "", size: 1 },
+  };
+  getRecentWorkspace.mockResolvedValue(initialWorkspace);
+  createLakeDocument.mockResolvedValue(createdWorkspace);
+  deleteLakeDocument.mockResolvedValue(initialWorkspace);
+  readLakeDocument.mockImplementation(async (path) => `<p>${path}</p>`);
+  writeLakeDocument.mockRejectedValue(new Error("写入失败"));
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("button", { name: "侧栏新建文档" }));
+  await waitFor(() => expect(screen.getByTestId("current-path")).toHaveTextContent("未命名文档.lake"));
+
+  await user.click(screen.getByRole("button", { name: "保存" }));
+  await screen.findByText("写入失败");
+
+  await user.click(screen.getByRole("button", { name: "删除 未命名文档" }));
+  await waitFor(() => expect(screen.getByTestId("current-path")).toHaveTextContent(""));
+
+  await user.click(screen.getByRole("treeitem", { name: "old" }));
+
+  await waitFor(() => {
+    expect(screen.getByTestId("current-path")).toHaveTextContent("old.lake");
+    expect(screen.queryByText("当前文档保存失败，请先处理后再切换")).not.toBeInTheDocument();
   });
 });

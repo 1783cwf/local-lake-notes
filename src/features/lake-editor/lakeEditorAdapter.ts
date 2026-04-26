@@ -97,13 +97,17 @@ export function destroyLakeEditor(editor: LakeEditorInstance | null): void {
     return;
   }
 
-  if (typeof editor.destroy === "function") {
-    editor.destroy();
-    return;
-  }
+  try {
+    if (typeof editor.destroy === "function") {
+      editor.destroy();
+      return;
+    }
 
-  if (typeof editor.destory === "function") {
-    editor.destory();
+    if (typeof editor.destory === "function") {
+      editor.destory();
+    }
+  } catch (error) {
+    console.warn("销毁语雀编辑器失败", error);
   }
 }
 

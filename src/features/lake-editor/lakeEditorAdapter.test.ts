@@ -156,3 +156,19 @@ test("销毁编辑器时兼容 destroy 和 destory", () => {
   });
   expect(destroy).toHaveBeenCalled();
 });
+
+test("销毁编辑器异常时不向外抛出", () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+  expect(() =>
+    destroyLakeEditor({
+      setDocument: vi.fn(),
+      getDocument: vi.fn(() => ""),
+      on: vi.fn(),
+      destroy: vi.fn(() => {
+        throw new Error("销毁失败");
+      }),
+    }),
+  ).not.toThrow();
+  expect(warn).toHaveBeenCalled();
+});

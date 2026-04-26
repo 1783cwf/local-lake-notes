@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { SaveStatus, UploadImageInput, UploadImageOutput } from "../../app/appState";
 import type { WorkspaceDocument } from "../workspace/workspaceStore";
@@ -56,10 +56,11 @@ export function LakeEditor({
     onSaveStatusChange(status);
   }, [onSaveStatusChange, status]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!document || !containerRef.current) {
       destroyLakeEditor(editorRef.current);
       editorRef.current = null;
+      setLoadError(null);
       return;
     }
 
@@ -70,17 +71,24 @@ export function LakeEditor({
 
     setLoadError(null);
     destroyLakeEditor(editorRef.current);
-    const editor = createLakeEditor(containerRef.current, {
-      onContentChange: () => {
-        scheduleSave();
-      },
-      uploadImage: (request) => createEditorImageUpload(request, onUploadImage),
-      uploadFile: (file) => createEditorFileUpload(file, onUploadFile),
-      openFileUrl: onOpenFileUrl,
-    });
-    editorRef.current = editor;
-    editor.setDocument("text/lake", content);
-    setStatus({ state: "clean" });
+    let editor: LakeEditorInstance;
+    try {
+      editor = createLakeEditor(containerRef.current, {
+        onContentChange: () => {
+          scheduleSave();
+        },
+        uploadImage: (request) => createEditorImageUpload(request, onUploadImage),
+        uploadFile: (file) => createEditorFileUpload(file, onUploadFile),
+        openFileUrl: onOpenFileUrl,
+      });
+      editorRef.current = editor;
+      editor.setDocument("text/lake", content);
+      setStatus({ state: "clean" });
+    } catch (error) {
+      editorRef.current = null;
+      setLoadError(toMessage(error));
+      return;
+    }
 
     return () => {
       destroyLakeEditor(editor);
@@ -126,4 +134,8 @@ export function LakeEditor({
   }
 
   return <div ref={containerRef} className="lake-editor-root ne-doc-major-editor" />;
+}
+
+function toMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
