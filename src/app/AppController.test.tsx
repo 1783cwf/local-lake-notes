@@ -114,6 +114,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  window.Doc = undefined;
   vi.restoreAllMocks();
 });
 
@@ -242,6 +243,15 @@ test("删除当前新建文档后仍可打开已有文档", async () => {
 
 test("可以导出整个知识库 Markdown ZIP", async () => {
   const user = userEvent.setup();
+  const editor = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => "![图片](file:///tmp/a.png)\n"),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
   getRecentWorkspace.mockResolvedValue({
     root: "/tmp/kb",
     directories: [{ id: "notes", path: "notes", name: "notes", parentPath: "" }],
@@ -260,5 +270,8 @@ test("可以导出整个知识库 Markdown ZIP", async () => {
       expect.any(Uint8Array),
       expect.any(Array),
     );
+    expect(editor.setDocument).toHaveBeenCalledWith("text/lake", "<h1>hello</h1><p>world</p>");
+    expect(editor.getDocument).toHaveBeenCalledWith("text/markdown");
+    expect(editor.destroy).toHaveBeenCalled();
   });
 });

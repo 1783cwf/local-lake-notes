@@ -6,6 +6,7 @@ import { DocumentSidebar } from "../components/DocumentSidebar";
 import { TopBar } from "../components/TopBar";
 import { LakeEditor } from "../features/lake-editor/LakeEditor";
 import {
+  createOfficialLakeMarkdownConverter,
   exportFileName,
   lakeDocumentToHtml,
   lakeDocumentToMarkdown,
@@ -330,7 +331,13 @@ export function AppController() {
     }
 
     try {
-      const zip = await lakeWorkspaceToMarkdownZip(workspace, readLakeDocument);
+      const converter = createOfficialLakeMarkdownConverter();
+      let zip: Uint8Array;
+      try {
+        zip = await lakeWorkspaceToMarkdownZip(workspace, readLakeDocument, converter.convert);
+      } finally {
+        converter.dispose();
+      }
       await saveBinaryExport(
         workspaceExportFileName(workspace.root),
         zip,

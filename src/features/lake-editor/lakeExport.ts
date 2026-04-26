@@ -1,12 +1,22 @@
 import type { WorkspaceDocument, WorkspacePayload } from "../workspace/workspaceStore";
 import { buildDocumentTree, documentTitleFromPath, flattenDocumentTree } from "../workspace/workspaceStore";
+import type { LakeEditorInstance } from "./editorTypes";
 
 export type DocumentExportFormat = "markdown" | "html" | "pdf";
+export type LakeWorkspaceMarkdownConverter = (
+  document: WorkspaceDocument,
+  lakeContent: string,
+) => Promise<string> | string;
 
 export interface LakeDocumentExportRequest {
   id: number;
   format: DocumentExportFormat;
   document: WorkspaceDocument;
+}
+
+export interface OfficialLakeMarkdownConverter {
+  convert: LakeWorkspaceMarkdownConverter;
+  dispose: () => void;
 }
 
 const markdownExtension = ".md";
@@ -292,6 +302,9 @@ export async function lakeDocumentToHtml(title: string, content: string): Promis
 export async function lakeWorkspaceToMarkdownZip(
   workspace: WorkspacePayload,
   readDocument: (path: string) => Promise<string>,
+  convertDocument: LakeWorkspaceMarkdownConverter = (document, content) => (
+    lakeDocumentToMarkdown(documentTitleFromPath(document.path), content)
+  ),
 ): Promise<Uint8Array> {
   const tree = buildDocumentTree(workspace.documents, workspace.directories, workspace.order);
   const nodes = flattenDocumentTree(tree);
@@ -307,12 +320,63 @@ export async function lakeWorkspaceToMarkdownZip(
       const content = await readDocument(node.document.path);
       entries.push({
         path: lakePathToMarkdownZipPath(node.document.path),
-        content: lakeDocumentToMarkdown(documentTitleFromPath(node.document.path), content),
+        content: await convertDocument(node.document, content),
       });
     }
   }
 
   return createZip(entries);
+}
+
+export function createOfficialLakeMarkdownConverter(): OfficialLakeMarkdownConverter {
+  if (!window.Doc?.createOpenEditor) {
+    throw new Error("语雀编辑器资源未加载，无法使用官方 Markdown 导出");
+  }
+
+  const host = document.createElement("div");
+  host.setAttribute("data-lake-export-converter", "true");
+  Object.assign(host.style, {
+    position: "fixed",
+    left: "-10000px",
+    top: "0",
+    width: "960px",
+    height: "720px",
+    overflow: "hidden",
+    opacity: "0",
+    pointerEvents: "none",
+  });
+  document.body.append(host);
+
+  let editor: LakeEditorInstance;
+  try {
+    editor = window.Doc.createOpenEditor(host, {
+      input: {},
+      toc: { enable: false },
+      image: {},
+      file: {},
+    });
+  } catch (error) {
+    host.remove();
+    throw error;
+  }
+  let disposed = false;
+
+  const dispose = () => {
+    if (disposed) {
+      return;
+    }
+    disposed = true;
+    destroyEditor(editor);
+    host.remove();
+  };
+
+  return {
+    convert: async (document, lakeContent) => {
+      editor.setDocument("text/lake", lakeContent);
+      return markdownWithTitle(documentTitleFromPath(document.path), editor.getDocument("text/markdown"));
+    },
+    dispose,
+  };
 }
 
 export function exportFileName(document: WorkspaceDocument, format: DocumentExportFormat): string {
@@ -415,6 +479,22 @@ function lakeCardToMarkdown(card: Element): string {
   }
 
   return `[${value.name || value.src}](${value.src})`;
+}
+
+function markdownWithTitle(title: string, markdown: string): string {
+  return normalizeMarkdown(`# ${title}\n\n${markdown}`);
+}
+
+function destroyEditor(editor: LakeEditorInstance): void {
+  try {
+    if (typeof editor.destroy === "function") {
+      editor.destroy();
+      return;
+    }
+    editor.destory?.();
+  } catch {
+    // 导出结束后的清理失败不应阻断文件保存结果。
+  }
 }
 
 function renderHtmlExportContent(content: string): { html: string; headings: ExportHeading[] } {

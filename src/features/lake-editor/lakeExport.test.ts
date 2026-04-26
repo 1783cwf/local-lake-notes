@@ -1,8 +1,13 @@
 import {
+  createOfficialLakeMarkdownConverter,
   lakeDocumentToHtml,
   lakeDocumentToMarkdown,
   lakeWorkspaceToMarkdownZip,
 } from "./lakeExport";
+
+afterEach(() => {
+  window.Doc = undefined;
+});
 
 test("Lake 内容可以导出为 Markdown", () => {
   const markdown = lakeDocumentToMarkdown(
@@ -40,6 +45,7 @@ test("HTML 导出保留 Lake 内容和打印样式", async () => {
 });
 
 test("知识库 Markdown 按目录树导出为 ZIP", async () => {
+  const convertDocument = vi.fn(async () => "![图片](file:///tmp/a.png)\n");
   const zip = await lakeWorkspaceToMarkdownZip(
     {
       root: "/tmp/kb",
@@ -48,13 +54,50 @@ test("知识库 Markdown 按目录树导出为 ZIP", async () => {
       order: ["folder:notes", "document:notes/a.lake"],
     },
     async () => "<p>正文</p>",
+    convertDocument,
   );
   const entries = readStoredZipEntries(zip);
 
   expect(entries.map((entry) => entry.path)).toEqual(["notes/", "notes/a.md"]);
   expect(entries[0].content).toBe("");
-  expect(entries[1].content).toContain("# a");
-  expect(entries[1].content).toContain("正文");
+  expect(entries[1].content).toBe("![图片](file:///tmp/a.png)\n");
+  expect(convertDocument).toHaveBeenCalledWith(
+    { id: "notes/a.lake", path: "notes/a.lake", name: "a", parentPath: "notes", size: 1 },
+    "<p>正文</p>",
+  );
+});
+
+test("官方 Markdown 转换器使用 Lake setDocument 和 getDocument", async () => {
+  const editor = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => "![图片](file:///tmp/a.png)\n"),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+
+  const converter = createOfficialLakeMarkdownConverter();
+  const markdown = await converter.convert(
+    { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1 },
+    "<p>正文</p>",
+  );
+  converter.dispose();
+
+  expect(window.Doc.createOpenEditor).toHaveBeenCalledWith(
+    expect.any(HTMLElement),
+    expect.objectContaining({
+      input: {},
+      toc: { enable: false },
+    }),
+  );
+  expect(editor.setDocument).toHaveBeenCalledWith("text/lake", "<p>正文</p>");
+  expect(editor.getDocument).toHaveBeenCalledWith("text/markdown");
+  expect(markdown).toContain("# a");
+  expect(markdown).toContain("![图片](file:///tmp/a.png)");
+  expect(editor.destroy).toHaveBeenCalled();
+  expect(document.querySelector("[data-lake-export-converter='true']")).toBeNull();
 });
 
 function readStoredZipEntries(bytes: Uint8Array): Array<{ path: string; content: string }> {
