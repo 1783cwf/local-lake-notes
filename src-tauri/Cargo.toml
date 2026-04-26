@@ -1,0 +1,32 @@
+[package]
+name = "yuque-lake-notes"
+version = "0.1.0"
+description = "Lake-first local notes app powered by Yuque editor"
+authors = ["weifeng"]
+edition = "2021"
+
+[lib]
+name = "yuque_lake_notes_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+doctest = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+aws-config = "1"
+aws-credential-types = "1"
+aws-sdk-s3 = "1"
+chrono = { version = "0.4", features = ["serde"] }
+mime_guess = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+uuid = { version = "1", features = ["v4"] }
+walkdir = "2"
+
+[dev-dependencies]
+tempfile = "3"
