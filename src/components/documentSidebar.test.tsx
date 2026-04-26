@@ -20,6 +20,7 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof DocumentSidebar>
     onCreateDocument: vi.fn(),
     onCreateDirectory: vi.fn(),
     onRenameWorkspace: vi.fn(),
+    onExportWorkspaceMarkdown: vi.fn(),
     onOpenDocument: vi.fn(),
     onRenameDocument: vi.fn(),
     onDeleteDocument: vi.fn(),

@@ -453,8 +453,49 @@ button {
 }
 
 .top-bar__actions {
+  position: relative;
   display: flex;
   gap: 8px;
+}
+
+.export-menu {
+  position: relative;
+}
+
+.export-menu__trigger {
+  grid-template-columns: 18px 12px;
+  gap: 1px;
+}
+
+.export-menu__content {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  min-width: 132px;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 14px 34px rgb(31 38 45 / 14%);
+}
+
+.export-menu__content button {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
+  color: #25292d;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.export-menu__content button:hover,
+.export-menu__content button:focus-visible {
+  color: var(--green-dark);
+  background: #eef7f2;
+  outline: none;
 }
 
 .app-error {

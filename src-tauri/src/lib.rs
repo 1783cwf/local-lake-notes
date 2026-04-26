@@ -5,8 +5,8 @@ pub mod state;
 pub mod storage;
 
 use commands::documents::{
-    create_lake_document, delete_lake_document, read_lake_document, rename_lake_document,
-    write_lake_document,
+    create_lake_document, delete_lake_document, export_pdf_from_html, read_lake_document,
+    rename_lake_document, write_export_bytes, write_export_file, write_lake_document,
 };
 use commands::external::open_external_url;
 use commands::settings::{get_oss_settings, save_oss_settings};
@@ -45,6 +45,9 @@ pub fn run() {
             delete_lake_document,
             read_lake_document,
             write_lake_document,
+            write_export_file,
+            write_export_bytes,
+            export_pdf_from_html,
             get_oss_settings,
             save_oss_settings,
             open_external_url,

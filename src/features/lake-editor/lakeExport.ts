@@ -1,0 +1,741 @@
+import type { WorkspaceDocument, WorkspacePayload } from "../workspace/workspaceStore";
+import { buildDocumentTree, documentTitleFromPath, flattenDocumentTree } from "../workspace/workspaceStore";
+
+export type DocumentExportFormat = "markdown" | "html" | "pdf";
+
+export interface LakeDocumentExportRequest {
+  id: number;
+  format: DocumentExportFormat;
+  document: WorkspaceDocument;
+}
+
+const markdownExtension = ".md";
+const zipExtension = ".zip";
+const lakeStylePaths = ["/vendor/lakex-doc/antd.css", "/vendor/lakex-doc/doc.css"];
+
+interface ExportHeading {
+  id: string;
+  level: number;
+  text: string;
+}
+
+export function lakeDocumentToMarkdown(title: string, content: string): string {
+  return normalizeMarkdown(`# ${title}\n\n${lakeContentToMarkdown(content)}`);
+}
+
+export function lakeContentToMarkdown(content: string): string {
+  const template = document.createElement("template");
+  template.innerHTML = content;
+  return normalizeMarkdown(nodesToMarkdown(Array.from(template.content.childNodes)));
+}
+
+export async function lakeDocumentToHtml(title: string, content: string): Promise<string> {
+  const styles = await loadExportStyles();
+  const rendered = renderHtmlExportContent(content);
+  return `<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${escapeHtml(title)}</title>
+    <style>
+      ${styles}
+      @page {
+        margin: 18mm;
+      }
+      body {
+        margin: 48px 0;
+        padding: 0 clamp(24px, 4vw, 72px);
+        color: #262626;
+        font: 16px/1.75 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+      .lake-export-shell {
+        --lake-export-outline-width: 220px;
+        display: grid;
+        grid-template-columns: var(--lake-export-outline-width) 10px minmax(0, 1fr);
+        gap: 24px;
+        align-items: start;
+        width: min(100%, 1760px);
+        margin: 0 auto;
+      }
+      .lake-export-outline {
+        position: sticky;
+        top: 32px;
+        max-height: calc(100vh - 64px);
+        overflow: auto;
+        padding: 8px 0 0;
+        color: #6b737b;
+        font-size: 14px;
+      }
+      .lake-export-outline__title {
+        margin: 0 0 10px;
+        color: #22272d;
+        font-weight: 650;
+      }
+      .lake-export-outline a,
+      .lake-export-outline span {
+        display: block;
+        overflow: hidden;
+        padding: 4px 0;
+        color: inherit;
+        text-decoration: none;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .lake-export-outline a:hover {
+        color: #1677ff;
+      }
+      .lake-export-resizer {
+        position: sticky;
+        top: 32px;
+        width: 10px;
+        height: calc(100vh - 64px);
+        border: 0;
+        border-radius: 999px;
+        background: transparent;
+        cursor: col-resize;
+      }
+      .lake-export-resizer::before {
+        display: block;
+        width: 2px;
+        height: 100%;
+        margin: 0 auto;
+        border-radius: 999px;
+        background: transparent;
+        content: "";
+        transition: background 120ms ease;
+      }
+      .lake-export-resizer:hover::before,
+      .lake-export-resizer:focus-visible::before,
+      .lake-export-resizer.is-dragging::before {
+        background: #d0d7de;
+      }
+      .lake-export-resizer:focus-visible {
+        outline: 2px solid #8bbcff;
+        outline-offset: 2px;
+      }
+      .lake-export-outline__item--2 { padding-left: 12px !important; }
+      .lake-export-outline__item--3 { padding-left: 24px !important; }
+      .lake-export-outline__item--4,
+      .lake-export-outline__item--5,
+      .lake-export-outline__item--6 { padding-left: 36px !important; }
+      .lake-export-document {
+        min-width: 0;
+      }
+      h1, h2, h3 { line-height: 1.35; }
+      img { max-width: 100%; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 8px 10px; border: 1px solid #dfe3e6; }
+      pre { overflow: auto; padding: 14px; border-radius: 8px; background: #f6f8f7; }
+      .lake-export-document-title { margin: 0 0 32px; }
+      .lake-export-attachment {
+        display: inline-flex;
+        align-items: center;
+        max-width: 100%;
+        min-height: 34px;
+        margin: 6px 0;
+        padding: 10px 12px;
+        border: 1px solid #8bbcff;
+        border-radius: 6px;
+        background: #f4f8ff;
+        color: #1677ff;
+        line-height: 1.35;
+        text-decoration: none;
+        vertical-align: middle;
+      }
+      .lake-export-attachment::before {
+        display: inline-grid;
+        place-items: center;
+        width: 18px;
+        height: 18px;
+        margin-right: 8px;
+        border-radius: 4px;
+        color: #ffffff;
+        background: #4f86e8;
+        font-size: 12px;
+        content: "📄";
+      }
+      .lake-export-attachment__name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .lake-export-attachment__size {
+        flex: 0 0 auto;
+        margin-left: 6px;
+        color: #4f86e8;
+      }
+      @media print {
+        body {
+          max-width: none;
+          margin: 0;
+          padding: 0;
+        }
+        .lake-export-shell {
+          grid-template-columns: 150px minmax(0, 1fr);
+          gap: 24px;
+        }
+        .lake-export-outline {
+          position: static;
+          font-size: 12px;
+        }
+        .lake-export-resizer {
+          display: none;
+        }
+      }
+      @media (max-width: 920px) {
+        body {
+          margin: 32px auto;
+          padding: 0 20px;
+        }
+        .lake-export-shell {
+          display: block;
+        }
+        .lake-export-outline {
+          position: static;
+          max-height: none;
+          margin-bottom: 28px;
+          padding-bottom: 18px;
+          border-bottom: 1px solid #dfe3e6;
+        }
+        .lake-export-resizer {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="lake-export-shell">
+      ${renderOutline(rendered.headings)}
+      <button
+        type="button"
+        class="lake-export-resizer"
+        aria-label="调整大纲宽度"
+        aria-orientation="vertical"
+        aria-valuemin="140"
+        aria-valuemax="420"
+        aria-valuenow="220"
+        role="separator"
+      ></button>
+      <main class="lake-export-document">
+        <h1 class="lake-export-document-title">${escapeHtml(title)}</h1>
+        <article class="lake-export-content ne-doc-major-editor">
+          ${rendered.html}
+        </article>
+      </main>
+    </div>
+    <script>
+      (() => {
+        const shell = document.querySelector(".lake-export-shell");
+        const resizer = document.querySelector(".lake-export-resizer");
+        if (!shell || !resizer) {
+          return;
+        }
+
+        const storageKey = "yuque-lake-export-outline-width:" + window.location.pathname;
+        const minWidth = Number(resizer.getAttribute("aria-valuemin")) || 140;
+        const maxWidth = Number(resizer.getAttribute("aria-valuemax")) || 420;
+        const readCurrentWidth = () => Number.parseFloat(getComputedStyle(shell).getPropertyValue("--lake-export-outline-width")) || 220;
+        const setOutlineWidth = (width) => {
+          const nextWidth = Math.max(minWidth, Math.min(maxWidth, Math.round(width)));
+          shell.style.setProperty("--lake-export-outline-width", nextWidth + "px");
+          resizer.setAttribute("aria-valuenow", String(nextWidth));
+          try {
+            window.localStorage.setItem(storageKey, String(nextWidth));
+          } catch {
+            // 本地文件禁用 localStorage 时，拖拽仍在当前页面生效。
+          }
+        };
+
+        try {
+          const savedWidth = Number(window.localStorage.getItem(storageKey));
+          if (Number.isFinite(savedWidth)) {
+            setOutlineWidth(savedWidth);
+          }
+        } catch {
+          // 忽略本地文件环境的存储限制。
+        }
+
+        resizer.addEventListener("pointerdown", (event) => {
+          const shellRect = shell.getBoundingClientRect();
+          resizer.classList.add("is-dragging");
+          resizer.setPointerCapture(event.pointerId);
+          event.preventDefault();
+
+          const onPointerMove = (moveEvent) => setOutlineWidth(moveEvent.clientX - shellRect.left);
+          const onPointerUp = () => {
+            resizer.classList.remove("is-dragging");
+            resizer.removeEventListener("pointermove", onPointerMove);
+          };
+
+          resizer.addEventListener("pointermove", onPointerMove);
+          resizer.addEventListener("pointerup", onPointerUp, { once: true });
+          resizer.addEventListener("pointercancel", onPointerUp, { once: true });
+        });
+
+        resizer.addEventListener("keydown", (event) => {
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+            return;
+          }
+          event.preventDefault();
+          const direction = event.key === "ArrowLeft" ? -1 : 1;
+          setOutlineWidth(readCurrentWidth() + direction * 12);
+        });
+      })();
+    </script>
+  </body>
+</html>
+`;
+}
+
+export async function lakeWorkspaceToMarkdownZip(
+  workspace: WorkspacePayload,
+  readDocument: (path: string) => Promise<string>,
+): Promise<Uint8Array> {
+  const tree = buildDocumentTree(workspace.documents, workspace.directories, workspace.order);
+  const nodes = flattenDocumentTree(tree);
+  const entries: ZipEntryInput[] = [];
+
+  for (const node of nodes) {
+    if (node.type === "folder") {
+      entries.push({ path: `${normalizeZipPath(node.path)}/`, content: "" });
+      continue;
+    }
+
+    if (node.document) {
+      const content = await readDocument(node.document.path);
+      entries.push({
+        path: lakePathToMarkdownZipPath(node.document.path),
+        content: lakeDocumentToMarkdown(documentTitleFromPath(node.document.path), content),
+      });
+    }
+  }
+
+  return createZip(entries);
+}
+
+export function exportFileName(document: WorkspaceDocument, format: DocumentExportFormat): string {
+  const extension = format === "markdown" ? markdownExtension : `.${format}`;
+  return `${safeFileName(documentTitleFromPath(document.path))}${extension}`;
+}
+
+export function workspaceExportFileName(workspaceRoot: string): string {
+  return `${safeFileName(basename(workspaceRoot))}${zipExtension}`;
+}
+
+function nodesToMarkdown(nodes: Node[]): string {
+  return nodes.map(nodeToMarkdown).join("");
+}
+
+function nodeToMarkdown(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent ?? "";
+  }
+
+  if (!(node instanceof Element)) {
+    return "";
+  }
+
+  const children = () => nodesToMarkdown(Array.from(node.childNodes));
+  const tagName = node.tagName.toLowerCase();
+
+  if (tagName.match(/^h[1-6]$/)) {
+    const level = Number(tagName.slice(1));
+    return `\n\n${"#".repeat(level)} ${inlineText(children())}\n\n`;
+  }
+
+  switch (tagName) {
+    case "p":
+    case "div":
+      return `\n\n${inlineText(children())}\n\n`;
+    case "br":
+      return "\n";
+    case "strong":
+    case "b":
+      return `**${inlineText(children())}**`;
+    case "em":
+    case "i":
+      return `*${inlineText(children())}*`;
+    case "s":
+    case "del":
+      return `~~${inlineText(children())}~~`;
+    case "code":
+      return node.closest("pre") ? node.textContent ?? "" : `\`${inlineText(children())}\``;
+    case "pre":
+      return `\n\n\`\`\`\n${node.textContent?.trim() ?? ""}\n\`\`\`\n\n`;
+    case "a": {
+      const text = inlineText(children()) || node.getAttribute("href") || "";
+      const href = node.getAttribute("href");
+      return href ? `[${text}](${href})` : text;
+    }
+    case "ul":
+      return `\n${Array.from(node.children).map((child) => listItemToMarkdown(child, "-")).join("")}\n`;
+    case "ol":
+      return `\n${Array.from(node.children).map((child, index) => listItemToMarkdown(child, `${index + 1}.`)).join("")}\n`;
+    case "blockquote":
+      return `\n\n${children().trim().split("\n").map((line) => `> ${line}`).join("\n")}\n\n`;
+    case "hr":
+      return "\n\n---\n\n";
+    case "table":
+      return tableToMarkdown(node);
+    case "card":
+      return lakeCardToMarkdown(node);
+    default:
+      return children();
+  }
+}
+
+function listItemToMarkdown(node: Element, marker: string): string {
+  return `${marker} ${inlineText(nodesToMarkdown(Array.from(node.childNodes)))}\n`;
+}
+
+function tableToMarkdown(table: Element): string {
+  const rows = Array.from(table.querySelectorAll("tr"))
+    .map((row) => Array.from(row.children).map((cell) => inlineText(cell.textContent ?? "")));
+  if (rows.length === 0) {
+    return "";
+  }
+
+  const header = rows[0];
+  const separator = header.map(() => "---");
+  const bodyRows = rows.slice(1);
+  return `\n\n| ${header.join(" | ")} |\n| ${separator.join(" | ")} |\n${bodyRows.map((row) => `| ${row.join(" | ")} |`).join("\n")}\n\n`;
+}
+
+function lakeCardToMarkdown(card: Element): string {
+  const name = card.getAttribute("name");
+  if (name !== "file" && name !== "localdoc") {
+    return inlineText(card.textContent ?? "");
+  }
+
+  const value = decodeLakeCardValue(card.getAttribute("value"));
+  if (!value?.src) {
+    return inlineText(card.textContent ?? "");
+  }
+
+  return `[${value.name || value.src}](${value.src})`;
+}
+
+function renderHtmlExportContent(content: string): { html: string; headings: ExportHeading[] } {
+  const template = document.createElement("template");
+  template.innerHTML = content;
+  const headings = collectAndMarkHeadings(template.content);
+  renderAttachmentCards(template.content);
+  return {
+    headings,
+    html: template.innerHTML,
+  };
+}
+
+function collectAndMarkHeadings(root: DocumentFragment): ExportHeading[] {
+  const headings: ExportHeading[] = [];
+  const usedIds = new Set<string>();
+  root.querySelectorAll("h1, h2, h3, h4, h5, h6").forEach((heading, index) => {
+    const text = inlineText(heading.textContent ?? "");
+    if (!text) {
+      return;
+    }
+
+    const id = uniqueId(`heading-${slugify(text) || index + 1}`, usedIds);
+    heading.setAttribute("id", id);
+    headings.push({
+      id,
+      level: Number(heading.tagName.slice(1)),
+      text,
+    });
+  });
+  return headings;
+}
+
+function renderAttachmentCards(root: DocumentFragment): void {
+  root.querySelectorAll("card[name='file'], card[name='localdoc']").forEach((card) => {
+    const value = decodeLakeCardValue(card.getAttribute("value"));
+    if (!value?.src) {
+      return;
+    }
+
+    const link = document.createElement("a");
+    link.className = "lake-export-attachment";
+    link.href = value.src;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+
+    const name = document.createElement("span");
+    name.className = "lake-export-attachment__name";
+    name.textContent = value.name || value.src;
+    link.append(name);
+
+    const size = readFileSize(value);
+    if (size) {
+      const sizeNode = document.createElement("span");
+      sizeNode.className = "lake-export-attachment__size";
+      sizeNode.textContent = `(${size})`;
+      link.append(sizeNode);
+    }
+
+    card.replaceWith(link);
+  });
+}
+
+function renderOutline(headings: ExportHeading[]): string {
+  const items = headings.length > 0
+    ? headings
+      .map((heading) => `<a class="lake-export-outline__item lake-export-outline__item--${Math.min(heading.level, 6)}" href="#${escapeHtml(heading.id)}">${escapeHtml(heading.text)}</a>`)
+      .join("\n")
+    : '<span class="lake-export-outline__empty">暂无大纲</span>';
+
+  return `<aside class="lake-export-outline" aria-label="大纲">
+        <p class="lake-export-outline__title">大纲</p>
+        ${items}
+      </aside>`;
+}
+
+function decodeLakeCardValue(value: string | null): { name?: string; src?: string; size?: number | string } | null {
+  if (!value) {
+    return null;
+  }
+
+  const payload = value.startsWith("data:") ? value.slice("data:".length) : value;
+  try {
+    return JSON.parse(decodeURIComponent(payload)) as { name?: string; src?: string };
+  } catch {
+    return null;
+  }
+}
+
+function readFileSize(value: { size?: number | string }): string | null {
+  if (typeof value.size === "string" && value.size.trim()) {
+    return value.size.trim();
+  }
+  if (typeof value.size !== "number" || !Number.isFinite(value.size) || value.size <= 0) {
+    return null;
+  }
+  if (value.size < 1024) {
+    return `${value.size} B`;
+  }
+  if (value.size < 1024 * 1024) {
+    return `${Math.round(value.size / 1024)} kB`;
+  }
+  return `${(value.size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function normalizeMarkdown(markdown: string): string {
+  return `${markdown
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()}\n`;
+}
+
+async function loadExportStyles(): Promise<string> {
+  if (typeof fetch !== "function") {
+    return "";
+  }
+
+  const results = await Promise.allSettled(
+    lakeStylePaths.map(async (path) => {
+      const response = await fetch(path);
+      return response.ok ? response.text() : "";
+    }),
+  );
+
+  return results
+    .map((result) => result.status === "fulfilled" ? result.value : "")
+    .filter(Boolean)
+    .join("\n");
+}
+
+function inlineText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function slugify(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{Letter}\p{Number}]+/gu, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function uniqueId(base: string, usedIds: Set<string>): string {
+  let candidate = base;
+  let index = 2;
+  while (usedIds.has(candidate)) {
+    candidate = `${base}-${index}`;
+    index += 1;
+  }
+  usedIds.add(candidate);
+  return candidate;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function basename(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
+
+function safeFileName(value: string): string {
+  return value.trim().replace(/[\\/:*?"<>|\s]+/g, "-").replace(/^-+|-+$/g, "") || "未命名";
+}
+
+interface ZipEntryInput {
+  path: string;
+  content: string;
+}
+
+interface ZipEntry {
+  pathBytes: Uint8Array;
+  contentBytes: Uint8Array;
+  crc: number;
+  localHeaderOffset: number;
+  isDirectory: boolean;
+}
+
+function createZip(inputs: ZipEntryInput[]): Uint8Array {
+  const chunks: Uint8Array[] = [];
+  const entries: ZipEntry[] = [];
+  const date = new Date();
+  const dosTime = toDosTime(date);
+  const dosDate = toDosDate(date);
+
+  for (const input of inputs) {
+    const normalizedPath = normalizeZipPath(input.path);
+    const path = input.path.endsWith("/") ? `${normalizedPath}/` : normalizedPath;
+    const contentBytes = input.path.endsWith("/") ? new Uint8Array() : utf8(input.content);
+    const pathBytes = utf8(path);
+    const crc = crc32(contentBytes);
+    const localHeaderOffset = byteLength(chunks);
+    const entry: ZipEntry = {
+      pathBytes,
+      contentBytes,
+      crc,
+      localHeaderOffset,
+      isDirectory: path.endsWith("/"),
+    };
+    entries.push(entry);
+    chunks.push(zipLocalHeader(entry, dosTime, dosDate), pathBytes, contentBytes);
+  }
+
+  const centralDirectoryOffset = byteLength(chunks);
+  for (const entry of entries) {
+    chunks.push(zipCentralDirectoryHeader(entry, dosTime, dosDate), entry.pathBytes);
+  }
+  const centralDirectorySize = byteLength(chunks) - centralDirectoryOffset;
+  chunks.push(zipEndOfCentralDirectory(entries.length, centralDirectorySize, centralDirectoryOffset));
+
+  return concatBytes(chunks);
+}
+
+function zipLocalHeader(entry: ZipEntry, dosTime: number, dosDate: number): Uint8Array {
+  const output = new Uint8Array(30);
+  const view = new DataView(output.buffer);
+  view.setUint32(0, 0x04034b50, true);
+  view.setUint16(4, 20, true);
+  view.setUint16(6, 0x0800, true);
+  view.setUint16(8, 0, true);
+  view.setUint16(10, dosTime, true);
+  view.setUint16(12, dosDate, true);
+  view.setUint32(14, entry.crc, true);
+  view.setUint32(18, entry.contentBytes.length, true);
+  view.setUint32(22, entry.contentBytes.length, true);
+  view.setUint16(26, entry.pathBytes.length, true);
+  view.setUint16(28, 0, true);
+  return output;
+}
+
+function zipCentralDirectoryHeader(entry: ZipEntry, dosTime: number, dosDate: number): Uint8Array {
+  const output = new Uint8Array(46);
+  const view = new DataView(output.buffer);
+  view.setUint32(0, 0x02014b50, true);
+  view.setUint16(4, 20, true);
+  view.setUint16(6, 20, true);
+  view.setUint16(8, 0x0800, true);
+  view.setUint16(10, 0, true);
+  view.setUint16(12, dosTime, true);
+  view.setUint16(14, dosDate, true);
+  view.setUint32(16, entry.crc, true);
+  view.setUint32(20, entry.contentBytes.length, true);
+  view.setUint32(24, entry.contentBytes.length, true);
+  view.setUint16(28, entry.pathBytes.length, true);
+  view.setUint16(30, 0, true);
+  view.setUint16(32, 0, true);
+  view.setUint16(34, 0, true);
+  view.setUint16(36, 0, true);
+  view.setUint32(38, entry.isDirectory ? 0x10 : 0, true);
+  view.setUint32(42, entry.localHeaderOffset, true);
+  return output;
+}
+
+function zipEndOfCentralDirectory(entryCount: number, centralDirectorySize: number, centralDirectoryOffset: number): Uint8Array {
+  const output = new Uint8Array(22);
+  const view = new DataView(output.buffer);
+  view.setUint32(0, 0x06054b50, true);
+  view.setUint16(4, 0, true);
+  view.setUint16(6, 0, true);
+  view.setUint16(8, entryCount, true);
+  view.setUint16(10, entryCount, true);
+  view.setUint32(12, centralDirectorySize, true);
+  view.setUint32(16, centralDirectoryOffset, true);
+  view.setUint16(20, 0, true);
+  return output;
+}
+
+function lakePathToMarkdownZipPath(path: string): string {
+  return normalizeZipPath(path.replace(/\.lake$/i, markdownExtension));
+}
+
+function normalizeZipPath(path: string): string {
+  return path.split("/")
+    .filter(Boolean)
+    .map((part) => safeFileName(part))
+    .join("/");
+}
+
+function toDosTime(date: Date): number {
+  return (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2);
+}
+
+function toDosDate(date: Date): number {
+  return ((date.getFullYear() - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
+}
+
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc = (crc >>> 8) ^ crcTable[(crc ^ byte) & 0xff];
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+const crcTable = Array.from({ length: 256 }, (_, index) => {
+  let value = index;
+  for (let bit = 0; bit < 8; bit += 1) {
+    value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+  }
+  return value >>> 0;
+});
+
+function utf8(value: string): Uint8Array {
+  return new TextEncoder().encode(value);
+}
+
+function concatBytes(chunks: Uint8Array[]): Uint8Array {
+  const output = new Uint8Array(byteLength(chunks));
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return output;
+}
+
+function byteLength(chunks: Uint8Array[]): number {
+  return chunks.reduce((total, chunk) => total + chunk.length, 0);
+}

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 
 import { LakeEditor } from "./LakeEditor";
 import type { LakeEditorInstance } from "./editorTypes";
@@ -21,7 +21,9 @@ test("没有文档时显示工作台空状态", () => {
       document={null}
       content=""
       manualSaveRequest={0}
+      exportRequest={null}
       onSave={vi.fn()}
+      onExportContent={vi.fn()}
       onUploadImage={vi.fn()}
       onUploadFile={vi.fn()}
       onOpenFileUrl={vi.fn()}
@@ -48,7 +50,9 @@ test("打开文档时把 text/lake 内容设置进语雀编辑器", () => {
       document={documentEntry}
       content="<p>内容</p>"
       manualSaveRequest={0}
+      exportRequest={null}
       onSave={vi.fn()}
+      onExportContent={vi.fn()}
       onUploadImage={vi.fn()}
       onUploadFile={vi.fn()}
       onOpenFileUrl={vi.fn()}
@@ -77,7 +81,9 @@ test("关闭当前文档时在编辑器容器移除前销毁 Lake 实例", () =>
       document={documentEntry}
       content="<p>内容</p>"
       manualSaveRequest={0}
+      exportRequest={null}
       onSave={vi.fn()}
+      onExportContent={vi.fn()}
       onUploadImage={vi.fn()}
       onUploadFile={vi.fn()}
       onOpenFileUrl={vi.fn()}
@@ -90,7 +96,9 @@ test("关闭当前文档时在编辑器容器移除前销毁 Lake 实例", () =>
       document={null}
       content=""
       manualSaveRequest={0}
+      exportRequest={null}
       onSave={vi.fn()}
+      onExportContent={vi.fn()}
       onUploadImage={vi.fn()}
       onUploadFile={vi.fn()}
       onOpenFileUrl={vi.fn()}
@@ -113,7 +121,9 @@ test("创建 Lake 实例失败时显示错误状态", () => {
       document={documentEntry}
       content="<p>内容</p>"
       manualSaveRequest={0}
+      exportRequest={null}
       onSave={vi.fn()}
+      onExportContent={vi.fn()}
       onUploadImage={vi.fn()}
       onUploadFile={vi.fn()}
       onOpenFileUrl={vi.fn()}
@@ -123,4 +133,76 @@ test("创建 Lake 实例失败时显示错误状态", () => {
 
   expect(screen.getByText("编辑器加载失败")).toBeInTheDocument();
   expect(screen.getByText("初始化失败")).toBeInTheDocument();
+});
+
+test("收到 HTML 导出请求时读取语雀 HTML 内容", async () => {
+  const onExportContent = vi.fn();
+  const editor: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn((type) => type === "text/html" ? "<p><img src=\"file:///tmp/a.png\"></p>" : "<p>Lake 内容</p>"),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+
+  render(
+    <LakeEditor
+      document={documentEntry}
+      content="<p>内容</p>"
+      manualSaveRequest={0}
+      exportRequest={{ id: 1, format: "html", document: documentEntry }}
+      onSave={vi.fn()}
+      onExportContent={onExportContent}
+      onUploadImage={vi.fn()}
+      onUploadFile={vi.fn()}
+      onOpenFileUrl={vi.fn()}
+      onSaveStatusChange={vi.fn()}
+    />,
+  );
+
+  await waitFor(() => {
+    expect(onExportContent).toHaveBeenCalledWith(
+      { id: 1, format: "html", document: documentEntry },
+      "<p><img src=\"file:///tmp/a.png\"></p>",
+    );
+  });
+  expect(editor.getDocument).toHaveBeenCalledWith("text/html");
+});
+
+test("收到 Markdown 导出请求时仍读取当前 Lake 内容", async () => {
+  const onExportContent = vi.fn();
+  const editor: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn((type) => type === "text/lake" ? "<p>Lake 内容</p>" : "<p>HTML 内容</p>"),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+
+  render(
+    <LakeEditor
+      document={documentEntry}
+      content="<p>内容</p>"
+      manualSaveRequest={0}
+      exportRequest={{ id: 1, format: "markdown", document: documentEntry }}
+      onSave={vi.fn()}
+      onExportContent={onExportContent}
+      onUploadImage={vi.fn()}
+      onUploadFile={vi.fn()}
+      onOpenFileUrl={vi.fn()}
+      onSaveStatusChange={vi.fn()}
+    />,
+  );
+
+  await waitFor(() => {
+    expect(onExportContent).toHaveBeenCalledWith(
+      { id: 1, format: "markdown", document: documentEntry },
+      "<p>Lake 内容</p>",
+    );
+  });
+  expect(editor.getDocument).toHaveBeenCalledWith("text/lake");
 });

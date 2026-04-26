@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 
 import type { OssSettings, UploadImageInput, UploadImageOutput } from "../app/appState";
 import type {
@@ -325,6 +325,76 @@ export async function writeLakeDocument(relativePath: string, content: string): 
   await invoke("write_lake_document", { relativePath, content });
 }
 
+export async function saveTextExport(
+  defaultPath: string,
+  content: string,
+  filters: Array<{ name: string; extensions: string[] }>,
+): Promise<string | null> {
+  if (!isTauriRuntime()) {
+    downloadBrowserFile(defaultPath, new Blob([content], { type: "text/plain;charset=utf-8" }));
+    return defaultPath;
+  }
+
+  const selected = await save({
+    defaultPath,
+    filters,
+    title: "导出文件",
+  });
+  if (typeof selected !== "string") {
+    return null;
+  }
+
+  await invoke("write_export_file", { path: selected, content });
+  return selected;
+}
+
+export async function saveBinaryExport(
+  defaultPath: string,
+  bytes: Uint8Array,
+  filters: Array<{ name: string; extensions: string[] }>,
+): Promise<string | null> {
+  if (!isTauriRuntime()) {
+    const browserBytes: Uint8Array<ArrayBuffer> = new Uint8Array(bytes);
+    downloadBrowserFile(defaultPath, new Blob([browserBytes], { type: "application/zip" }));
+    return defaultPath;
+  }
+
+  const selected = await save({
+    defaultPath,
+    filters,
+    title: "导出文件",
+  });
+  if (typeof selected !== "string") {
+    return null;
+  }
+
+  await invoke("write_export_bytes", { path: selected, bytes: Array.from(bytes) });
+  return selected;
+}
+
+export async function savePdfExport(
+  defaultPath: string,
+  html: string,
+  filters: Array<{ name: string; extensions: string[] }>,
+): Promise<string | null> {
+  if (!isTauriRuntime()) {
+    printBrowserHtml(html);
+    return defaultPath;
+  }
+
+  const selected = await save({
+    defaultPath,
+    filters,
+    title: "导出文件",
+  });
+  if (typeof selected !== "string") {
+    return null;
+  }
+
+  await invoke("export_pdf_from_html", { path: selected, html });
+  return selected;
+}
+
 export async function getOssSettings(): Promise<OssSettings | null> {
   if (!isTauriRuntime()) {
     const stored = window.localStorage.getItem(browserSettingsKey);
@@ -389,6 +459,32 @@ function browserDocumentKey(relativePath: string): string {
 
 function saveBrowserWorkspace(workspace: WorkspacePayload): void {
   window.localStorage.setItem(browserWorkspaceKey, JSON.stringify(workspace));
+}
+
+function downloadBrowserFile(filename: string, blob: Blob): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function printBrowserHtml(html: string): void {
+  const frame = document.createElement("iframe");
+  frame.style.position = "fixed";
+  frame.style.right = "0";
+  frame.style.bottom = "0";
+  frame.style.width = "0";
+  frame.style.height = "0";
+  frame.style.border = "0";
+  frame.srcdoc = html;
+  frame.onload = () => {
+    frame.contentWindow?.focus();
+    frame.contentWindow?.print();
+    window.setTimeout(() => frame.remove(), 1000);
+  };
+  document.body.append(frame);
 }
 
 function normalizeBrowserWorkspace(workspace: Partial<WorkspacePayload>): WorkspacePayload {

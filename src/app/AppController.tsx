@@ -5,6 +5,15 @@ import { AppRail } from "../components/AppRail";
 import { DocumentSidebar } from "../components/DocumentSidebar";
 import { TopBar } from "../components/TopBar";
 import { LakeEditor } from "../features/lake-editor/LakeEditor";
+import {
+  exportFileName,
+  lakeDocumentToHtml,
+  lakeDocumentToMarkdown,
+  lakeWorkspaceToMarkdownZip,
+  workspaceExportFileName,
+  type DocumentExportFormat,
+  type LakeDocumentExportRequest,
+} from "../features/lake-editor/lakeExport";
 import { OssSettingsPanel } from "../features/settings/OssSettingsPanel";
 import type {
   WorkspaceDocument,
@@ -12,7 +21,12 @@ import type {
   WorkspaceMoveResolution,
   WorkspacePayload,
 } from "../features/workspace/workspaceStore";
-import { applyWorkspaceMove, buildDocumentTree, resolveWorkspaceMove } from "../features/workspace/workspaceStore";
+import {
+  applyWorkspaceMove,
+  buildDocumentTree,
+  documentTitleFromPath,
+  resolveWorkspaceMove,
+} from "../features/workspace/workspaceStore";
 import {
   chooseWorkspaceDirectory,
   createLakeDirectory,
@@ -28,6 +42,9 @@ import {
   renameLakeDocument,
   renameWorkspace,
   saveOssSettings,
+  saveBinaryExport,
+  savePdfExport,
+  saveTextExport,
   setWorkspaceRoot,
   uploadFile,
   uploadImage,
@@ -49,6 +66,7 @@ export function AppController() {
   const [currentDocument, setCurrentDocument] = useState<CurrentDocumentState | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>(emptySaveStatus);
   const [manualSaveRequest, setManualSaveRequest] = useState(0);
+  const [exportRequest, setExportRequest] = useState<LakeDocumentExportRequest | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [ossSettings, setOssSettings] = useState<OssSettings | null>(null);
   const [appError, setAppError] = useState<string | null>(null);
@@ -263,6 +281,67 @@ export function AppController() {
     await writeLakeDocument(relativePath, content);
   }, []);
 
+  const exportDocument = useCallback((format: DocumentExportFormat) => {
+    if (!currentDocument) {
+      return;
+    }
+
+    setExportRequest((request) => ({
+      id: (request?.id ?? 0) + 1,
+      format,
+      document: currentDocument.entry,
+    }));
+  }, [currentDocument]);
+
+  const writeDocumentExport = useCallback(async (
+    request: LakeDocumentExportRequest,
+    content: string,
+  ) => {
+    const title = documentTitleFromPath(request.document.path);
+    try {
+      if (request.format === "markdown") {
+        await saveTextExport(
+          exportFileName(request.document, request.format),
+          lakeDocumentToMarkdown(title, content),
+          [{ name: "Markdown", extensions: ["md"] }],
+        );
+      } else if (request.format === "html") {
+        await saveTextExport(
+          exportFileName(request.document, request.format),
+          await lakeDocumentToHtml(title, content),
+          [{ name: "HTML", extensions: ["html"] }],
+        );
+      } else {
+        await savePdfExport(
+          exportFileName(request.document, request.format),
+          await lakeDocumentToHtml(title, content),
+          [{ name: "PDF", extensions: ["pdf"] }],
+        );
+      }
+      setAppError(null);
+    } catch (error) {
+      setAppError(toMessage(error));
+    }
+  }, []);
+
+  const exportWorkspaceMarkdownZip = useCallback(async () => {
+    if (!workspace) {
+      return;
+    }
+
+    try {
+      const zip = await lakeWorkspaceToMarkdownZip(workspace, readLakeDocument);
+      await saveBinaryExport(
+        workspaceExportFileName(workspace.root),
+        zip,
+        [{ name: "ZIP", extensions: ["zip"] }],
+      );
+      setAppError(null);
+    } catch (error) {
+      setAppError(toMessage(error));
+    }
+  }, [workspace]);
+
   const saveSettings = useCallback(async (settings: OssSettings) => {
     const saved = await saveOssSettings(settings);
     setOssSettings(saved);
@@ -379,6 +458,7 @@ export function AppController() {
         onCreateDocument={createDocument}
         onCreateDirectory={createDirectory}
         onRenameWorkspace={renameCurrentWorkspace}
+        onExportWorkspaceMarkdown={exportWorkspaceMarkdownZip}
         onRenameDocument={renameDocument}
         onDeleteDocument={deleteDocument}
         onRenameDirectory={renameDirectory}
@@ -391,6 +471,7 @@ export function AppController() {
           document={currentDocument?.entry ?? null}
           saveStatus={saveStatus}
           onManualSave={() => setManualSaveRequest((current) => current + 1)}
+          onExportDocument={exportDocument}
           onRenameDocument={(title) => {
             if (currentDocument) {
               return renameDocumentTo(currentDocument.entry, title);
@@ -402,7 +483,9 @@ export function AppController() {
           document={currentDocument?.entry ?? null}
           content={currentDocument?.content ?? ""}
           manualSaveRequest={manualSaveRequest}
+          exportRequest={exportRequest}
           onSave={saveDocument}
+          onExportContent={writeDocumentExport}
           onUploadImage={uploadEditorImage}
           onUploadFile={uploadEditorFile}
           onOpenFileUrl={openEditorFileUrl}

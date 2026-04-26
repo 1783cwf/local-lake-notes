@@ -13,6 +13,9 @@ const deleteLakeDocument = vi.fn<(path: string) => Promise<WorkspacePayload>>();
 const getRecentWorkspace = vi.fn<() => Promise<WorkspacePayload | null>>(async () => null);
 const moveWorkspaceItem = vi.fn<(input: MoveWorkspaceItemInput) => Promise<WorkspacePayload>>();
 const readLakeDocument = vi.fn<(path: string) => Promise<string>>(async () => "<p>hello</p>");
+const saveBinaryExport = vi.fn<(defaultPath: string, bytes: Uint8Array, filters: Array<{ name: string; extensions: string[] }>) => Promise<string | null>>();
+const savePdfExport = vi.fn<(defaultPath: string, html: string, filters: Array<{ name: string; extensions: string[] }>) => Promise<string | null>>();
+const saveTextExport = vi.fn<(defaultPath: string, content: string, filters: Array<{ name: string; extensions: string[] }>) => Promise<string | null>>();
 const setWorkspaceRoot = vi.fn<(path: string) => Promise<WorkspacePayload>>();
 const writeLakeDocument = vi.fn<(path: string, content: string) => Promise<void>>();
 
@@ -22,6 +25,7 @@ vi.mock("../components/DocumentSidebar", () => ({
     documents,
     currentPath,
     onCreateDocument,
+    onExportWorkspaceMarkdown,
     onOpenDocument,
     onDeleteDocument,
     onMoveNode,
@@ -30,6 +34,7 @@ vi.mock("../components/DocumentSidebar", () => ({
     documents: Array<{ path: string; name: string; parentPath: string; size: number }>;
     currentPath: string | null;
     onCreateDocument: (parentPath: string) => void;
+    onExportWorkspaceMarkdown: () => void;
     onOpenDocument: (document: { path: string; name: string; parentPath: string; size: number }) => void;
     onDeleteDocument: (document: { path: string; name: string; parentPath: string; size: number }) => void;
     onMoveNode: (sourceId: string, intent: { placement: "inside"; targetId: string }) => void;
@@ -39,6 +44,9 @@ vi.mock("../components/DocumentSidebar", () => ({
       <div data-testid="current-path">{currentPath ?? ""}</div>
       <button type="button" onClick={() => onCreateDocument("")}>
         侧栏新建文档
+      </button>
+      <button type="button" onClick={onExportWorkspaceMarkdown}>
+        导出知识库 Markdown ZIP
       </button>
       {documents.map((document) => (
         <div key={document.path}>
@@ -79,6 +87,9 @@ vi.mock("../lib/tauri", () => ({
   renameLakeDocument: vi.fn(),
   renameWorkspace: vi.fn(),
   saveOssSettings: vi.fn(),
+  saveBinaryExport: (defaultPath: string, bytes: Uint8Array, filters: Array<{ name: string; extensions: string[] }>) => saveBinaryExport(defaultPath, bytes, filters),
+  savePdfExport: (defaultPath: string, html: string, filters: Array<{ name: string; extensions: string[] }>) => savePdfExport(defaultPath, html, filters),
+  saveTextExport: (defaultPath: string, content: string, filters: Array<{ name: string; extensions: string[] }>) => saveTextExport(defaultPath, content, filters),
   saveWorkspaceOrder: vi.fn(),
   setWorkspaceRoot: (path: string) => setWorkspaceRoot(path),
   uploadFile: vi.fn(),
@@ -92,6 +103,12 @@ beforeEach(() => {
   getRecentWorkspace.mockResolvedValue(null);
   moveWorkspaceItem.mockReset();
   readLakeDocument.mockResolvedValue("<p>hello</p>");
+  saveBinaryExport.mockReset();
+  saveBinaryExport.mockResolvedValue("/tmp/export.zip");
+  savePdfExport.mockReset();
+  savePdfExport.mockResolvedValue("/tmp/export.pdf");
+  saveTextExport.mockReset();
+  saveTextExport.mockResolvedValue("/tmp/export.md");
   setWorkspaceRoot.mockReset();
   writeLakeDocument.mockResolvedValue(undefined);
 });
@@ -220,5 +237,28 @@ test("删除当前新建文档后仍可打开已有文档", async () => {
   await waitFor(() => {
     expect(screen.getByTestId("current-path")).toHaveTextContent("old.lake");
     expect(screen.queryByText("当前文档保存失败，请先处理后再切换")).not.toBeInTheDocument();
+  });
+});
+
+test("可以导出整个知识库 Markdown ZIP", async () => {
+  const user = userEvent.setup();
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [{ id: "notes", path: "notes", name: "notes", parentPath: "" }],
+    documents: [{ id: "notes/a.lake", path: "notes/a.lake", name: "a", parentPath: "notes", size: 1 }],
+    order: ["folder:notes", "document:notes/a.lake"],
+  });
+  readLakeDocument.mockResolvedValue("<h1>hello</h1><p>world</p>");
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("button", { name: "导出知识库 Markdown ZIP" }));
+
+  await waitFor(() => {
+    expect(saveBinaryExport).toHaveBeenCalledWith(
+      "kb.zip",
+      expect.any(Uint8Array),
+      expect.any(Array),
+    );
   });
 });

@@ -22,6 +22,7 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   ChevronDown,
   ChevronRight,
+  Download,
   FilePlus,
   FileText,
   Folder,
@@ -55,6 +56,7 @@ interface DocumentSidebarProps {
   onCreateDocument: (parentPath: string) => void;
   onCreateDirectory: (parentPath: string) => void;
   onRenameWorkspace: () => void;
+  onExportWorkspaceMarkdown: () => void;
   onRenameDocument: (document: WorkspaceDocument) => void;
   onDeleteDocument: (document: WorkspaceDocument) => void;
   onRenameDirectory: (directory: WorkspaceDirectory) => void;
@@ -74,6 +76,7 @@ export function DocumentSidebar({
   onCreateDocument,
   onCreateDirectory,
   onRenameWorkspace,
+  onExportWorkspaceMarkdown,
   onRenameDocument,
   onDeleteDocument,
   onRenameDirectory,
@@ -163,6 +166,9 @@ export function DocumentSidebar({
         <div className="sidebar-actions">
           <button type="button" className="tiny-icon-button" onClick={onRenameWorkspace} aria-label="重命名知识库" disabled={!workspaceRoot}>
             <Pencil size={15} />
+          </button>
+          <button type="button" className="tiny-icon-button" onClick={onExportWorkspaceMarkdown} aria-label="导出知识库 Markdown ZIP" disabled={!workspaceRoot}>
+            <Download size={15} />
           </button>
           <button type="button" className="tiny-icon-button" onClick={() => onCreateDirectory("")} aria-label="新建目录" disabled={!workspaceRoot}>
             <FolderPlus size={15} />

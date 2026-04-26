@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 use tauri::{AppHandle, State};
 
@@ -99,6 +100,36 @@ pub fn write_lake_document(
     atomic_write(&path, &content)
 }
 
+#[tauri::command]
+pub fn write_export_file(path: String, content: String) -> AppResult<()> {
+    let path = Path::new(&path);
+    ensure_export_parent(path)?;
+    fs::write(path, content)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn write_export_bytes(path: String, bytes: Vec<u8>) -> AppResult<()> {
+    let path = Path::new(&path);
+    ensure_export_parent(path)?;
+    fs::write(path, bytes)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn export_pdf_from_html(path: String, html: String) -> AppResult<()> {
+    let path = Path::new(&path);
+    ensure_export_parent(path)?;
+    let temp_dir = std::env::temp_dir().join("yuque-lake-notes");
+    fs::create_dir_all(&temp_dir)?;
+    let html_path = temp_dir.join(format!("{}.html", uuid::Uuid::new_v4()));
+    fs::write(&html_path, html)?;
+    let result = run_wkhtmltopdf(&html_path, path);
+    let _ = fs::remove_file(html_path);
+    result?;
+    Ok(())
+}
+
 pub fn create_document(root: &Path, title: &str) -> AppResult<String> {
     create_document_at(root, "", title)
 }
@@ -169,6 +200,51 @@ pub fn atomic_write(path: &Path, content: &str) -> AppResult<()> {
     fs::write(&temp_path, content)?;
     fs::rename(temp_path, path)?;
     Ok(())
+}
+
+fn ensure_export_parent(path: &Path) -> AppResult<()> {
+    let parent = path.parent().ok_or(AppError::InvalidFilename)?;
+    if !parent.exists() {
+        fs::create_dir_all(parent)?;
+    }
+    Ok(())
+}
+
+fn run_wkhtmltopdf(html_path: &Path, pdf_path: &Path) -> AppResult<()> {
+    let candidates = [
+        std::env::var("YUQUE_WKHTMLTOPDF").ok(),
+        Some("wkhtmltopdf".to_string()),
+        Some("/usr/local/bin/wkhtmltopdf".to_string()),
+        Some("/opt/homebrew/bin/wkhtmltopdf".to_string()),
+    ];
+    let mut last_error = None;
+
+    for candidate in candidates.into_iter().flatten() {
+        let output = Command::new(&candidate)
+            .arg("--enable-local-file-access")
+            .arg("--encoding")
+            .arg("utf-8")
+            .arg("--print-media-type")
+            .arg("--quiet")
+            .arg(html_path)
+            .arg(pdf_path)
+            .output();
+
+        match output {
+            Ok(output) if output.status.success() => return Ok(()),
+            Ok(output) => {
+                last_error = Some(String::from_utf8_lossy(&output.stderr).trim().to_string());
+            }
+            Err(error) => {
+                last_error = Some(error.to_string());
+            }
+        }
+    }
+
+    Err(AppError::Export(format!(
+        "PDF 导出失败，请确认已安装 wkhtmltopdf：{}",
+        last_error.unwrap_or_else(|| "未找到可用命令".to_string())
+    )))
 }
 
 fn replace_file_name(relative_path: &str, filename: &str) -> String {

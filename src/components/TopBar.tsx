@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Cloud, Save, Share2 } from "lucide-react";
+import { ChevronDown, Cloud, Download, Save, Share2 } from "lucide-react";
 
 import type { SaveStatus } from "../app/appState";
+import type { DocumentExportFormat } from "../features/lake-editor/lakeExport";
 import type { WorkspaceDocument } from "../features/workspace/workspaceStore";
 import { documentTitleFromPath } from "../features/workspace/workspaceStore";
 import { IconButton } from "./IconButton";
@@ -11,12 +12,14 @@ interface TopBarProps {
   saveStatus: SaveStatus;
   onManualSave: () => void;
   onRenameDocument?: (title: string) => void | Promise<void>;
+  onExportDocument?: (format: DocumentExportFormat) => void;
 }
 
-export function TopBar({ document, saveStatus, onManualSave, onRenameDocument }: TopBarProps) {
+export function TopBar({ document, saveStatus, onManualSave, onRenameDocument, onExportDocument }: TopBarProps) {
   const title = document ? documentTitleFromPath(document.path) : "Lake 本地笔记";
   const [editingTitle, setEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(title);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
 
   useEffect(() => {
     if (!editingTitle) {
@@ -30,6 +33,10 @@ export function TopBar({ document, saveStatus, onManualSave, onRenameDocument }:
     if (document && nextTitle && nextTitle !== title) {
       void onRenameDocument?.(nextTitle);
     }
+  };
+  const exportDocument = (format: DocumentExportFormat) => {
+    setExportMenuOpen(false);
+    onExportDocument?.(format);
   };
 
   return (
@@ -76,6 +83,39 @@ export function TopBar({ document, saveStatus, onManualSave, onRenameDocument }:
         <IconButton label="保存" onClick={onManualSave} disabled={!document}>
           <Save size={18} />
         </IconButton>
+        <div className="export-menu">
+          <button
+            type="button"
+            className="icon-button export-menu__trigger"
+            aria-label="导出文档"
+            aria-haspopup="menu"
+            aria-expanded={exportMenuOpen}
+            title="导出文档"
+            disabled={!document}
+            onClick={() => setExportMenuOpen((open) => !open)}
+            onBlur={(event) => {
+              if (!event.currentTarget.parentElement?.contains(event.relatedTarget as Node | null)) {
+                setExportMenuOpen(false);
+              }
+            }}
+          >
+            <Download size={18} />
+            <ChevronDown size={12} />
+          </button>
+          {exportMenuOpen ? (
+            <div className="export-menu__content" role="menu">
+              <button type="button" role="menuitem" onClick={() => exportDocument("markdown")}>
+                Markdown
+              </button>
+              <button type="button" role="menuitem" onClick={() => exportDocument("html")}>
+                HTML
+              </button>
+              <button type="button" role="menuitem" onClick={() => exportDocument("pdf")}>
+                PDF
+              </button>
+            </div>
+          ) : null}
+        </div>
         <IconButton label="分享" disabled>
           <Share2 size={18} />
         </IconButton>

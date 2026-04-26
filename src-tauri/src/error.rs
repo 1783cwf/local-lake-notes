@@ -33,6 +33,8 @@ pub enum AppError {
     Walkdir(#[from] walkdir::Error),
     #[error("S3 上传失败：{0}")]
     S3(String),
+    #[error("{0}")]
+    Export(String),
 }
 
 impl Serialize for AppError {

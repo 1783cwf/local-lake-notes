@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import type { SaveStatus, UploadImageInput, UploadImageOutput } from "../../app/appState";
 import type { WorkspaceDocument } from "../workspace/workspaceStore";
 import type { LakeEditorInstance } from "./editorTypes";
+import type { LakeDocumentExportRequest } from "./lakeExport";
 import { createLakeEditor, destroyLakeEditor, hasLakeEditorRuntime } from "./lakeEditorAdapter";
 import { createEditorFileUpload, createEditorImageUpload } from "./uploadAdapter";
 import { useLakeAutosave } from "./useLakeAutosave";
@@ -11,7 +12,9 @@ interface LakeEditorProps {
   document: WorkspaceDocument | null;
   content: string;
   manualSaveRequest: number;
+  exportRequest: LakeDocumentExportRequest | null;
   onSave: (relativePath: string, content: string) => Promise<void>;
+  onExportContent: (request: LakeDocumentExportRequest, content: string) => Promise<void>;
   onUploadImage: (input: UploadImageInput) => Promise<UploadImageOutput>;
   onUploadFile: (input: UploadImageInput) => Promise<UploadImageOutput>;
   onOpenFileUrl: (url: string) => Promise<void>;
@@ -22,7 +25,9 @@ export function LakeEditor({
   document,
   content,
   manualSaveRequest,
+  exportRequest,
   onSave,
+  onExportContent,
   onUploadImage,
   onUploadFile,
   onOpenFileUrl,
@@ -30,11 +35,18 @@ export function LakeEditor({
 }: LakeEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<LakeEditorInstance | null>(null);
+  const handledExportRequestRef = useRef(0);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const readContent = useCallback(() => {
     return editorRef.current?.getDocument("text/lake") ?? content;
   }, [content]);
+  const readExportContent = useCallback((request: LakeDocumentExportRequest) => {
+    if (request.format === "html" || request.format === "pdf") {
+      return editorRef.current?.getDocument("text/html") ?? content;
+    }
+    return readContent();
+  }, [content, readContent]);
 
   const saveContent = useCallback(
     async (nextContent: string) => {
@@ -103,6 +115,15 @@ export function LakeEditor({
       void saveNow();
     }
   }, [manualSaveRequest, saveNow]);
+
+  useEffect(() => {
+    if (!exportRequest || handledExportRequestRef.current === exportRequest.id) {
+      return;
+    }
+
+    handledExportRequestRef.current = exportRequest.id;
+    void onExportContent(exportRequest, readExportContent(exportRequest));
+  }, [exportRequest, onExportContent, readExportContent]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
