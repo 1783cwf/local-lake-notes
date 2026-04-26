@@ -1,20 +1,33 @@
 use std::fs;
 use std::path::Path;
 
-use tauri::State;
+use tauri::{AppHandle, State};
 
-use crate::commands::workspace::{resolve_existing_lake_path, resolve_writable_lake_path, workspace_payload};
+use crate::commands::workspace::{
+    resolve_existing_directory_path, resolve_existing_lake_path, resolve_writable_lake_path,
+    workspace_payload_for_app,
+};
 use crate::error::{AppError, AppResult};
-use crate::models::CreateDocumentPayload;
+use crate::models::{CreateDocumentPayload, WorkspacePayload};
 use crate::state::AppState;
+use crate::storage::app_database::{
+    prune_workspace_order_path, push_workspace_order_item, rewrite_workspace_order_path,
+};
 
 const EMPTY_LAKE_DOCUMENT: &str = "<p><span class=\"ne-text\"> </span></p>";
 
 #[tauri::command]
-pub fn create_lake_document(title: String, state: State<'_, AppState>) -> AppResult<CreateDocumentPayload> {
+pub fn create_lake_document(
+    title: String,
+    parent_path: Option<String>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<CreateDocumentPayload> {
     let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
-    let created_path = create_document(&root, &title)?;
-    let payload = workspace_payload(&root)?;
+    let created_path =
+        create_document_at(&root, parent_path.as_deref().unwrap_or_default(), &title)?;
+    push_workspace_order_item(&app, &root, format!("document:{created_path}"))?;
+    let payload = workspace_payload_for_app(&app, &root)?;
     let created_document = payload
         .documents
         .iter()
@@ -23,9 +36,49 @@ pub fn create_lake_document(title: String, state: State<'_, AppState>) -> AppRes
         .ok_or(AppError::InvalidLakePath)?;
     Ok(CreateDocumentPayload {
         root: payload.root,
+        directories: payload.directories,
         documents: payload.documents,
+        order: payload.order,
         created_document,
     })
+}
+
+#[tauri::command]
+pub fn rename_lake_document(
+    relative_path: String,
+    title: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<WorkspacePayload> {
+    let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
+    let current_path = resolve_existing_lake_path(&root, &relative_path)?;
+    let parent = current_path.parent().ok_or(AppError::InvalidLakePath)?;
+    let filename = format!("{}.lake", safe_file_stem(&title)?);
+    let target = parent.join(&filename);
+    if target.exists() {
+        return Err(AppError::InvalidFilename);
+    }
+    fs::rename(current_path, target)?;
+    rewrite_workspace_order_path(
+        &app,
+        &root,
+        &relative_path,
+        &replace_file_name(&relative_path, &filename),
+    )?;
+    workspace_payload_for_app(&app, &root)
+}
+
+#[tauri::command]
+pub fn delete_lake_document(
+    relative_path: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<WorkspacePayload> {
+    let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
+    let path = resolve_existing_lake_path(&root, &relative_path)?;
+    fs::remove_file(path)?;
+    prune_workspace_order_path(&app, &root, &relative_path)?;
+    workspace_payload_for_app(&app, &root)
 }
 
 #[tauri::command]
@@ -47,18 +100,33 @@ pub fn write_lake_document(
 }
 
 pub fn create_document(root: &Path, title: &str) -> AppResult<String> {
+    create_document_at(root, "", title)
+}
+
+pub fn create_document_at(root: &Path, parent_path: &str, title: &str) -> AppResult<String> {
     let stem = safe_file_stem(title)?;
+    let parent = resolve_existing_directory_path(root, parent_path)?;
+    let normalized_parent = if parent_path.trim().is_empty() {
+        String::new()
+    } else {
+        parent_path.trim_matches('/').to_string()
+    };
     let mut candidate = format!("{stem}.lake");
     let mut counter = 2;
 
-    while root.join(&candidate).exists() {
+    while parent.join(&candidate).exists() {
         candidate = format!("{stem}-{counter}.lake");
         counter += 1;
     }
 
-    let path = resolve_writable_lake_path(root, &candidate)?;
+    let relative_path = if normalized_parent.is_empty() {
+        candidate.clone()
+    } else {
+        format!("{normalized_parent}/{candidate}")
+    };
+    let path = resolve_writable_lake_path(root, &relative_path)?;
     atomic_write(&path, EMPTY_LAKE_DOCUMENT)?;
-    Ok(candidate)
+    Ok(relative_path)
 }
 
 pub fn safe_file_stem(title: &str) -> AppResult<String> {
@@ -67,7 +135,10 @@ pub fn safe_file_stem(title: &str) -> AppResult<String> {
 
     for character in title.trim().chars() {
         let invalid = character.is_control()
-            || matches!(character, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|');
+            || matches!(
+                character,
+                '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'
+            );
         if invalid || character.is_whitespace() {
             if !last_was_dash && !output.is_empty() {
                 output.push('-');
@@ -98,4 +169,11 @@ pub fn atomic_write(path: &Path, content: &str) -> AppResult<()> {
     fs::write(&temp_path, content)?;
     fs::rename(temp_path, path)?;
     Ok(())
+}
+
+fn replace_file_name(relative_path: &str, filename: &str) -> String {
+    relative_path
+        .rsplit_once('/')
+        .map(|(parent, _)| format!("{parent}/{filename}"))
+        .unwrap_or_else(|| filename.to_string())
 }

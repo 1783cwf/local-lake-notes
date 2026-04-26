@@ -7,11 +7,18 @@ const setWorkspaceRoot = vi.fn();
 
 vi.mock("../lib/tauri", () => ({
   chooseWorkspaceDirectory: vi.fn(async () => "/tmp/kb"),
+  createLakeDirectory: vi.fn(),
   createLakeDocument: vi.fn(),
+  deleteLakeDirectory: vi.fn(),
+  deleteLakeDocument: vi.fn(),
   getOssSettings: vi.fn(async () => null),
   getRecentWorkspace: vi.fn(async () => null),
   readLakeDocument: vi.fn(async () => "<p>hello</p>"),
+  renameLakeDirectory: vi.fn(),
+  renameLakeDocument: vi.fn(),
+  renameWorkspace: vi.fn(),
   saveOssSettings: vi.fn(),
+  saveWorkspaceOrder: vi.fn(),
   setWorkspaceRoot: (...args: unknown[]) => setWorkspaceRoot(...args),
   uploadImage: vi.fn(),
   writeLakeDocument: vi.fn(),
@@ -21,6 +28,7 @@ test("选择目录后展示 workspace 文档", async () => {
   const user = userEvent.setup();
   setWorkspaceRoot.mockResolvedValue({
     root: "/tmp/kb",
+    directories: [],
     documents: [
       {
         id: "a.lake",
@@ -30,6 +38,7 @@ test("选择目录后展示 workspace 文档", async () => {
         size: 1,
       },
     ],
+    order: [],
   });
 
   render(<AppController />);

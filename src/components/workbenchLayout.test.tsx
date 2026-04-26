@@ -9,7 +9,7 @@ test("工作台关键区域具备可访问入口", () => {
     <>
       <AppRail onChooseWorkspace={vi.fn()} onCreateDocument={vi.fn()} onOpenSettings={vi.fn()} />
       <TopBar document={null} saveStatus={{ state: "clean" }} onManualSave={vi.fn()} />
-      <OutlinePanel />
+      <OutlinePanel items={[]} />
     </>,
   );
 

@@ -4,6 +4,7 @@ import type { SaveStatus, UploadImageInput, UploadImageOutput } from "../../app/
 import type { WorkspaceDocument } from "../workspace/workspaceStore";
 import type { LakeEditorInstance } from "./editorTypes";
 import { createLakeEditor, destroyLakeEditor, hasLakeEditorRuntime } from "./lakeEditorAdapter";
+import { extractLakeOutline, type LakeOutlineItem } from "./lakeOutline";
 import { createEditorImageUpload } from "./uploadAdapter";
 import { useLakeAutosave } from "./useLakeAutosave";
 
@@ -13,6 +14,7 @@ interface LakeEditorProps {
   manualSaveRequest: number;
   onSave: (relativePath: string, content: string) => Promise<void>;
   onUploadImage: (input: UploadImageInput) => Promise<UploadImageOutput>;
+  onOutlineChange: (outline: LakeOutlineItem[]) => void;
   onSaveStatusChange: (status: SaveStatus) => void;
 }
 
@@ -22,6 +24,7 @@ export function LakeEditor({
   manualSaveRequest,
   onSave,
   onUploadImage,
+  onOutlineChange,
   onSaveStatusChange,
 }: LakeEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -67,11 +70,15 @@ export function LakeEditor({
     setLoadError(null);
     destroyLakeEditor(editorRef.current);
     const editor = createLakeEditor(containerRef.current, {
-      onContentChange: scheduleSave,
+      onContentChange: () => {
+        scheduleSave();
+        onOutlineChange(extractLakeOutline(editorRef.current?.getDocument("text/lake") ?? ""));
+      },
       uploadImage: (request) => createEditorImageUpload(request, onUploadImage),
     });
     editorRef.current = editor;
     editor.setDocument("text/lake", content);
+    onOutlineChange(extractLakeOutline(content));
     setStatus({ state: "clean" });
 
     return () => {
@@ -80,7 +87,7 @@ export function LakeEditor({
         editorRef.current = null;
       }
     };
-  }, [content, document, onUploadImage, scheduleSave, setStatus]);
+  }, [content, document, onOutlineChange, onUploadImage, scheduleSave, setStatus]);
 
   useEffect(() => {
     if (manualSaveRequest > 0) {

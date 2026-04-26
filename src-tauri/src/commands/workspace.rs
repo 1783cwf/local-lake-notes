@@ -2,31 +2,29 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 use walkdir::WalkDir;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{WorkspaceDocument, WorkspacePayload};
+use crate::models::{WorkspaceDirectory, WorkspaceDocument, WorkspacePayload};
 use crate::state::AppState;
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct WorkspaceConfig {
-    recent_workspace: String,
-}
+use crate::storage::app_database::{
+    load_recent_workspace_root, move_workspace_order, prune_workspace_order_path,
+    push_workspace_order_item, read_workspace_order, rewrite_workspace_order_path,
+    save_recent_workspace_root, set_workspace_order,
+};
 
 #[tauri::command]
 pub fn get_recent_workspace(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<Option<WorkspacePayload>> {
-    let Some(config) = read_workspace_config(&app)? else {
+    let Some(recent_workspace) = load_recent_workspace_root(&app)? else {
         return Ok(None);
     };
-    let root = normalize_workspace_root(&config.recent_workspace)?;
+    let root = normalize_workspace_root(&recent_workspace)?;
     state.set_workspace_root(root.clone());
-    Ok(Some(workspace_payload(&root)?))
+    Ok(Some(workspace_payload_for_app(&app, &root)?))
 }
 
 #[tauri::command]
@@ -36,15 +34,121 @@ pub fn set_workspace_root(
     state: State<'_, AppState>,
 ) -> AppResult<WorkspacePayload> {
     let root = normalize_workspace_root(&path)?;
-    write_workspace_config(&app, &root)?;
+    save_recent_workspace_root(&app, &root)?;
     state.set_workspace_root(root.clone());
-    workspace_payload(&root)
+    workspace_payload_for_app(&app, &root)
 }
 
 #[tauri::command]
-pub fn list_lake_documents(state: State<'_, AppState>) -> AppResult<WorkspacePayload> {
+pub fn list_lake_documents(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<WorkspacePayload> {
     let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
-    workspace_payload(&root)
+    workspace_payload_for_app(&app, &root)
+}
+
+#[tauri::command]
+pub fn rename_workspace(
+    name: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<WorkspacePayload> {
+    let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
+    let parent = root.parent().ok_or(AppError::InvalidFilename)?;
+    let target = parent.join(safe_directory_name(&name)?);
+    if target.exists() {
+        return Err(AppError::InvalidFilename);
+    }
+
+    fs::rename(&root, &target)?;
+    let new_root = target.canonicalize()?;
+    move_workspace_order(&app, &root, &new_root)?;
+    save_recent_workspace_root(&app, &new_root)?;
+    state.set_workspace_root(new_root.clone());
+    workspace_payload_for_app(&app, &new_root)
+}
+
+#[tauri::command]
+pub fn create_lake_directory(
+    parent_path: String,
+    name: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<WorkspacePayload> {
+    let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
+    let parent = resolve_existing_directory_path(&root, &parent_path)?;
+    let directory_name = safe_directory_name(&name)?;
+    let target = parent.join(&directory_name);
+    if target.exists() {
+        return Err(AppError::InvalidFilename);
+    }
+    fs::create_dir_all(target)?;
+    push_workspace_order_item(
+        &app,
+        &root,
+        format!(
+            "folder:{}",
+            child_relative_path(&parent_path, &directory_name)
+        ),
+    )?;
+    workspace_payload_for_app(&app, &root)
+}
+
+#[tauri::command]
+pub fn rename_lake_directory(
+    relative_path: String,
+    name: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<WorkspacePayload> {
+    let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
+    if relative_path.trim().is_empty() {
+        return Err(AppError::InvalidFilename);
+    }
+    let current_path = resolve_existing_directory_path(&root, &relative_path)?;
+    let parent = current_path.parent().ok_or(AppError::InvalidFilename)?;
+    let directory_name = safe_directory_name(&name)?;
+    let target = parent.join(&directory_name);
+    if target.exists() {
+        return Err(AppError::InvalidFilename);
+    }
+
+    fs::rename(current_path, target)?;
+    rewrite_workspace_order_path(
+        &app,
+        &root,
+        &relative_path,
+        &replace_directory_name(&relative_path, &directory_name),
+    )?;
+    workspace_payload_for_app(&app, &root)
+}
+
+#[tauri::command]
+pub fn delete_lake_directory(
+    relative_path: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<WorkspacePayload> {
+    let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
+    if relative_path.trim().is_empty() {
+        return Err(AppError::InvalidFilename);
+    }
+    let target = resolve_existing_directory_path(&root, &relative_path)?;
+    fs::remove_dir_all(target)?;
+    prune_workspace_order_path(&app, &root, &relative_path)?;
+    workspace_payload_for_app(&app, &root)
+}
+
+#[tauri::command]
+pub fn save_workspace_order(
+    order: Vec<String>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<WorkspacePayload> {
+    let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
+    set_workspace_order(&app, &root, &order)?;
+    workspace_payload_for_app(&app, &root)
 }
 
 pub fn normalize_workspace_root(path: impl AsRef<Path>) -> AppResult<PathBuf> {
@@ -56,10 +160,67 @@ pub fn normalize_workspace_root(path: impl AsRef<Path>) -> AppResult<PathBuf> {
 }
 
 pub fn workspace_payload(root: &Path) -> AppResult<WorkspacePayload> {
+    workspace_payload_with_order(root, Vec::new())
+}
+
+pub fn workspace_payload_for_app(app: &AppHandle, root: &Path) -> AppResult<WorkspacePayload> {
+    workspace_payload_with_order(root, read_workspace_order(app, root)?)
+}
+
+fn workspace_payload_with_order(root: &Path, order: Vec<String>) -> AppResult<WorkspacePayload> {
     Ok(WorkspacePayload {
         root: root.to_string_lossy().to_string(),
+        directories: list_directories(root)?,
         documents: list_documents(root)?,
+        order,
     })
+}
+
+pub fn list_directories(root: &Path) -> AppResult<Vec<WorkspaceDirectory>> {
+    let root = root.canonicalize()?;
+    let mut directories = Vec::new();
+
+    for entry in WalkDir::new(&root).into_iter().filter_entry(|entry| {
+        entry.depth() == 0 || !entry.file_name().to_string_lossy().starts_with('.')
+    }) {
+        let entry = entry.map_err(|error| AppError::Io(error.into()))?;
+        if !entry.file_type().is_dir() || entry.depth() == 0 {
+            continue;
+        }
+
+        let relative = entry
+            .path()
+            .strip_prefix(&root)
+            .map_err(|_| AppError::PathOutsideWorkspace)?;
+        let relative_path = normalize_relative_path(relative);
+        let metadata = entry.metadata()?;
+        let modified_at = metadata
+            .modified()
+            .ok()
+            .map(DateTime::<Utc>::from)
+            .map(|time| time.to_rfc3339());
+        let name = entry
+            .path()
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("Untitled")
+            .to_string();
+        let parent_path = relative
+            .parent()
+            .map(normalize_relative_path)
+            .unwrap_or_default();
+
+        directories.push(WorkspaceDirectory {
+            id: relative_path.clone(),
+            path: relative_path,
+            name,
+            parent_path,
+            modified_at,
+        });
+    }
+
+    directories.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(directories)
 }
 
 pub fn list_documents(root: &Path) -> AppResult<Vec<WorkspaceDocument>> {
@@ -135,6 +296,20 @@ pub fn resolve_writable_lake_path(root: &Path, relative_path: &str) -> AppResult
     Ok(full_path)
 }
 
+pub fn resolve_existing_directory_path(root: &Path, relative_path: &str) -> AppResult<PathBuf> {
+    let root = root.canonicalize()?;
+    if relative_path.trim().is_empty() {
+        return Ok(root);
+    }
+
+    validate_relative_directory_path(relative_path)?;
+    let full_path = root.join(relative_path).canonicalize()?;
+    if !full_path.starts_with(&root) || !full_path.is_dir() {
+        return Err(AppError::PathOutsideWorkspace);
+    }
+    Ok(full_path)
+}
+
 fn validate_relative_lake_path(relative_path: &str) -> AppResult<()> {
     let path = Path::new(relative_path);
     if path.is_absolute() {
@@ -144,11 +319,70 @@ fn validate_relative_lake_path(relative_path: &str) -> AppResult<()> {
         return Err(AppError::InvalidLakePath);
     }
     for component in path.components() {
-        if matches!(component, Component::ParentDir | Component::RootDir | Component::Prefix(_)) {
+        if matches!(
+            component,
+            Component::CurDir | Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        ) {
             return Err(AppError::PathOutsideWorkspace);
         }
     }
     Ok(())
+}
+
+fn validate_relative_directory_path(relative_path: &str) -> AppResult<()> {
+    let path = Path::new(relative_path);
+    if path.is_absolute() {
+        return Err(AppError::PathOutsideWorkspace);
+    }
+    for component in path.components() {
+        match component {
+            Component::Normal(value) => {
+                if value.to_string_lossy().starts_with('.') {
+                    return Err(AppError::PathOutsideWorkspace);
+                }
+            }
+            Component::CurDir
+            | Component::ParentDir
+            | Component::RootDir
+            | Component::Prefix(_) => {
+                return Err(AppError::PathOutsideWorkspace);
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn safe_directory_name(name: &str) -> AppResult<String> {
+    let mut output = String::new();
+    let mut last_was_dash = false;
+
+    for character in name.trim().chars() {
+        let invalid = character.is_control()
+            || matches!(
+                character,
+                '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'
+            );
+        if invalid || character.is_whitespace() {
+            if !last_was_dash && !output.is_empty() {
+                output.push('-');
+                last_was_dash = true;
+            }
+            continue;
+        }
+
+        output.push(character);
+        last_was_dash = false;
+        if output.chars().count() >= 80 {
+            break;
+        }
+    }
+
+    let output = output.trim_matches('-').to_string();
+    if output.is_empty() || output.starts_with('.') {
+        Err(AppError::InvalidFilename)
+    } else {
+        Ok(output)
+    }
 }
 
 fn normalize_relative_path(path: &Path) -> String {
@@ -161,26 +395,18 @@ fn normalize_relative_path(path: &Path) -> String {
         .join("/")
 }
 
-fn workspace_config_path(app: &AppHandle) -> AppResult<PathBuf> {
-    let dir = app.path().app_config_dir()?;
-    fs::create_dir_all(&dir)?;
-    Ok(dir.join("workspace.json"))
-}
-
-fn read_workspace_config(app: &AppHandle) -> AppResult<Option<WorkspaceConfig>> {
-    let path = workspace_config_path(app)?;
-    if !path.exists() {
-        return Ok(None);
+fn child_relative_path(parent_path: &str, child_name: &str) -> String {
+    let parent_path = parent_path.trim_matches('/');
+    if parent_path.is_empty() {
+        child_name.to_string()
+    } else {
+        format!("{parent_path}/{child_name}")
     }
-    let content = fs::read_to_string(path)?;
-    Ok(Some(serde_json::from_str(&content)?))
 }
 
-fn write_workspace_config(app: &AppHandle, root: &Path) -> AppResult<()> {
-    let path = workspace_config_path(app)?;
-    let config = WorkspaceConfig {
-        recent_workspace: root.to_string_lossy().to_string(),
-    };
-    fs::write(path, serde_json::to_string_pretty(&config)?)?;
-    Ok(())
+fn replace_directory_name(relative_path: &str, directory_name: &str) -> String {
+    relative_path
+        .rsplit_once('/')
+        .map(|(parent, _)| format!("{parent}/{directory_name}"))
+        .unwrap_or_else(|| directory_name.to_string())
 }

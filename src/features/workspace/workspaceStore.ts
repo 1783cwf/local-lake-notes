@@ -7,9 +7,19 @@ export interface WorkspaceDocument {
   size: number;
 }
 
+export interface WorkspaceDirectory {
+  id: string;
+  path: string;
+  name: string;
+  parentPath: string;
+  modifiedAt?: string;
+}
+
 export interface WorkspacePayload {
   root: string;
+  directories: WorkspaceDirectory[];
   documents: WorkspaceDocument[];
+  order: string[];
 }
 
 export interface CreateDocumentPayload extends WorkspacePayload {
@@ -20,14 +30,23 @@ export interface DocumentTreeNode {
   id: string;
   name: string;
   path: string;
+  parentPath: string;
   type: "folder" | "document";
+  itemId: string;
   children: DocumentTreeNode[];
   document?: WorkspaceDocument;
+  directory?: WorkspaceDirectory;
 }
 
-export function buildDocumentTree(documents: WorkspaceDocument[]): DocumentTreeNode[] {
+export function buildDocumentTree(
+  documents: WorkspaceDocument[],
+  directories: WorkspaceDirectory[] = [],
+  order: string[] = [],
+): DocumentTreeNode[] {
   const roots: DocumentTreeNode[] = [];
   const folders = new Map<string, DocumentTreeNode>();
+  const explicitDirectories = new Map(directories.map((directory) => [directory.path, directory]));
+  const orderRank = new Map(order.map((itemId, index) => [itemId, index]));
 
   const ensureFolder = (folderPath: string): DocumentTreeNode | null => {
     if (!folderPath) {
@@ -43,12 +62,16 @@ export function buildDocumentTree(documents: WorkspaceDocument[]): DocumentTreeN
     const name = segments[segments.length - 1];
     const parentPath = segments.slice(0, -1).join("/");
     const parent = ensureFolder(parentPath);
+    const directory = explicitDirectories.get(folderPath);
     const node: DocumentTreeNode = {
       id: `folder:${folderPath}`,
-      name,
+      name: directory?.name ?? name,
       path: folderPath,
+      parentPath,
       type: "folder",
+      itemId: `folder:${folderPath}`,
       children: [],
+      directory,
     };
 
     folders.set(folderPath, node);
@@ -60,12 +83,18 @@ export function buildDocumentTree(documents: WorkspaceDocument[]): DocumentTreeN
     return node;
   };
 
+  for (const directory of directories) {
+    ensureFolder(directory.path);
+  }
+
   for (const document of documents) {
     const node: DocumentTreeNode = {
       id: `document:${document.path}`,
       name: document.name,
       path: document.path,
+      parentPath: document.parentPath,
       type: "document",
+      itemId: `document:${document.path}`,
       children: [],
       document,
     };
@@ -79,6 +108,11 @@ export function buildDocumentTree(documents: WorkspaceDocument[]): DocumentTreeN
 
   const sortTree = (nodes: DocumentTreeNode[]) => {
     nodes.sort((a, b) => {
+      const rankA = orderRank.get(a.itemId);
+      const rankB = orderRank.get(b.itemId);
+      if (rankA !== undefined || rankB !== undefined) {
+        return (rankA ?? Number.MAX_SAFE_INTEGER) - (rankB ?? Number.MAX_SAFE_INTEGER);
+      }
       if (a.type !== b.type) {
         return a.type === "folder" ? -1 : 1;
       }
@@ -89,6 +123,10 @@ export function buildDocumentTree(documents: WorkspaceDocument[]): DocumentTreeN
 
   sortTree(roots);
   return roots;
+}
+
+export function flattenTreeOrder(nodes: DocumentTreeNode[]): string[] {
+  return nodes.flatMap((node) => [node.itemId, ...flattenTreeOrder(node.children)]);
 }
 
 export function documentTitleFromPath(path: string): string {

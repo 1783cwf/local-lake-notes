@@ -17,6 +17,8 @@ pub enum AppError {
     Io(#[from] std::io::Error),
     #[error("JSON 错误：{0}")]
     Json(#[from] serde_json::Error),
+    #[error("SQLite 错误：{0}")]
+    Sqlite(#[from] rusqlite::Error),
     #[error("Tauri 错误：{0}")]
     Tauri(#[from] tauri::Error),
     #[error("目录遍历错误：{0}")]

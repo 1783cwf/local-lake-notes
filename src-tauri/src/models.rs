@@ -13,16 +13,36 @@ pub struct WorkspaceDocument {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkspaceDirectory {
+    pub id: String,
+    pub path: String,
+    pub name: String,
+    pub parent_path: String,
+    pub modified_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceOrder {
+    pub items: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspacePayload {
     pub root: String,
+    pub directories: Vec<WorkspaceDirectory>,
     pub documents: Vec<WorkspaceDocument>,
+    pub order: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateDocumentPayload {
     pub root: String,
+    pub directories: Vec<WorkspaceDirectory>,
     pub documents: Vec<WorkspaceDocument>,
+    pub order: Vec<String>,
     pub created_document: WorkspaceDocument,
 }
 
