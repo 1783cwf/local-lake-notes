@@ -21,7 +21,7 @@ export function AppRail({ onChooseWorkspace, onCreateDocument, onOpenSettings }:
         <Plus size={20} />
       </IconButton>
       <div className="app-rail__spacer" />
-      <IconButton label="OSS 设置" onClick={onOpenSettings}>
+      <IconButton label="设置" onClick={onOpenSettings}>
         <Settings size={20} />
       </IconButton>
     </nav>

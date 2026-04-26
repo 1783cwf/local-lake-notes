@@ -4,7 +4,7 @@ import type { SaveStatus, UploadImageInput, UploadImageOutput } from "../../app/
 import type { WorkspaceDocument } from "../workspace/workspaceStore";
 import type { LakeEditorInstance } from "./editorTypes";
 import { createLakeEditor, destroyLakeEditor, hasLakeEditorRuntime } from "./lakeEditorAdapter";
-import { createEditorImageUpload } from "./uploadAdapter";
+import { createEditorFileUpload, createEditorImageUpload } from "./uploadAdapter";
 import { useLakeAutosave } from "./useLakeAutosave";
 
 interface LakeEditorProps {
@@ -13,6 +13,8 @@ interface LakeEditorProps {
   manualSaveRequest: number;
   onSave: (relativePath: string, content: string) => Promise<void>;
   onUploadImage: (input: UploadImageInput) => Promise<UploadImageOutput>;
+  onUploadFile: (input: UploadImageInput) => Promise<UploadImageOutput>;
+  onOpenFileUrl: (url: string) => Promise<void>;
   onSaveStatusChange: (status: SaveStatus) => void;
 }
 
@@ -22,6 +24,8 @@ export function LakeEditor({
   manualSaveRequest,
   onSave,
   onUploadImage,
+  onUploadFile,
+  onOpenFileUrl,
   onSaveStatusChange,
 }: LakeEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -71,6 +75,8 @@ export function LakeEditor({
         scheduleSave();
       },
       uploadImage: (request) => createEditorImageUpload(request, onUploadImage),
+      uploadFile: (file) => createEditorFileUpload(file, onUploadFile),
+      openFileUrl: onOpenFileUrl,
     });
     editorRef.current = editor;
     editor.setDocument("text/lake", content);
@@ -82,7 +88,7 @@ export function LakeEditor({
         editorRef.current = null;
       }
     };
-  }, [content, document, onUploadImage, scheduleSave, setStatus]);
+  }, [content, document, onOpenFileUrl, onUploadFile, onUploadImage, scheduleSave, setStatus]);
 
   useEffect(() => {
     if (manualSaveRequest > 0) {

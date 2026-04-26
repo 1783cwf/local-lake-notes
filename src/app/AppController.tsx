@@ -16,6 +16,7 @@ import {
   deleteLakeDocument,
   getOssSettings,
   getRecentWorkspace,
+  openExternalUrl,
   readLakeDocument,
   renameLakeDirectory,
   renameLakeDocument,
@@ -23,6 +24,7 @@ import {
   saveOssSettings,
   saveWorkspaceOrder,
   setWorkspaceRoot,
+  uploadFile,
   uploadImage,
   writeLakeDocument,
 } from "../lib/tauri";
@@ -267,6 +269,23 @@ export function AppController() {
     return uploadImage(input);
   }, [ossSettings]);
 
+  const uploadEditorFile = useCallback(async (input: UploadImageInput): Promise<UploadImageOutput> => {
+    if (!ossSettings) {
+      setSettingsOpen(true);
+      throw new Error("请先配置 OSS 上传信息");
+    }
+    return uploadFile(input);
+  }, [ossSettings]);
+
+  const openEditorFileUrl = useCallback(async (url: string) => {
+    try {
+      await openExternalUrl(url);
+      setAppError(null);
+    } catch (error) {
+      setAppError(toMessage(error));
+    }
+  }, []);
+
   const currentPath = currentDocument?.entry.path ?? null;
   const documents = useMemo(() => workspace?.documents ?? [], [workspace]);
   const directories = useMemo(() => workspace?.directories ?? [], [workspace]);
@@ -361,6 +380,8 @@ export function AppController() {
           manualSaveRequest={manualSaveRequest}
           onSave={saveDocument}
           onUploadImage={uploadEditorImage}
+          onUploadFile={uploadEditorFile}
+          onOpenFileUrl={openEditorFileUrl}
           onSaveStatusChange={setSaveStatus}
         />
       </main>

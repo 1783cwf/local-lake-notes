@@ -19,6 +19,8 @@ test("没有文档时显示工作台空状态", () => {
       manualSaveRequest={0}
       onSave={vi.fn()}
       onUploadImage={vi.fn()}
+      onUploadFile={vi.fn()}
+      onOpenFileUrl={vi.fn()}
       onSaveStatusChange={vi.fn()}
     />,
   );
@@ -44,6 +46,8 @@ test("打开文档时把 text/lake 内容设置进语雀编辑器", () => {
       manualSaveRequest={0}
       onSave={vi.fn()}
       onUploadImage={vi.fn()}
+      onUploadFile={vi.fn()}
+      onOpenFileUrl={vi.fn()}
       onSaveStatusChange={vi.fn()}
     />,
   );

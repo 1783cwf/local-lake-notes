@@ -300,10 +300,38 @@ export async function uploadImage(input: UploadImageInput): Promise<UploadImageO
       url: `https://oss-preview.local/images/${encodeURIComponent(input.filename)}`,
       size: input.bytes.length,
       filename: input.filename,
+      extname: fileExtension(input.filename),
     };
   }
 
   return invoke<UploadImageOutput>("upload_image", { input });
+}
+
+export async function uploadFile(input: UploadImageInput): Promise<UploadImageOutput> {
+  if (!isTauriRuntime()) {
+    return {
+      url: `https://oss-preview.local/files/${encodeURIComponent(input.filename)}`,
+      size: input.bytes.length,
+      filename: input.filename,
+      extname: fileExtension(input.filename),
+    };
+  }
+
+  return invoke<UploadImageOutput>("upload_file", { input });
+}
+
+export async function openExternalUrl(url: string): Promise<void> {
+  if (!isTauriRuntime()) {
+    window.open(url, "_blank", "noopener,noreferrer");
+    return;
+  }
+
+  return invoke<void>("open_external_url", { url });
+}
+
+function fileExtension(filename: string): string | undefined {
+  const extension = filename.split(".").pop();
+  return extension && extension !== filename ? extension : undefined;
 }
 
 function browserDocumentKey(relativePath: string): string {

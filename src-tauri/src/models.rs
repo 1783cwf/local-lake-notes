@@ -73,4 +73,6 @@ pub struct UploadImageOutput {
     pub url: String,
     pub size: usize,
     pub filename: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extname: Option<String>,
 }

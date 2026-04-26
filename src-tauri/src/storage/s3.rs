@@ -9,7 +9,17 @@ use uuid::Uuid;
 use crate::error::{AppError, AppResult};
 use crate::models::OssSettings;
 
+const FILE_UPLOAD_PREFIX: &str = "files";
+
 pub fn build_image_object_key(prefix: &str, filename: &str) -> String {
+    build_object_key(prefix, filename)
+}
+
+pub fn build_file_object_key(filename: &str) -> String {
+    build_object_key(FILE_UPLOAD_PREFIX, filename)
+}
+
+fn build_object_key(prefix: &str, filename: &str) -> String {
     let safe_prefix = sanitize_path_segment(prefix).unwrap_or_else(|| "images".to_string());
     let safe_filename = sanitize_filename(filename);
     let extension = safe_filename
@@ -28,7 +38,11 @@ pub fn build_image_object_key(prefix: &str, filename: &str) -> String {
 }
 
 pub fn build_public_url(base_url: &str, key: &str) -> String {
-    format!("{}/{}", base_url.trim_end_matches('/'), key.trim_start_matches('/'))
+    format!(
+        "{}/{}",
+        base_url.trim_end_matches('/'),
+        key.trim_start_matches('/')
+    )
 }
 
 pub async fn put_object(
@@ -93,7 +107,10 @@ fn sanitize_filename(filename: &str) -> String {
     let mut last_dash = false;
     for character in filename.trim().chars() {
         let invalid = character.is_control()
-            || matches!(character, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|');
+            || matches!(
+                character,
+                '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'
+            );
         if invalid || character.is_whitespace() {
             if !last_dash && !output.is_empty() {
                 output.push('-');

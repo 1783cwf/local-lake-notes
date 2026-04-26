@@ -24,12 +24,19 @@ export async function createEditorImageUpload(
     throw new Error("无法识别图片上传内容");
   }
 
-  const bytes = Array.from(new Uint8Array(await payload.arrayBuffer()));
-  return uploadImage({
-    bytes,
-    filename: payload.name || "image.png",
-    mimeType: payload.type || undefined,
-  });
+  return uploadLocalFile(payload, uploadImage, "image.png");
+}
+
+export async function createEditorFileUpload(
+  request: unknown,
+  uploadFile: (input: UploadImageInput) => Promise<UploadImageOutput>,
+): Promise<UploadImageOutput> {
+  const payload = request instanceof File ? request : (request as EditorUploadRequest).data ?? (request as EditorUploadRequest).file;
+  if (!(payload instanceof File)) {
+    throw new Error("无法识别附件上传内容");
+  }
+
+  return uploadLocalFile(payload, uploadFile, "attachment.bin");
 }
 
 async function uploadBase64Image(
@@ -45,6 +52,19 @@ async function uploadBase64Image(
     bytes,
     filename: defaultFilenameForMime(mimeType),
     mimeType,
+  });
+}
+
+async function uploadLocalFile(
+  file: File,
+  uploadFile: (input: UploadImageInput) => Promise<UploadImageOutput>,
+  fallbackFilename: string,
+): Promise<UploadImageOutput> {
+  const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
+  return uploadFile({
+    bytes,
+    filename: file.name || fallbackFilename,
+    mimeType: file.type || undefined,
   });
 }
 

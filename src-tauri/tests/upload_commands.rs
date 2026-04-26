@@ -1,4 +1,6 @@
-use yuque_lake_notes_lib::storage::s3::{build_image_object_key, build_public_url};
+use yuque_lake_notes_lib::storage::s3::{
+    build_file_object_key, build_image_object_key, build_public_url,
+};
 
 #[test]
 fn builds_image_object_key_under_type_directory() {
@@ -6,6 +8,15 @@ fn builds_image_object_key_under_type_directory() {
 
     assert!(key.starts_with("images/"));
     assert!(key.ends_with(".png"));
+    assert!(!key.contains(' '));
+}
+
+#[test]
+fn builds_file_object_key_under_files_directory() {
+    let key = build_file_object_key("hello world.zip");
+
+    assert!(key.starts_with("files/"));
+    assert!(key.ends_with(".zip"));
     assert!(!key.contains(' '));
 }
 

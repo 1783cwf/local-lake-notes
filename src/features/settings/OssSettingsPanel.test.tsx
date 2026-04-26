@@ -9,6 +9,8 @@ test("保存前校验 OSS 必填项", async () => {
 
   render(<OssSettingsPanel open settings={null} onClose={vi.fn()} onSave={onSave} />);
 
+  expect(screen.getByRole("button", { name: "上传配置" })).toBeInTheDocument();
+
   await user.click(screen.getByRole("button", { name: "保存" }));
 
   expect(await screen.findByText("请填写 endpoint")).toBeInTheDocument();

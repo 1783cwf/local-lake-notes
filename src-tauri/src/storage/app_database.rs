@@ -22,9 +22,19 @@ struct LegacyWorkspaceConfig {
 }
 
 pub fn database_path(app: &AppHandle) -> AppResult<PathBuf> {
-    let dir = app.path().app_config_dir()?;
+    let dir = database_dir(app)?;
     fs::create_dir_all(&dir)?;
     Ok(dir.join(DATABASE_FILE))
+}
+
+#[cfg(debug_assertions)]
+fn database_dir(_app: &AppHandle) -> AppResult<PathBuf> {
+    Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("dev-data"))
+}
+
+#[cfg(not(debug_assertions))]
+fn database_dir(app: &AppHandle) -> AppResult<PathBuf> {
+    app.path().app_local_data_dir().map_err(Into::into)
 }
 
 pub fn initialize_app_database(app: &AppHandle) -> AppResult<()> {

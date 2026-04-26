@@ -1,6 +1,6 @@
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
-import { Check, X } from "lucide-react";
+import { Check, CloudUpload, X } from "lucide-react";
 
 import type { OssSettings } from "../../app/appState";
 import { mergeOssSettings, validateOssSettings } from "./ossSettingsStore";
@@ -57,65 +57,78 @@ export function OssSettingsPanel({ open, settings, onClose, onSave }: OssSetting
 
   return (
     <div className="settings-backdrop" role="presentation">
-      <form className="settings-panel" onSubmit={submit} aria-label="OSS 设置">
+      <form className="settings-panel" onSubmit={submit} aria-label="设置">
         <div className="settings-panel__header">
-          <h2>OSS 设置</h2>
+          <h2>设置</h2>
           <button type="button" className="icon-button" onClick={onClose} aria-label="关闭">
             <X size={18} />
           </button>
         </div>
 
-        <label>
-          Endpoint
-          <input value={draft.endpoint} onChange={(event) => update("endpoint", event.target.value)} />
-        </label>
-        <label>
-          Bucket
-          <input value={draft.bucket} onChange={(event) => update("bucket", event.target.value)} />
-        </label>
-        <label>
-          Region
-          <input value={draft.region} onChange={(event) => update("region", event.target.value)} />
-        </label>
-        <label>
-          Access Key
-          <input value={draft.accessKeyId} onChange={(event) => update("accessKeyId", event.target.value)} />
-        </label>
-        <label>
-          Secret Key
-          <input
-            type="password"
-            value={draft.secretAccessKey}
-            onChange={(event) => update("secretAccessKey", event.target.value)}
-          />
-        </label>
-        <label>
-          公开访问 URL
-          <input value={draft.publicBaseUrl} onChange={(event) => update("publicBaseUrl", event.target.value)} />
-        </label>
-        <label>
-          图片目录
-          <input value={draft.imagePrefix} onChange={(event) => update("imagePrefix", event.target.value)} />
-        </label>
-        <label className="checkbox-label">
-          <input
-            type="checkbox"
-            checked={draft.forcePathStyle}
-            onChange={(event) => update("forcePathStyle", event.target.checked)}
-          />
-          Path-style endpoint
-        </label>
+        <div className="settings-panel__body">
+          <nav className="settings-menu" aria-label="设置菜单">
+            <button type="button" className="settings-menu__item is-active">
+              <CloudUpload size={16} />
+              上传配置
+            </button>
+          </nav>
 
-        {error ? <p className="settings-error">{error}</p> : null}
+          <section className="settings-content" aria-labelledby="upload-settings-title">
+            <h3 id="upload-settings-title">上传配置</h3>
 
-        <div className="settings-actions">
-          <button type="button" className="secondary-button" onClick={onClose}>
-            取消
-          </button>
-          <button type="submit" className="primary-button" disabled={saving}>
-            <Check size={16} />
-            保存
-          </button>
+            <label>
+              Endpoint
+              <input value={draft.endpoint} onChange={(event) => update("endpoint", event.target.value)} />
+            </label>
+            <label>
+              Bucket
+              <input value={draft.bucket} onChange={(event) => update("bucket", event.target.value)} />
+            </label>
+            <label>
+              Region
+              <input value={draft.region} onChange={(event) => update("region", event.target.value)} />
+            </label>
+            <label>
+              Access Key
+              <input value={draft.accessKeyId} onChange={(event) => update("accessKeyId", event.target.value)} />
+            </label>
+            <label>
+              Secret Key
+              <input
+                type="password"
+                value={draft.secretAccessKey}
+                onChange={(event) => update("secretAccessKey", event.target.value)}
+              />
+            </label>
+            <label>
+              公开访问 URL
+              <input value={draft.publicBaseUrl} onChange={(event) => update("publicBaseUrl", event.target.value)} />
+            </label>
+            <label>
+              图片目录
+              <input value={draft.imagePrefix} onChange={(event) => update("imagePrefix", event.target.value)} />
+            </label>
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={draft.forcePathStyle}
+                onChange={(event) => update("forcePathStyle", event.target.checked)}
+              />
+              Path-style endpoint
+            </label>
+
+            {error ? <p className="settings-error">{error}</p> : null}
+
+            <div className="settings-actions">
+              <button type="button" className="secondary-button" onClick={onClose}>
+                取消
+              </button>
+              <button type="submit" className="primary-button" disabled={saving}>
+                <Check size={16} />
+                保存
+              </button>
+            </div>
+          </section>
         </div>
       </form>
     </div>

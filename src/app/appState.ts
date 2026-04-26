@@ -23,6 +23,7 @@ export interface UploadImageOutput {
   url: string;
   size: number;
   filename: string;
+  extname?: string;
 }
 
 export interface OssSettings {

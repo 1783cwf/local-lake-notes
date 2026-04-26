@@ -8,8 +8,9 @@ use commands::documents::{
     create_lake_document, delete_lake_document, read_lake_document, rename_lake_document,
     write_lake_document,
 };
+use commands::external::open_external_url;
 use commands::settings::{get_oss_settings, save_oss_settings};
-use commands::upload::upload_image;
+use commands::upload::{upload_file, upload_image};
 use commands::workspace::{
     create_lake_directory, delete_lake_directory, get_recent_workspace, list_lake_documents,
     rename_lake_directory, rename_workspace, save_workspace_order, set_workspace_root,
@@ -44,6 +45,8 @@ pub fn run() {
             write_lake_document,
             get_oss_settings,
             save_oss_settings,
+            open_external_url,
+            upload_file,
             upload_image,
         ])
         .run(tauri::generate_context!())

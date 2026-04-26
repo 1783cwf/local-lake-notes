@@ -13,6 +13,7 @@ vi.mock("../lib/tauri", () => ({
   deleteLakeDocument: vi.fn(),
   getOssSettings: vi.fn(async () => null),
   getRecentWorkspace: vi.fn(async () => null),
+  openExternalUrl: vi.fn(),
   readLakeDocument: vi.fn(async () => "<p>hello</p>"),
   renameLakeDirectory: vi.fn(),
   renameLakeDocument: vi.fn(),
@@ -20,6 +21,7 @@ vi.mock("../lib/tauri", () => ({
   saveOssSettings: vi.fn(),
   saveWorkspaceOrder: vi.fn(),
   setWorkspaceRoot: (...args: unknown[]) => setWorkspaceRoot(...args),
+  uploadFile: vi.fn(),
   uploadImage: vi.fn(),
   writeLakeDocument: vi.fn(),
 }));

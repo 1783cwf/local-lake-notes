@@ -11,6 +11,8 @@ pub enum AppError {
     InvalidLakePath,
     #[error("无效的文件名")]
     InvalidFilename,
+    #[error("无效的外部链接")]
+    InvalidExternalUrl,
     #[error("OSS 设置不完整：{0}")]
     InvalidOssSettings(String),
     #[error("文件系统错误：{0}")]

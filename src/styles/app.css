@@ -29,6 +29,13 @@ body,
   width: 100%;
   height: 100%;
   margin: 0;
+  overflow: hidden;
+}
+
+body {
+  position: fixed;
+  inset: 0;
+  overscroll-behavior: none;
 }
 
 button,
@@ -41,15 +48,24 @@ button {
 }
 
 .app-shell {
+  position: fixed;
+  inset: 0;
   display: grid;
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
   background: #ffffff;
 }
 
+@supports (height: 100dvh) {
+  .app-shell {
+    height: 100dvh;
+  }
+}
+
 .app-rail {
   display: flex;
+  min-height: 0;
   flex-direction: column;
   align-items: center;
   gap: 14px;
@@ -107,6 +123,8 @@ button {
 
 .document-sidebar {
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   border-right: 1px solid var(--line);
   background: var(--sidebar);
 }
@@ -139,6 +157,8 @@ button {
 }
 
 .sidebar-section {
+  height: calc(100% - var(--topbar-height));
+  overflow: auto;
   padding: 16px 8px;
 }
 
@@ -260,7 +280,9 @@ button {
 .editor-workspace {
   display: flex;
   min-width: 0;
+  min-height: 0;
   flex-direction: column;
+  overflow: hidden;
   background: #ffffff;
 }
 
@@ -343,6 +365,50 @@ button {
   width: 100% !important;
   max-width: none !important;
   margin: 0 !important;
+}
+
+.lake-file-card-active {
+  border-radius: 3px;
+  outline: 1px solid #8bbcff;
+  background: #e5f0ff !important;
+  color: #1677ff !important;
+}
+
+.lake-file-floating-toolbar {
+  position: fixed;
+  z-index: 1000;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d8dde3;
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 12px 30px rgb(28 35 43 / 12%);
+  color: #22272d;
+}
+
+.lake-file-floating-toolbar[hidden] {
+  display: none;
+}
+
+.lake-file-floating-toolbar__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 42px;
+  border: 0;
+  border-radius: 5px;
+  color: #252b31;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.lake-file-floating-toolbar__button:hover,
+.lake-file-floating-toolbar__button:focus-visible {
+  color: #1677ff;
+  background: #f4f8ff;
+  outline: none;
 }
 
 .empty-editor-state {
@@ -441,9 +507,8 @@ button {
 
 .settings-panel {
   display: flex;
-  width: min(420px, 100vw);
+  width: min(720px, 100vw);
   flex-direction: column;
-  gap: 14px;
   padding: 22px;
   border-left: 1px solid var(--line);
   background: #ffffff;
@@ -457,7 +522,52 @@ button {
   margin-bottom: 6px;
 }
 
-.settings-panel label {
+.settings-panel__body {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: 168px minmax(0, 1fr);
+  gap: 20px;
+}
+
+.settings-menu {
+  padding-top: 8px;
+  border-right: 1px solid var(--line);
+}
+
+.settings-menu__item {
+  display: inline-flex;
+  width: calc(100% - 14px);
+  height: 36px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: #2c3238;
+  background: transparent;
+  cursor: pointer;
+}
+
+.settings-menu__item.is-active,
+.settings-menu__item:hover {
+  color: var(--green-dark);
+  background: #eef7f2;
+}
+
+.settings-content {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-content h3 {
+  margin: 8px 0 0;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.settings-content label {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -466,7 +576,7 @@ button {
   font-weight: 600;
 }
 
-.settings-panel input {
+.settings-content input {
   width: 100%;
   height: 38px;
   padding: 0 10px;
@@ -475,7 +585,7 @@ button {
   outline: none;
 }
 
-.settings-panel input:focus {
+.settings-content input:focus {
   border-color: var(--green);
 }
 
@@ -548,5 +658,15 @@ button {
   .lake-editor-root,
   .empty-editor-state {
     padding: 32px 20px;
+  }
+
+  .settings-panel__body {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-menu {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 0 0 10px;
   }
 }

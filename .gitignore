@@ -1,6 +1,7 @@
 node_modules/
 dist/
 src-tauri/target/
+src-tauri/dev-data/
 src-tauri/gen/schemas/
 public/vendor/lakex-doc/doc.global.js
 *.log

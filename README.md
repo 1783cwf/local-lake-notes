@@ -60,11 +60,21 @@ Yuque Lake Notes 是一个基于 Tauri 的本地笔记应用原型，目标是�
 - 目录和文档排序
 - OSS 设置
 
-macOS 下 SQLite 文件通常位于：
+开发环境固定使用仓库内的 SQLite 文件，方便反复调试时复用同一份应用数据：
+
+```text
+src-tauri/dev-data/yuque-lake-notes.sqlite3
+```
+
+该目录已加入 `.gitignore`，不会被提交。
+
+打包后的应用使用 Tauri 的应用本地数据目录，数据跟随应用标识保存。macOS 下通常位于：
 
 ```text
 ~/Library/Application Support/com.weistuday.yuque.lake-notes/yuque-lake-notes.sqlite3
 ```
+
+说明：SQLite 不写入 `.app` 包体内部。macOS 应用包在安装、签名和升级时不适合承载可变数据，实际可写数据应放在应用数据目录中。
 
 旧版本产生的 `workspace.json`、`oss-settings.json`、`.yuque-lake-notes/order.json` 会在读取时迁移到 SQLite。
 
@@ -112,6 +122,12 @@ http://127.0.0.1:1420
 ```
 
 说明：直接在浏览器打开 Vite 页面时会使用浏览器 fallback 存储；完整的文件系统、SQLite、OSS 上传能力需要在 Tauri 桌面窗口中验证。
+
+开发模式下反复运行 `npm run tauri dev` 会复用同一个数据库：
+
+```text
+src-tauri/dev-data/yuque-lake-notes.sqlite3
+```
 
 ## 本地验证流程
 
