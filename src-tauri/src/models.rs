@@ -48,6 +48,14 @@ pub struct CreateDocumentPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct MoveWorkspaceItemInput {
+    pub source_id: String,
+    pub target_parent_path: String,
+    pub order: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct OssSettings {
     pub endpoint: String,
     pub bucket: String,

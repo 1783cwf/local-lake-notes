@@ -6,8 +6,13 @@ import { DocumentSidebar } from "../components/DocumentSidebar";
 import { TopBar } from "../components/TopBar";
 import { LakeEditor } from "../features/lake-editor/LakeEditor";
 import { OssSettingsPanel } from "../features/settings/OssSettingsPanel";
-import type { WorkspaceDocument, WorkspacePayload } from "../features/workspace/workspaceStore";
-import { buildDocumentTree, flattenTreeOrder } from "../features/workspace/workspaceStore";
+import type {
+  WorkspaceDocument,
+  WorkspaceDropIntent,
+  WorkspaceMoveResolution,
+  WorkspacePayload,
+} from "../features/workspace/workspaceStore";
+import { applyWorkspaceMove, buildDocumentTree, resolveWorkspaceMove } from "../features/workspace/workspaceStore";
 import {
   chooseWorkspaceDirectory,
   createLakeDirectory,
@@ -16,13 +21,13 @@ import {
   deleteLakeDocument,
   getOssSettings,
   getRecentWorkspace,
+  moveWorkspaceItem,
   openExternalUrl,
   readLakeDocument,
   renameLakeDirectory,
   renameLakeDocument,
   renameWorkspace,
   saveOssSettings,
-  saveWorkspaceOrder,
   setWorkspaceRoot,
   uploadFile,
   uploadImage,
@@ -291,29 +296,46 @@ export function AppController() {
   const directories = useMemo(() => workspace?.directories ?? [], [workspace]);
   const order = useMemo(() => workspace?.order ?? [], [workspace]);
 
-  const moveNode = useCallback(async (
-    sourceId: string,
-    targetId: string,
-    _parentPath: string,
-    placement: "before" | "after",
-  ) => {
+  const moveNode = useCallback(async (sourceId: string, intent: WorkspaceDropIntent) => {
     if (!workspace) {
       return;
     }
 
-    const currentOrder = flattenTreeOrder(buildDocumentTree(workspace.documents, workspace.directories, workspace.order));
-    const nextOrder = currentOrder.filter((itemId) => itemId !== sourceId);
-    const targetIndex = nextOrder.indexOf(targetId);
-    const insertIndex = targetIndex >= 0 ? targetIndex + (placement === "after" ? 1 : 0) : nextOrder.length;
-    nextOrder.splice(insertIndex, 0, sourceId);
+    const move = resolveWorkspaceMove(
+      buildDocumentTree(workspace.documents, workspace.directories, workspace.order),
+      sourceId,
+      intent,
+    );
+    if (!move.ok) {
+      setAppError(move.reason);
+      return;
+    }
+    if (move.noop) {
+      return;
+    }
+
+    const previousWorkspace = workspace;
+    const previousCurrentDocument = currentDocument;
+    const optimisticWorkspace = applyWorkspaceMove(workspace, move);
+    setWorkspace(optimisticWorkspace);
+    setCurrentDocument(rebindCurrentDocument(currentDocument, optimisticWorkspace, move).document);
 
     try {
-      setWorkspace(await saveWorkspaceOrder(nextOrder));
-      setAppError(null);
+      const payload = await moveWorkspaceItem({
+        sourceId,
+        targetParentPath: move.targetParentPath,
+        order: move.order,
+      });
+      const currentBinding = rebindCurrentDocument(currentDocument, payload, move);
+      setWorkspace(payload);
+      setCurrentDocument(currentBinding.document);
+      setAppError(currentBinding.missing ? "移动后找不到当前文档，已关闭编辑区" : null);
     } catch (error) {
+      setWorkspace(previousWorkspace);
+      setCurrentDocument(previousCurrentDocument);
       setAppError(toMessage(error));
     }
-  }, [workspace]);
+  }, [currentDocument, workspace]);
 
   const beginSidebarResize = useCallback((event: PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -400,6 +422,38 @@ export function AppController() {
 
 function toMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function rebindCurrentDocument(
+  currentDocument: CurrentDocumentState | null,
+  workspace: WorkspacePayload,
+  move: WorkspaceMoveResolution,
+): { document: CurrentDocumentState | null; missing: boolean } {
+  if (!currentDocument || !move.ok) {
+    return { document: currentDocument, missing: false };
+  }
+
+  if (!isSameOrChildPath(currentDocument.entry.path, move.sourcePath)) {
+    const refreshedEntry = workspace.documents.find((entry) => entry.path === currentDocument.entry.path);
+    return {
+      document: refreshedEntry ? { ...currentDocument, entry: refreshedEntry } : currentDocument,
+      missing: false,
+    };
+  }
+
+  const nextPath = replacePathPrefix(currentDocument.entry.path, move.sourcePath, move.targetPath);
+  const nextEntry = workspace.documents.find((entry) => entry.path === nextPath);
+  return nextEntry
+    ? { document: { ...currentDocument, entry: nextEntry }, missing: false }
+    : { document: null, missing: true };
+}
+
+function replacePathPrefix(path: string, fromPath: string, toPath: string): string {
+  return isSameOrChildPath(path, fromPath) ? `${toPath}${path.slice(fromPath.length)}` : path;
+}
+
+function isSameOrChildPath(path: string, basePath: string): boolean {
+  return path === basePath || path.startsWith(`${basePath}/`);
 }
 
 function PaneResizer({

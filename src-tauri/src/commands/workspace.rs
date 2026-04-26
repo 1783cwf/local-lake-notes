@@ -6,12 +6,14 @@ use tauri::{AppHandle, State};
 use walkdir::WalkDir;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{WorkspaceDirectory, WorkspaceDocument, WorkspacePayload};
+use crate::models::{
+    MoveWorkspaceItemInput, WorkspaceDirectory, WorkspaceDocument, WorkspacePayload,
+};
 use crate::state::AppState;
 use crate::storage::app_database::{
     load_recent_workspace_root, move_workspace_order, prune_workspace_order_path,
-    push_workspace_order_item, read_workspace_order, rewrite_workspace_order_path,
-    save_recent_workspace_root, set_workspace_order,
+    push_workspace_order_item, read_workspace_order, rewrite_workspace_order_items,
+    rewrite_workspace_order_path, save_recent_workspace_root, set_workspace_order,
 };
 
 #[tauri::command]
@@ -149,6 +151,99 @@ pub fn save_workspace_order(
     let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
     set_workspace_order(&app, &root, &order)?;
     workspace_payload_for_app(&app, &root)
+}
+
+#[tauri::command]
+pub fn move_workspace_item(
+    input: MoveWorkspaceItemInput,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<WorkspacePayload> {
+    let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
+    let moved_item = move_workspace_item_on_disk(&root, &input)?;
+    let order = rewrite_workspace_order_items(
+        &input.order,
+        &moved_item.source_path,
+        &moved_item.target_path,
+    );
+
+    if let Err(error) = set_workspace_order(&app, &root, &order) {
+        if moved_item.source_path != moved_item.target_path {
+            let _ = fs::rename(
+                root.join(&moved_item.target_path),
+                root.join(&moved_item.source_path),
+            );
+        }
+        return Err(error);
+    }
+
+    workspace_payload_for_app(&app, &root)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct WorkspaceItemMove {
+    pub source_path: String,
+    pub target_path: String,
+}
+
+pub fn move_workspace_item_on_disk(
+    root: &Path,
+    input: &MoveWorkspaceItemInput,
+) -> AppResult<WorkspaceItemMove> {
+    let (kind, source_path) = parse_workspace_item_id(&input.source_id)?;
+    let target_parent_path = input.target_parent_path.trim_matches('/').to_string();
+    if kind == WorkspaceItemKind::Folder && is_same_or_child_path(&target_parent_path, &source_path)
+    {
+        return Err(AppError::InvalidWorkspaceMove(
+            "不能把目录移动到自身或子目录内".to_string(),
+        ));
+    }
+
+    let current_path = match kind {
+        WorkspaceItemKind::Document => resolve_existing_lake_path(root, &source_path),
+        WorkspaceItemKind::Folder => resolve_existing_directory_path(root, &source_path),
+    }
+    .map_err(|_| AppError::WorkspaceItemNotFound(input.source_id.clone()))?;
+    let target_parent = resolve_existing_directory_path(root, &target_parent_path)?;
+    let source_name = Path::new(&source_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or(AppError::InvalidFilename)?;
+    let target_path = child_relative_path(&target_parent_path, source_name);
+
+    if target_path != source_path {
+        let full_target_path = target_parent.join(source_name);
+        if full_target_path.exists() {
+            return Err(AppError::WorkspaceItemConflict(target_path));
+        }
+        fs::rename(current_path, full_target_path)?;
+    }
+
+    Ok(WorkspaceItemMove {
+        source_path,
+        target_path,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorkspaceItemKind {
+    Folder,
+    Document,
+}
+
+fn parse_workspace_item_id(item_id: &str) -> AppResult<(WorkspaceItemKind, String)> {
+    let Some((kind, path)) = item_id.split_once(':') else {
+        return Err(AppError::InvalidWorkspaceMove("缺少移动源类型".to_string()));
+    };
+    if path.trim().is_empty() {
+        return Err(AppError::InvalidWorkspaceMove("缺少移动源路径".to_string()));
+    }
+
+    match kind {
+        "folder" => Ok((WorkspaceItemKind::Folder, path.to_string())),
+        "document" => Ok((WorkspaceItemKind::Document, path.to_string())),
+        _ => Err(AppError::InvalidWorkspaceMove("未知移动源类型".to_string())),
+    }
 }
 
 pub fn normalize_workspace_root(path: impl AsRef<Path>) -> AppResult<PathBuf> {
@@ -409,4 +504,8 @@ fn replace_directory_name(relative_path: &str, directory_name: &str) -> String {
         .rsplit_once('/')
         .map(|(parent, _)| format!("{parent}/{directory_name}"))
         .unwrap_or_else(|| directory_name.to_string())
+}
+
+fn is_same_or_child_path(path: &str, base_path: &str) -> bool {
+    path == base_path || path.starts_with(&format!("{base_path}/"))
 }

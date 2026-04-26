@@ -105,10 +105,8 @@ pub fn rewrite_workspace_order_path(
     to_path: &str,
 ) -> AppResult<()> {
     let path = database_path(app)?;
-    let order = read_workspace_order_at(&path, root)?
-        .into_iter()
-        .map(|item_id| replace_order_item_path(&item_id, from_path, to_path))
-        .collect::<Vec<_>>();
+    let order =
+        rewrite_workspace_order_items(&read_workspace_order_at(&path, root)?, from_path, to_path);
     set_workspace_order_at(&path, root, &order)?;
     remove_legacy_workspace_order(root)
 }
@@ -190,11 +188,23 @@ pub fn rewrite_workspace_order_path_at(
     from_path: &str,
     to_path: &str,
 ) -> AppResult<()> {
-    let order = read_workspace_order_at(database_path, root)?
-        .into_iter()
-        .map(|item_id| replace_order_item_path(&item_id, from_path, to_path))
-        .collect::<Vec<_>>();
+    let order = rewrite_workspace_order_items(
+        &read_workspace_order_at(database_path, root)?,
+        from_path,
+        to_path,
+    );
     set_workspace_order_at(database_path, root, &order)
+}
+
+pub fn rewrite_workspace_order_items(
+    order: &[String],
+    from_path: &str,
+    to_path: &str,
+) -> Vec<String> {
+    order
+        .iter()
+        .map(|item_id| replace_order_item_path(item_id, from_path, to_path))
+        .collect()
 }
 
 pub fn prune_workspace_order_path_at(

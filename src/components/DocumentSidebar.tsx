@@ -1,4 +1,25 @@
 import {
+  closestCenter,
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragMoveEvent,
+  type DragOverEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
   ChevronDown,
   ChevronRight,
   FilePlus,
@@ -9,14 +30,20 @@ import {
   Pencil,
   Trash2,
 } from "lucide-react";
-import type { DragEvent, ReactNode } from "react";
+import { useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import type {
-  DocumentTreeNode,
+  FlatDocumentTreeNode,
   WorkspaceDirectory,
   WorkspaceDocument,
+  WorkspaceDropIntent,
+  WorkspaceMoveResolution,
 } from "../features/workspace/workspaceStore";
-import { buildDocumentTree } from "../features/workspace/workspaceStore";
+import {
+  buildDocumentTree,
+  flattenDocumentTree,
+  resolveWorkspaceMove,
+} from "../features/workspace/workspaceStore";
 
 interface DocumentSidebarProps {
   workspaceRoot: string | null;
@@ -32,8 +59,10 @@ interface DocumentSidebarProps {
   onDeleteDocument: (document: WorkspaceDocument) => void;
   onRenameDirectory: (directory: WorkspaceDirectory) => void;
   onDeleteDirectory: (directory: WorkspaceDirectory) => void;
-  onMoveNode: (sourceId: string, targetId: string, parentPath: string, placement: "before" | "after") => void;
+  onMoveNode: (sourceId: string, intent: WorkspaceDropIntent) => void;
 }
+
+const rootDropId = "__workspace-root-end__";
 
 export function DocumentSidebar({
   workspaceRoot,
@@ -51,7 +80,52 @@ export function DocumentSidebar({
   onDeleteDirectory,
   onMoveNode,
 }: DocumentSidebarProps) {
-  const tree = buildDocumentTree(documents, directories, order);
+  const tree = useMemo(() => buildDocumentTree(documents, directories, order), [directories, documents, order]);
+  const flatNodes = useMemo(() => flattenDocumentTree(tree), [tree]);
+  const itemIds = useMemo(() => flatNodes.map((node) => node.itemId), [flatNodes]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [dropState, setDropState] = useState<{
+    intent: WorkspaceDropIntent;
+    resolution: WorkspaceMoveResolution;
+  } | null>(null);
+  const activeNode = activeId ? flatNodes.find((node) => node.itemId === activeId) ?? null : null;
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 4 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+
+  const updateDropIntent = (event: DragMoveEvent | DragOverEvent) => {
+    const sourceId = String(event.active.id);
+    const intent = resolvePointerIntent(flatNodes, String(event.over?.id ?? ""), pointerY(event));
+    const resolution = intent ? resolveWorkspaceMove(tree, sourceId, intent) : null;
+    setDropState(intent && resolution ? { intent, resolution } : null);
+  };
+
+  const onDragStart = (event: DragStartEvent) => {
+    setActiveId(String(event.active.id));
+  };
+  const onDragMove = (event: DragMoveEvent) => updateDropIntent(event);
+  const onDragOver = (event: DragOverEvent) => updateDropIntent(event);
+  const onDragEnd = (event: DragEndEvent) => {
+    const sourceId = String(event.active.id);
+    const intent = dropState?.intent ?? resolvePointerIntent(flatNodes, String(event.over?.id ?? ""), pointerY(event));
+    const resolution = intent ? resolveWorkspaceMove(tree, sourceId, intent) : null;
+
+    setActiveId(null);
+    setDropState(null);
+
+    if (intent && resolution?.ok && !resolution.noop) {
+      onMoveNode(sourceId, intent);
+    }
+  };
+  const onDragCancel = () => {
+    setActiveId(null);
+    setDropState(null);
+  };
 
   return (
     <aside className="document-sidebar">
@@ -75,24 +149,41 @@ export function DocumentSidebar({
 
       <div className="sidebar-section">
         <div className="sidebar-section__title">目录</div>
-        {tree.length > 0 ? (
-          <div className="document-tree" role="tree">
-            {tree.map((node) => (
-              <TreeNode
-                key={node.id}
-                node={node}
-                currentPath={currentPath}
-                onOpenDocument={onOpenDocument}
-                onCreateDocument={onCreateDocument}
-                onCreateDirectory={onCreateDirectory}
-                onRenameDocument={onRenameDocument}
-                onDeleteDocument={onDeleteDocument}
-                onRenameDirectory={onRenameDirectory}
-                onDeleteDirectory={onDeleteDirectory}
-                onMoveNode={onMoveNode}
-              />
-            ))}
-          </div>
+        {flatNodes.length > 0 ? (
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragStart={onDragStart}
+            onDragMove={onDragMove}
+            onDragOver={onDragOver}
+            onDragEnd={onDragEnd}
+            onDragCancel={onDragCancel}
+          >
+            <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
+              <div className="document-tree" role="tree">
+                {flatNodes.map((node) => (
+                  <SortableTreeRow
+                    key={node.itemId}
+                    node={node}
+                    activeId={activeId}
+                    currentPath={currentPath}
+                    dropState={dropState}
+                    onOpenDocument={onOpenDocument}
+                    onCreateDocument={onCreateDocument}
+                    onCreateDirectory={onCreateDirectory}
+                    onRenameDocument={onRenameDocument}
+                    onDeleteDocument={onDeleteDocument}
+                    onRenameDirectory={onRenameDirectory}
+                    onDeleteDirectory={onDeleteDirectory}
+                  />
+                ))}
+                <RootDropZone active={Boolean(activeId)} dropState={dropState} />
+              </div>
+            </SortableContext>
+            <DragOverlay>
+              {activeNode ? <TreeRowOverlay node={activeNode} /> : null}
+            </DragOverlay>
+          </DndContext>
         ) : (
           <div className="empty-sidebar-state">
             <p>{workspaceRoot ? "还没有 Lake 文档" : "选择目录后显示文档"}</p>
@@ -103,9 +194,11 @@ export function DocumentSidebar({
   );
 }
 
-function TreeNode({
+function SortableTreeRow({
   node,
+  activeId,
   currentPath,
+  dropState,
   onOpenDocument,
   onCreateDocument,
   onCreateDirectory,
@@ -113,10 +206,11 @@ function TreeNode({
   onDeleteDocument,
   onRenameDirectory,
   onDeleteDirectory,
-  onMoveNode,
 }: {
-  node: DocumentTreeNode;
+  node: FlatDocumentTreeNode;
+  activeId: string | null;
   currentPath: string | null;
+  dropState: { intent: WorkspaceDropIntent; resolution: WorkspaceMoveResolution } | null;
   onOpenDocument: (document: WorkspaceDocument) => void;
   onCreateDocument: (parentPath: string) => void;
   onCreateDirectory: (parentPath: string) => void;
@@ -124,31 +218,66 @@ function TreeNode({
   onDeleteDocument: (document: WorkspaceDocument) => void;
   onRenameDirectory: (directory: WorkspaceDirectory) => void;
   onDeleteDirectory: (directory: WorkspaceDirectory) => void;
-  onMoveNode: (sourceId: string, targetId: string, parentPath: string, placement: "before" | "after") => void;
 }) {
-  const onDragStart = (event: DragEvent<HTMLElement>) => {
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("application/json", JSON.stringify({ id: node.itemId, parentPath: node.parentPath }));
-    event.dataTransfer.setData("text/plain", node.itemId);
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: node.itemId });
+  const isDocument = node.type === "document";
+  const isCurrent = isDocument && currentPath === node.path;
+  const dropPlacement = dropState?.intent.targetId === node.itemId ? dropState.intent.placement : null;
+  const illegalDrop = dropPlacement && !dropState?.resolution.ok;
+  const className = [
+    "tree-row",
+    isDocument ? "tree-row--document" : "tree-row--folder",
+    isCurrent ? "is-current" : "",
+    isDragging ? "is-dragging" : "",
+    activeId && activeId !== node.itemId ? "is-drag-active" : "",
+    dropPlacement && dropState?.resolution.ok ? `is-drop-${dropPlacement}` : "",
+    illegalDrop ? "is-drop-forbidden" : "",
+  ].filter(Boolean).join(" ");
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    paddingLeft: `${10 + node.depth * 18}px`,
   };
-  const onDragOver = (event: DragEvent<HTMLElement>) => {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-  };
-  const onDrop = (event: DragEvent<HTMLElement>) => {
-    event.preventDefault();
-    const { id: sourceId, parentPath: sourceParentPath } = readDragPayload(event);
-    if (sourceId && sourceId !== node.itemId && sourceParentPath === node.parentPath) {
-      onMoveNode(sourceId, node.itemId, node.parentPath, dropPlacement(event));
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if ((event.key === "Enter" || event.key === " ") && node.document) {
+      event.preventDefault();
+      onOpenDocument(node.document);
     }
   };
 
-  if (node.type === "folder") {
-    return (
-      <div className="tree-folder" role="group">
-        <div className="tree-row tree-row--folder" draggable onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop}>
-          <GripVertical size={13} className="drag-handle" />
-          {node.children.length > 0 ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+  return (
+    <div
+      ref={setNodeRef}
+      className={className}
+      style={style}
+      data-tree-item-id={node.itemId}
+      data-testid={`tree-row-${node.itemId}`}
+      onClick={() => node.document && onOpenDocument(node.document)}
+      role="treeitem"
+      aria-level={node.depth + 1}
+      tabIndex={isDocument ? 0 : -1}
+      onKeyDown={onKeyDown}
+    >
+      <button
+        type="button"
+        className="tree-drag-handle"
+        aria-label={`拖拽${node.name}`}
+        {...attributes}
+        {...listeners}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <GripVertical size={13} />
+      </button>
+      {node.type === "folder" ? (
+        <>
+          {node.hasChildren ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           <Folder size={15} />
           <span>{node.name}</span>
           {node.directory ? (
@@ -159,54 +288,46 @@ function TreeNode({
               <RowButton label="删除目录" onClick={() => onDeleteDirectory(node.directory!)} icon={<Trash2 size={14} />} />
             </RowActions>
           ) : null}
-        </div>
-        <div className="tree-children">
-          {node.children.map((child) => (
-            <TreeNode
-              key={child.id}
-              node={child}
-              currentPath={currentPath}
-              onOpenDocument={onOpenDocument}
-              onCreateDocument={onCreateDocument}
-              onCreateDirectory={onCreateDirectory}
-              onRenameDocument={onRenameDocument}
-              onDeleteDocument={onDeleteDocument}
-              onRenameDirectory={onRenameDirectory}
-              onDeleteDirectory={onDeleteDirectory}
-              onMoveNode={onMoveNode}
-            />
-          ))}
-        </div>
-      </div>
-    );
-  }
+        </>
+      ) : (
+        <>
+          <FileText size={15} />
+          <span>{node.name}</span>
+          {node.document ? (
+            <RowActions>
+              <RowButton label="重命名文档" onClick={() => onRenameDocument(node.document!)} icon={<Pencil size={14} />} />
+              <RowButton label="删除文档" onClick={() => onDeleteDocument(node.document!)} icon={<Trash2 size={14} />} />
+            </RowActions>
+          ) : null}
+        </>
+      )}
+    </div>
+  );
+}
 
+function RootDropZone({
+  active,
+  dropState,
+}: {
+  active: boolean;
+  dropState: { intent: WorkspaceDropIntent; resolution: WorkspaceMoveResolution } | null;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: rootDropId });
+  const className = [
+    "tree-root-dropzone",
+    active ? "is-active" : "",
+    isOver && dropState?.intent.placement === "root-end" ? "is-over" : "",
+  ].filter(Boolean).join(" ");
+
+  return <div ref={setNodeRef} className={className} data-testid="tree-root-dropzone" />;
+}
+
+function TreeRowOverlay({ node }: { node: FlatDocumentTreeNode }) {
   return (
-    <div
-      className={`tree-row tree-row--document ${currentPath === node.path ? "is-current" : ""}`}
-      draggable
-      onDragStart={onDragStart}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-      onClick={() => node.document && onOpenDocument(node.document)}
-      role="treeitem"
-      tabIndex={0}
-      onKeyDown={(event) => {
-        if ((event.key === "Enter" || event.key === " ") && node.document) {
-          event.preventDefault();
-          onOpenDocument(node.document);
-        }
-      }}
-    >
+    <div className="tree-row tree-row--overlay">
       <GripVertical size={13} className="drag-handle" />
-      <FileText size={15} />
+      {node.type === "folder" ? <Folder size={15} /> : <FileText size={15} />}
       <span>{node.name}</span>
-      {node.document ? (
-        <RowActions>
-          <RowButton label="重命名文档" onClick={() => onRenameDocument(node.document!)} icon={<Pencil size={14} />} />
-          <RowButton label="删除文档" onClick={() => onDeleteDocument(node.document!)} icon={<Trash2 size={14} />} />
-        </RowActions>
-      ) : null}
     </div>
   );
 }
@@ -235,25 +356,55 @@ function RowButton({ label, icon, onClick }: { label: string; icon: ReactNode; o
   );
 }
 
+export function resolvePointerIntent(
+  flatNodes: FlatDocumentTreeNode[],
+  overId: string,
+  clientY: number | null,
+): WorkspaceDropIntent | null {
+  if (!overId) {
+    return null;
+  }
+  if (overId === rootDropId) {
+    return { placement: "root-end" };
+  }
+
+  const target = flatNodes.find((node) => node.itemId === overId);
+  if (!target) {
+    return null;
+  }
+
+  const targetElement = document.querySelector<HTMLElement>(`[data-tree-item-id="${escapeAttributeValue(overId)}"]`);
+  const rect = targetElement?.getBoundingClientRect();
+  if (!rect || clientY === null) {
+    return { placement: "after", targetId: overId };
+  }
+
+  const ratio = rect.height > 0 ? (clientY - rect.top) / rect.height : 0.5;
+  if (target.type === "folder") {
+    if (ratio < 0.25) {
+      return { placement: "before", targetId: overId };
+    }
+    if (ratio > 0.75) {
+      return { placement: "after", targetId: overId };
+    }
+    return { placement: "inside", targetId: overId };
+  }
+
+  return { placement: ratio > 0.5 ? "after" : "before", targetId: overId };
+}
+
+function pointerY(event: DragMoveEvent | DragOverEvent | DragEndEvent): number | null {
+  const activator = event.activatorEvent;
+  if (activator && "clientY" in activator && typeof activator.clientY === "number") {
+    return activator.clientY + event.delta.y;
+  }
+  return null;
+}
+
 function basename(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
-function readDragPayload(event: DragEvent<HTMLElement>): { id: string; parentPath: string } {
-  const json = event.dataTransfer.getData("application/json");
-  if (json) {
-    try {
-      return JSON.parse(json) as { id: string; parentPath: string };
-    } catch {
-      return { id: "", parentPath: "" };
-    }
-  }
-
-  return { id: event.dataTransfer.getData("text/plain"), parentPath: "" };
-}
-
-function dropPlacement(event: DragEvent<HTMLElement>): "before" | "after" {
-  const target = event.currentTarget;
-  const rect = target.getBoundingClientRect();
-  return event.clientY > rect.top + rect.height / 2 ? "after" : "before";
+function escapeAttributeValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
 }

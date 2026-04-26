@@ -1,83 +1,79 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import type { ComponentProps } from "react";
 
-import { DocumentSidebar } from "./DocumentSidebar";
+import { buildDocumentTree, flattenDocumentTree } from "../features/workspace/workspaceStore";
+import { DocumentSidebar, resolvePointerIntent } from "./DocumentSidebar";
+
+function renderSidebar(overrides: Partial<ComponentProps<typeof DocumentSidebar>> = {}) {
+  const props: ComponentProps<typeof DocumentSidebar> = {
+    workspaceRoot: "/tmp/kb",
+    currentPath: "notes/a.lake",
+    directories: [
+      {
+        id: "notes",
+        path: "notes",
+        name: "notes",
+        parentPath: "",
+      },
+    ],
+    order: [],
+    onCreateDocument: vi.fn(),
+    onCreateDirectory: vi.fn(),
+    onRenameWorkspace: vi.fn(),
+    onOpenDocument: vi.fn(),
+    onRenameDocument: vi.fn(),
+    onDeleteDocument: vi.fn(),
+    onRenameDirectory: vi.fn(),
+    onDeleteDirectory: vi.fn(),
+    onMoveNode: vi.fn(),
+    documents: [
+      {
+        id: "notes/a.lake",
+        path: "notes/a.lake",
+        name: "a",
+        parentPath: "notes",
+        size: 1,
+      },
+    ],
+    ...overrides,
+  };
+
+  return {
+    props,
+    ...render(<DocumentSidebar {...props} />),
+  };
+}
 
 test("展示目录树并高亮当前文档", () => {
-  render(
-    <DocumentSidebar
-      workspaceRoot="/tmp/kb"
-      currentPath="notes/a.lake"
-      directories={[
-        {
-          id: "notes",
-          path: "notes",
-          name: "notes",
-          parentPath: "",
-        },
-      ]}
-      order={[]}
-      onCreateDocument={vi.fn()}
-      onCreateDirectory={vi.fn()}
-      onRenameWorkspace={vi.fn()}
-      onOpenDocument={vi.fn()}
-      onRenameDocument={vi.fn()}
-      onDeleteDocument={vi.fn()}
-      onRenameDirectory={vi.fn()}
-      onDeleteDirectory={vi.fn()}
-      onMoveNode={vi.fn()}
-      documents={[
-        {
-          id: "notes/a.lake",
-          path: "notes/a.lake",
-          name: "a",
-          parentPath: "notes",
-          size: 1,
-        },
-      ]}
-    />,
-  );
+  renderSidebar();
 
   expect(screen.getByText("kb")).toBeInTheDocument();
   expect(screen.getByRole("treeitem", { name: /a/ })).toHaveClass("is-current");
 });
 
-test("按落点把拖拽节点插入目标后方", () => {
-  const onMoveNode = vi.fn();
+test("目录树拖拽不再依赖原生 draggable 属性", () => {
+  renderSidebar();
 
-  render(
-    <DocumentSidebar
-      workspaceRoot="/tmp/kb"
-      currentPath="a.lake"
-      directories={[{ id: "notes", path: "notes", name: "notes", parentPath: "" }]}
-      documents={[{ id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1 }]}
-      order={["document:a.lake", "folder:notes"]}
-      onCreateDocument={vi.fn()}
-      onCreateDirectory={vi.fn()}
-      onRenameWorkspace={vi.fn()}
-      onOpenDocument={vi.fn()}
-      onRenameDocument={vi.fn()}
-      onDeleteDocument={vi.fn()}
-      onRenameDirectory={vi.fn()}
-      onDeleteDirectory={vi.fn()}
-      onMoveNode={onMoveNode}
-    />,
-  );
+  expect(screen.getByRole("treeitem", { name: /a/ })).not.toHaveAttribute("draggable");
+  expect(screen.getByRole("button", { name: "拖拽a" })).toBeInTheDocument();
+});
 
-  const documentRow = screen.getByRole("treeitem", { name: /a/ });
-  const folderRow = screen.getByText("notes").closest(".tree-row") as HTMLElement;
-  const data = new Map<string, string>();
-  const dataTransfer = {
-    effectAllowed: "",
-    dropEffect: "",
-    setData: (type: string, value: string) => data.set(type, value),
-    getData: (type: string) => data.get(type) ?? "",
-  };
-
-  fireEvent.dragStart(documentRow, { dataTransfer });
+test("按指针位置计算 after 和 inside 落点意图", () => {
+  renderSidebar({
+    currentPath: "a.lake",
+    documents: [{ id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1 }],
+    order: ["document:a.lake", "folder:notes"],
+  });
+  const flatNodes = flattenDocumentTree(buildDocumentTree(
+    [{ id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1 }],
+    [{ id: "notes", path: "notes", name: "notes", parentPath: "" }],
+    ["document:a.lake", "folder:notes"],
+  ));
+  const folderRow = screen.getByTestId("tree-row-folder:notes");
   vi.spyOn(folderRow, "getBoundingClientRect").mockReturnValue({
     top: 100,
-    bottom: 138,
-    height: 38,
+    bottom: 140,
+    height: 40,
     left: 0,
     right: 300,
     width: 300,
@@ -85,10 +81,34 @@ test("按落点把拖拽节点插入目标后方", () => {
     y: 100,
     toJSON: () => undefined,
   });
-  const dropEvent = new Event("drop", { bubbles: true, cancelable: true });
-  Object.defineProperty(dropEvent, "clientY", { value: 132 });
-  Object.defineProperty(dropEvent, "dataTransfer", { value: dataTransfer });
-  fireEvent(folderRow, dropEvent);
 
-  expect(onMoveNode).toHaveBeenCalledWith("document:a.lake", "folder:notes", "", "after");
+  expect(resolvePointerIntent(flatNodes, "folder:notes", 132)).toEqual({
+    placement: "after",
+    targetId: "folder:notes",
+  });
+  expect(resolvePointerIntent(flatNodes, "folder:notes", 118)).toEqual({
+    placement: "inside",
+    targetId: "folder:notes",
+  });
+});
+
+test("根目录末尾落点生成 root-end intent", () => {
+  renderSidebar();
+
+  const flatNodes = flattenDocumentTree(buildDocumentTree([], []));
+
+  expect(resolvePointerIntent(flatNodes, "__workspace-root-end__", 200)).toEqual({
+    placement: "root-end",
+  });
+});
+
+test("点击行操作不会触发打开文档", () => {
+  const onOpenDocument = vi.fn();
+  const onDeleteDocument = vi.fn();
+  renderSidebar({ onOpenDocument, onDeleteDocument });
+
+  fireEvent.click(screen.getByRole("button", { name: "删除文档" }));
+
+  expect(onDeleteDocument).toHaveBeenCalledTimes(1);
+  expect(onOpenDocument).not.toHaveBeenCalled();
 });

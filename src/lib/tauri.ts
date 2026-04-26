@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type { OssSettings, UploadImageInput, UploadImageOutput } from "../app/appState";
 import type {
   CreateDocumentPayload,
+  MoveWorkspaceItemInput,
   WorkspaceDirectory,
   WorkspacePayload,
 } from "../features/workspace/workspaceStore";
@@ -174,6 +175,54 @@ export async function saveWorkspaceOrder(order: string[]): Promise<WorkspacePayl
   }
 
   return invoke<WorkspacePayload>("save_workspace_order", { order });
+}
+
+export async function moveWorkspaceItem(input: MoveWorkspaceItemInput): Promise<WorkspacePayload> {
+  if (!isTauriRuntime()) {
+    const workspace = await listLakeDocuments();
+    const movedItem = resolveBrowserMovedItem(workspace, input);
+    const payload: WorkspacePayload = {
+      ...workspace,
+      directories: workspace.directories.map((directory) => {
+        if (!isSameOrChildPath(directory.path, movedItem.sourcePath)) {
+          return directory;
+        }
+        const path = replacePathPrefix(directory.path, movedItem.sourcePath, movedItem.targetPath);
+        return {
+          ...directory,
+          id: path,
+          path,
+          parentPath: directory.path === movedItem.sourcePath
+            ? movedItem.targetParentPath
+            : replacePathPrefix(directory.parentPath, movedItem.sourcePath, movedItem.targetPath),
+        };
+      }),
+      documents: workspace.documents.map((document) => {
+        if (!isSameOrChildPath(document.path, movedItem.sourcePath)) {
+          return document;
+        }
+        const path = replacePathPrefix(document.path, movedItem.sourcePath, movedItem.targetPath);
+        if (document.path === movedItem.sourcePath) {
+          moveBrowserDocument(document.path, path);
+        } else if (movedItem.kind === "folder") {
+          moveBrowserDocument(document.path, path);
+        }
+        return {
+          ...document,
+          id: path,
+          path,
+          parentPath: document.path === movedItem.sourcePath
+            ? movedItem.targetParentPath
+            : replacePathPrefix(document.parentPath, movedItem.sourcePath, movedItem.targetPath),
+        };
+      }),
+      order: input.order.map((itemId) => replaceOrderedItemPath(itemId, movedItem.sourcePath, movedItem.targetPath)),
+    };
+    saveBrowserWorkspace(payload);
+    return payload;
+  }
+
+  return invoke<WorkspacePayload>("move_workspace_item", { input });
 }
 
 export async function createLakeDocument(title: string, parentPath = ""): Promise<CreateDocumentPayload> {
@@ -351,6 +400,65 @@ function normalizeBrowserWorkspace(workspace: Partial<WorkspacePayload>): Worksp
   };
 }
 
+function resolveBrowserMovedItem(
+  workspace: WorkspacePayload,
+  input: MoveWorkspaceItemInput,
+): {
+  kind: "folder" | "document";
+  sourcePath: string;
+  targetParentPath: string;
+  targetPath: string;
+} {
+  const [kind, sourcePath] = parseBrowserItemId(input.sourceId);
+  const targetParentPath = input.targetParentPath.trim().replace(/^\/+|\/+$/g, "");
+  if (kind === "folder" && isSameOrChildPath(targetParentPath, sourcePath)) {
+    throw new Error("不能把目录移动到自身或子目录内");
+  }
+
+  const sourceExists = kind === "folder"
+    ? workspace.directories.some((directory) => directory.path === sourcePath)
+    : workspace.documents.some((document) => document.path === sourcePath);
+  if (!sourceExists) {
+    throw new Error(`移动源不存在：${input.sourceId}`);
+  }
+
+  const targetParentExists = !targetParentPath ||
+    workspace.directories.some((directory) => directory.path === targetParentPath);
+  if (!targetParentExists) {
+    throw new Error(`拖拽目标不存在：${targetParentPath}`);
+  }
+
+  const targetPath = targetParentPath ? `${targetParentPath}/${pathBasename(sourcePath)}` : pathBasename(sourcePath);
+  if (targetPath !== sourcePath) {
+    const targetExists = kind === "folder"
+      ? workspace.directories.some((directory) => directory.path === targetPath)
+      : workspace.documents.some((document) => document.path === targetPath);
+    if (targetExists) {
+      throw new Error(`目标位置已存在同名项目：${targetPath}`);
+    }
+  }
+
+  return {
+    kind,
+    sourcePath,
+    targetParentPath,
+    targetPath,
+  };
+}
+
+function parseBrowserItemId(itemId: string): ["folder" | "document", string] {
+  const separatorIndex = itemId.indexOf(":");
+  const kind = itemId.slice(0, separatorIndex);
+  const path = itemId.slice(separatorIndex + 1);
+  if (separatorIndex < 0 || !path) {
+    throw new Error("无效的移动源");
+  }
+  if (kind !== "folder" && kind !== "document") {
+    throw new Error("无效的移动源类型");
+  }
+  return [kind, path];
+}
+
 function moveBrowserDocument(fromPath: string, toPath: string): void {
   const content = window.localStorage.getItem(browserDocumentKey(fromPath));
   if (content !== null) {
@@ -368,6 +476,10 @@ function replacePathPrefix(path: string, fromPath: string, toPath: string): stri
     return "";
   }
   return isSameOrChildPath(path, fromPath) ? `${toPath}${path.slice(fromPath.length)}` : path;
+}
+
+function pathBasename(path: string): string {
+  return path.split("/").filter(Boolean).pop() ?? path;
 }
 
 function replaceOrderedItemPath(itemId: string, fromPath: string, toPath: string): string {

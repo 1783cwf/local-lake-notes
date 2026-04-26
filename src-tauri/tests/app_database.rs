@@ -2,8 +2,8 @@ use tempfile::tempdir;
 use yuque_lake_notes_lib::models::OssSettings;
 use yuque_lake_notes_lib::storage::app_database::{
     load_oss_settings_at, load_recent_workspace_root_at, prune_workspace_order_path_at,
-    read_workspace_order_at, rewrite_workspace_order_path_at, save_oss_settings_at,
-    set_recent_workspace_root_at, set_workspace_order_at,
+    read_workspace_order_at, rewrite_workspace_order_items, rewrite_workspace_order_path_at,
+    save_oss_settings_at, set_recent_workspace_root_at, set_workspace_order_at,
 };
 
 fn valid_settings() -> OssSettings {
@@ -60,4 +60,24 @@ fn stores_and_rewrites_workspace_order_in_sqlite() {
     assert!(read_workspace_order_at(&database, &workspace)
         .unwrap()
         .is_empty());
+}
+
+#[test]
+fn rewrites_directory_subtree_order_items() {
+    let order = vec![
+        "folder:notes".to_string(),
+        "folder:notes/deep".to_string(),
+        "document:notes/deep/a.lake".to_string(),
+        "document:other.lake".to_string(),
+    ];
+
+    assert_eq!(
+        rewrite_workspace_order_items(&order, "notes", "archive/notes"),
+        vec![
+            "folder:archive/notes",
+            "folder:archive/notes/deep",
+            "document:archive/notes/deep/a.lake",
+            "document:other.lake",
+        ]
+    );
 }

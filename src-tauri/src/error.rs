@@ -11,6 +11,12 @@ pub enum AppError {
     InvalidLakePath,
     #[error("无效的文件名")]
     InvalidFilename,
+    #[error("无效的拖拽目标：{0}")]
+    InvalidWorkspaceMove(String),
+    #[error("移动源不存在：{0}")]
+    WorkspaceItemNotFound(String),
+    #[error("目标位置已存在同名项目：{0}")]
+    WorkspaceItemConflict(String),
     #[error("无效的外部链接")]
     InvalidExternalUrl,
     #[error("OSS 设置不完整：{0}")]
