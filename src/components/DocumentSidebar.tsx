@@ -29,11 +29,14 @@ import {
   FolderPlus,
   GripVertical,
   Pencil,
+  Search,
   Trash2,
+  X,
 } from "lucide-react";
 import { useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import type {
+  DocumentTreeNode,
   FlatDocumentTreeNode,
   WorkspaceDirectory,
   WorkspaceDocument,
@@ -62,6 +65,7 @@ interface DocumentSidebarProps {
   onRenameDirectory: (directory: WorkspaceDirectory) => void;
   onDeleteDirectory: (directory: WorkspaceDirectory) => void;
   onMoveNode: (sourceId: string, intent: WorkspaceDropIntent) => void;
+  collapsed?: boolean;
 }
 
 const rootDropId = "__workspace-root-end__";
@@ -82,11 +86,21 @@ export function DocumentSidebar({
   onRenameDirectory,
   onDeleteDirectory,
   onMoveNode,
+  collapsed = false,
 }: DocumentSidebarProps) {
   const tree = useMemo(() => buildDocumentTree(documents, directories, order), [directories, documents, order]);
   const flatNodes = useMemo(() => flattenDocumentTree(tree), [tree]);
   const [collapsedFolderIds, setCollapsedFolderIds] = useState<Set<string>>(() => new Set());
-  const visibleNodes = useMemo(() => flattenVisibleDocumentTree(tree, collapsedFolderIds), [collapsedFolderIds, tree]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const normalizedSearchQuery = useMemo(() => normalizeSearchQuery(searchQuery), [searchQuery]);
+  const searchTree = useMemo(
+    () => (normalizedSearchQuery ? filterDocumentTreeByName(tree, normalizedSearchQuery) : tree),
+    [normalizedSearchQuery, tree],
+  );
+  const visibleNodes = useMemo(
+    () => (normalizedSearchQuery ? flattenDocumentTree(searchTree) : flattenVisibleDocumentTree(tree, collapsedFolderIds)),
+    [collapsedFolderIds, normalizedSearchQuery, searchTree, tree],
+  );
   const itemIds = useMemo(() => visibleNodes.map((node) => node.itemId), [visibleNodes]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [dropState, setDropState] = useState<{
@@ -157,7 +171,7 @@ export function DocumentSidebar({
   };
 
   return (
-    <aside className="document-sidebar">
+    <aside className={`document-sidebar${collapsed ? " is-collapsed" : ""}`} aria-hidden={collapsed || undefined}>
       <div className="document-sidebar__header">
         <div>
           <p className="eyebrow">知识库</p>
@@ -181,6 +195,22 @@ export function DocumentSidebar({
 
       <div className="sidebar-section">
         <div className="sidebar-section__title">目录</div>
+        <label className={`sidebar-search${!workspaceRoot || documents.length === 0 ? " is-disabled" : ""}`}>
+          <Search size={14} />
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="搜索文档"
+            aria-label="搜索文档"
+            disabled={!workspaceRoot || documents.length === 0}
+          />
+          {searchQuery ? (
+            <button type="button" aria-label="清空搜索" onClick={() => setSearchQuery("")}>
+              <X size={14} />
+            </button>
+          ) : null}
+        </label>
         {visibleNodes.length > 0 ? (
           <DndContext
             sensors={sensors}
@@ -197,7 +227,7 @@ export function DocumentSidebar({
                   <SortableTreeRow
                     key={node.itemId}
                     node={node}
-                    expanded={!collapsedFolderIds.has(node.itemId)}
+                    expanded={Boolean(normalizedSearchQuery) || !collapsedFolderIds.has(node.itemId)}
                     activeId={activeId}
                     currentPath={currentPath}
                     dropState={dropState}
@@ -220,7 +250,7 @@ export function DocumentSidebar({
           </DndContext>
         ) : (
           <div className="empty-sidebar-state">
-            <p>{workspaceRoot ? "还没有 Lake 文档" : "选择目录后显示文档"}</p>
+            <p>{normalizedSearchQuery ? "没有匹配的文档" : workspaceRoot ? "还没有 Lake 文档" : "选择目录后显示文档"}</p>
           </div>
         )}
       </div>
@@ -468,6 +498,21 @@ function pointerY(event: DragMoveEvent | DragOverEvent | DragEndEvent): number |
 
 function basename(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
+
+function normalizeSearchQuery(value: string): string {
+  return value.trim().toLocaleLowerCase();
+}
+
+function filterDocumentTreeByName(nodes: DocumentTreeNode[], query: string): DocumentTreeNode[] {
+  return nodes.flatMap((node) => {
+    if (node.type === "document") {
+      return normalizeSearchQuery(node.name).includes(query) ? [{ ...node, children: [] }] : [];
+    }
+
+    const children = filterDocumentTreeByName(node.children, query);
+    return children.length > 0 ? [{ ...node, children }] : [];
+  });
 }
 
 function flattenVisibleDocumentTree(

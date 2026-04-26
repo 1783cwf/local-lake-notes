@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 
 import { buildDocumentTree, flattenDocumentTree } from "../features/workspace/workspaceStore";
@@ -71,6 +72,53 @@ test("目录支持展开和收起", () => {
 
   expect(screen.getByRole("treeitem", { name: /a/ })).toBeInTheDocument();
   expect(screen.getByRole("treeitem", { name: /notes/ })).toHaveAttribute("aria-expanded", "true");
+});
+
+test("可以按文档名称搜索文档", async () => {
+  const user = userEvent.setup();
+  renderSidebar({
+    currentPath: "notes/product.lake",
+    directories: [
+      {
+        id: "notes",
+        path: "notes",
+        name: "notes",
+        parentPath: "",
+      },
+      {
+        id: "meeting",
+        path: "meeting",
+        name: "meeting",
+        parentPath: "",
+      },
+    ],
+    documents: [
+      {
+        id: "notes/product.lake",
+        path: "notes/product.lake",
+        name: "产品方案",
+        parentPath: "notes",
+        size: 1,
+      },
+      {
+        id: "meeting/record.lake",
+        path: "meeting/record.lake",
+        name: "会议记录",
+        parentPath: "meeting",
+        size: 1,
+      },
+    ],
+  });
+
+  await user.type(screen.getByRole("searchbox", { name: "搜索文档" }), "会议");
+
+  expect(screen.getByRole("treeitem", { name: /会议记录/ })).toBeInTheDocument();
+  expect(screen.getByRole("treeitem", { name: /meeting/ })).toBeInTheDocument();
+  expect(screen.queryByRole("treeitem", { name: /产品方案/ })).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "清空搜索" }));
+
+  expect(screen.getByRole("treeitem", { name: /产品方案/ })).toBeInTheDocument();
 });
 
 test("按指针位置计算 after 和 inside 落点意图", () => {

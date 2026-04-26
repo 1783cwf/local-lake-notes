@@ -1,5 +1,6 @@
 import type { FormEvent, PointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { AppRail } from "../components/AppRail";
 import { DocumentSidebar } from "../components/DocumentSidebar";
@@ -79,10 +80,23 @@ export function AppController() {
   const [ossSettings, setOssSettings] = useState<OssSettings | null>(null);
   const [appError, setAppError] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(296);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [textDialog, setTextDialog] = useState<TextDialogState | null>(null);
 
   useEffect(() => {
     void boot();
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey && event.altKey && event.key === ",") {
+        event.preventDefault();
+        setSidebarCollapsed((current) => !current);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
   const boot = async () => {
@@ -433,6 +447,9 @@ export function AppController() {
   }, [currentDocument, workspace]);
 
   const beginSidebarResize = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    if (sidebarCollapsed) {
+      return;
+    }
     event.preventDefault();
     const startX = event.clientX;
     const startWidth = sidebarWidth;
@@ -448,13 +465,13 @@ export function AppController() {
 
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
-  }, [sidebarWidth]);
+  }, [sidebarCollapsed, sidebarWidth]);
 
   return (
     <div
-      className="app-shell"
+      className={`app-shell${sidebarCollapsed ? " is-sidebar-collapsed" : ""}`}
       style={{
-        gridTemplateColumns: `var(--rail-width) ${sidebarWidth}px 8px minmax(0, 1fr)`,
+        gridTemplateColumns: `var(--rail-width) ${sidebarCollapsed ? 0 : sidebarWidth}px 12px minmax(0, 1fr)`,
       }}
     >
       <AppRail
@@ -467,6 +484,7 @@ export function AppController() {
         directories={directories}
         documents={documents}
         order={order}
+        collapsed={sidebarCollapsed}
         currentPath={currentPath}
         onOpenDocument={openDocument}
         onCreateDocument={createDocument}
@@ -479,7 +497,12 @@ export function AppController() {
         onDeleteDirectory={deleteDirectory}
         onMoveNode={moveNode}
       />
-      <PaneResizer label="调整目录宽度" onPointerDown={beginSidebarResize} />
+      <PaneResizer
+        collapsed={sidebarCollapsed}
+        label="调整目录宽度"
+        onPointerDown={beginSidebarResize}
+        onToggleCollapsed={() => setSidebarCollapsed((current) => !current)}
+      />
       <main className="editor-workspace">
         <TopBar
           document={currentDocument?.entry ?? null}
@@ -556,20 +579,42 @@ function isSameOrChildPath(path: string, basePath: string): boolean {
 }
 
 function PaneResizer({
+  collapsed,
   label,
   onPointerDown,
+  onToggleCollapsed,
 }: {
+  collapsed: boolean;
   label: string;
   onPointerDown: (event: PointerEvent<HTMLDivElement>) => void;
+  onToggleCollapsed: () => void;
 }) {
   return (
     <div
-      className="pane-resizer"
-      role="separator"
-      aria-label={label}
-      tabIndex={0}
-      onPointerDown={onPointerDown}
-    />
+      className={`pane-resizer${collapsed ? " is-collapsed" : ""}`}
+    >
+      <div
+        className="pane-resizer__drag-surface"
+        role="separator"
+        aria-label={label}
+        aria-orientation="vertical"
+        tabIndex={collapsed ? -1 : 0}
+        onPointerDown={onPointerDown}
+      />
+      <button
+        type="button"
+        className="pane-resizer__toggle"
+        title={collapsed ? "展开目录侧栏 (⌘+Option+,)" : "收起目录侧栏 (⌘+Option+,)"}
+        aria-label={collapsed ? "展开目录侧栏" : "收起目录侧栏"}
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggleCollapsed();
+        }}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+      </button>
+    </div>
   );
 }
 

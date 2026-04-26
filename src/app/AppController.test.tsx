@@ -245,6 +245,22 @@ test("删除当前新建文档后仍可打开已有文档", async () => {
   });
 });
 
+test("可以收起并展开目录侧栏", async () => {
+  const user = userEvent.setup();
+  const { container } = render(<AppController />);
+  const shell = container.querySelector(".app-shell");
+
+  await user.click(screen.getByRole("button", { name: "收起目录侧栏" }));
+
+  expect(shell).toHaveAttribute("style", expect.stringContaining("0px 12px"));
+  expect(screen.getByRole("button", { name: "展开目录侧栏" })).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "展开目录侧栏" }));
+
+  expect(shell).toHaveAttribute("style", expect.stringContaining("296px 12px"));
+  expect(screen.getByRole("button", { name: "收起目录侧栏" })).toBeInTheDocument();
+});
+
 test("可以导出整个知识库 Markdown ZIP", async () => {
   const user = userEvent.setup();
   const editor = {
