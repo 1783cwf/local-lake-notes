@@ -1,0 +1,213 @@
+# Yuque Lake Notes
+
+Yuque Lake Notes 是一个基于 Tauri 的本地笔记应用原型，目标是在桌面端直接使用语雀 Lake 编辑器编辑 `.lake` 文档。当前版本以 Lake 原生格式为主，文档文件保存在用户选择的知识库目录中，应用配置、排序和 OSS 设置等非文档数据保存在 SQLite 中。
+
+## 当前能力
+
+- 选择本地目录作为知识库。
+- 新建 `.lake` 文档，并使用语雀 Lake 编辑器编辑和保存。
+- 支持知识库、目录、文档的层级展示。
+- 支持目录和文档重命名、删除、同级拖拽排序。
+- 使用 Lake 编辑器内置大纲能力。
+- 支持目录栏拖拽调整宽度，编辑区占满剩余空间。
+- 支持图片上传到兼容 S3 协议的 OSS。
+- 应用数据使用 SQLite 存储，为后续 WebDAV 备份设置预留扩展空间。
+
+## 技术栈
+
+- 桌面壳：Tauri 2
+- 前端：React 18、TypeScript、Vite
+- 后端：Rust
+- 本地数据库：SQLite，使用 `rusqlite`
+- 编辑器：语雀 Lake 编辑器静态资源，位于 `public/vendor/lakex-doc`
+- 对象存储：AWS S3 SDK，兼容 S3 协议的 OSS
+
+## 目录结构
+
+```text
+.
+├── public/vendor/lakex-doc        # 语雀 Lake 编辑器资源
+├── src                            # React 前端
+│   ├── app                        # 应用控制器和状态类型
+│   ├── components                 # 主界面组件
+│   ├── features/lake-editor       # Lake 编辑器适配、上传、自动保存
+│   ├── features/settings          # OSS 设置
+│   ├── features/workspace         # 知识库文档树模型
+│   └── lib/tauri.ts               # 前端 Tauri 调用封装
+├── src-tauri                      # Tauri/Rust 后端
+│   ├── src/commands               # Tauri 命令
+│   ├── src/storage                # SQLite 和 S3 存储实现
+│   └── tests                      # Rust 集成测试
+├── docs                           # 需求和计划文档
+└── yuque-developer-docs.md        # 语雀开发者文档整理稿
+```
+
+## 数据存储
+
+`.lake` 文档保存在用户选择的知识库目录中，例如：
+
+```text
+/Users/you/Notes/
+├── 工作/
+│   └── 需求分析.lake
+└── 个人/
+    └── 读书笔记.lake
+```
+
+应用自身数据保存在 SQLite 中，不再写入知识库目录：
+
+- 最近打开的知识库路径
+- 目录和文档排序
+- OSS 设置
+
+macOS 下 SQLite 文件通常位于：
+
+```text
+~/Library/Application Support/com.weistuday.yuque.lake-notes/yuque-lake-notes.sqlite3
+```
+
+旧版本产生的 `workspace.json`、`oss-settings.json`、`.yuque-lake-notes/order.json` 会在读取时迁移到 SQLite。
+
+## 环境要求
+
+- Node.js 20 或更高版本
+- npm
+- Rust stable
+- macOS 构建需要 Xcode Command Line Tools
+
+检查环境：
+
+```bash
+node -v
+npm -v
+rustc --version
+cargo --version
+```
+
+## 安装依赖
+
+```bash
+cd /Users/weifeng/code/OpenSource/yuque
+npm install
+```
+
+## 本地开发
+
+启动桌面应用开发模式：
+
+```bash
+npm run tauri dev
+```
+
+该命令会自动启动 Vite 开发服务：
+
+```bash
+npm run dev
+```
+
+默认前端地址：
+
+```text
+http://127.0.0.1:1420
+```
+
+说明：直接在浏览器打开 Vite 页面时会使用浏览器 fallback 存储；完整的文件系统、SQLite、OSS 上传能力需要在 Tauri 桌面窗口中验证。
+
+## 本地验证流程
+
+建议使用一个空目录验证，避免影响真实笔记：
+
+```bash
+mkdir -p /tmp/yuque-lake-test
+npm run tauri dev
+```
+
+在应用中验证：
+
+1. 选择 `/tmp/yuque-lake-test` 作为知识库。
+2. 新建目录和 `.lake` 文档。
+3. 编辑文档内容并观察自动保存状态。
+4. 新建多个标题，确认 Lake 编辑器内置大纲正常显示。
+5. 重命名目录、文档和知识库。
+6. 删除测试目录或测试文档。
+7. 拖拽同级目录或文档，确认排序保持。
+8. 拖动目录栏边界，确认目录宽度可调且编辑区占满剩余空间。
+9. 配置 OSS 后上传图片，确认图片 URL 被插入到文档中。
+
+## 测试
+
+前端测试：
+
+```bash
+npm run test:run
+```
+
+Rust 测试：
+
+```bash
+cd src-tauri
+cargo test
+```
+
+完整验证建议：
+
+```bash
+npm run build
+npm run test:run
+cd src-tauri && cargo test
+```
+
+## 构建前端
+
+```bash
+npm run build
+```
+
+该命令会执行 TypeScript 检查并生成 Vite 静态产物到 `dist/`。
+
+## 打包桌面应用
+
+```bash
+npm run tauri build
+```
+
+当前 Tauri 配置只生成 macOS `.app`，产物路径：
+
+```text
+src-tauri/target/release/bundle/macos/Yuque Lake Notes.app
+```
+
+打开构建产物：
+
+```bash
+open "src-tauri/target/release/bundle/macos/Yuque Lake Notes.app"
+```
+
+如需生成 `.dmg`，后续需要调整 `src-tauri/tauri.conf.json` 的 `bundle.targets`。
+
+## OSS 配置
+
+当前图片上传使用兼容 S3 协议的配置项：
+
+- endpoint
+- bucket
+- region
+- access key
+- secret key
+- public base URL
+- force path style
+- image prefix
+
+上传后的图片对象 key 会按年份和月份分目录保存，例如：
+
+```text
+images/2026/04/<uuid>.png
+```
+
+## 后续方向
+
+- 支持多知识库列表和知识库排序。
+- 支持 WebDAV 备份笔记和设置。
+- 补充 `.lake` 与 HTML/Markdown 的导入导出能力。
+- 增强拖拽能力，支持跨目录移动。
+- 增加更完整的打包格式，例如 `.dmg`。

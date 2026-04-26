@@ -32,7 +32,7 @@ interface DocumentSidebarProps {
   onDeleteDocument: (document: WorkspaceDocument) => void;
   onRenameDirectory: (directory: WorkspaceDirectory) => void;
   onDeleteDirectory: (directory: WorkspaceDirectory) => void;
-  onMoveNode: (sourceId: string, targetId: string, parentPath: string) => void;
+  onMoveNode: (sourceId: string, targetId: string, parentPath: string, placement: "before" | "after") => void;
 }
 
 export function DocumentSidebar({
@@ -124,11 +124,12 @@ function TreeNode({
   onDeleteDocument: (document: WorkspaceDocument) => void;
   onRenameDirectory: (directory: WorkspaceDirectory) => void;
   onDeleteDirectory: (directory: WorkspaceDirectory) => void;
-  onMoveNode: (sourceId: string, targetId: string, parentPath: string) => void;
+  onMoveNode: (sourceId: string, targetId: string, parentPath: string, placement: "before" | "after") => void;
 }) {
   const onDragStart = (event: DragEvent<HTMLElement>) => {
     event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", `${node.itemId}\n${node.parentPath}`);
+    event.dataTransfer.setData("application/json", JSON.stringify({ id: node.itemId, parentPath: node.parentPath }));
+    event.dataTransfer.setData("text/plain", node.itemId);
   };
   const onDragOver = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
@@ -136,9 +137,9 @@ function TreeNode({
   };
   const onDrop = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
-    const [sourceId, sourceParentPath] = event.dataTransfer.getData("text/plain").split("\n");
+    const { id: sourceId, parentPath: sourceParentPath } = readDragPayload(event);
     if (sourceId && sourceId !== node.itemId && sourceParentPath === node.parentPath) {
-      onMoveNode(sourceId, node.itemId, node.parentPath);
+      onMoveNode(sourceId, node.itemId, node.parentPath, dropPlacement(event));
     }
   };
 
@@ -211,14 +212,13 @@ function TreeNode({
 }
 
 function RowActions({ children }: { children: ReactNode }) {
-  return <span className="tree-row__actions">{children}</span>;
+  return <div className="tree-row__actions">{children}</div>;
 }
 
 function RowButton({ label, icon, onClick }: { label: string; icon: ReactNode; onClick: () => void }) {
   return (
-    <span
-      role="button"
-      tabIndex={0}
+    <button
+      type="button"
       className="tree-action-button"
       title={label}
       aria-label={label}
@@ -226,19 +226,34 @@ function RowButton({ label, icon, onClick }: { label: string; icon: ReactNode; o
         event.stopPropagation();
         onClick();
       }}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          event.stopPropagation();
-          onClick();
-        }
+      onPointerDown={(event) => {
+        event.stopPropagation();
       }}
     >
       {icon}
-    </span>
+    </button>
   );
 }
 
 function basename(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
+
+function readDragPayload(event: DragEvent<HTMLElement>): { id: string; parentPath: string } {
+  const json = event.dataTransfer.getData("application/json");
+  if (json) {
+    try {
+      return JSON.parse(json) as { id: string; parentPath: string };
+    } catch {
+      return { id: "", parentPath: "" };
+    }
+  }
+
+  return { id: event.dataTransfer.getData("text/plain"), parentPath: "" };
+}
+
+function dropPlacement(event: DragEvent<HTMLElement>): "before" | "after" {
+  const target = event.currentTarget;
+  const rect = target.getBoundingClientRect();
+  return event.clientY > rect.top + rect.height / 2 ? "after" : "before";
 }

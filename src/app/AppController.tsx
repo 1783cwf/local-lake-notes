@@ -1,12 +1,10 @@
-import type { PointerEvent } from "react";
+import type { FormEvent, PointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AppRail } from "../components/AppRail";
 import { DocumentSidebar } from "../components/DocumentSidebar";
-import { OutlinePanel } from "../components/OutlinePanel";
 import { TopBar } from "../components/TopBar";
 import { LakeEditor } from "../features/lake-editor/LakeEditor";
-import type { LakeOutlineItem } from "../features/lake-editor/lakeOutline";
 import { OssSettingsPanel } from "../features/settings/OssSettingsPanel";
 import type { WorkspaceDocument, WorkspacePayload } from "../features/workspace/workspaceStore";
 import { buildDocumentTree, flattenTreeOrder } from "../features/workspace/workspaceStore";
@@ -31,6 +29,14 @@ import {
 import type { CurrentDocumentState, OssSettings, SaveStatus, UploadImageInput, UploadImageOutput } from "./appState";
 import { emptySaveStatus } from "./appState";
 
+interface TextDialogState {
+  title: string;
+  label: string;
+  initialValue: string;
+  submitLabel: string;
+  onSubmit: (value: string) => Promise<void>;
+}
+
 export function AppController() {
   const [workspace, setWorkspace] = useState<WorkspacePayload | null>(null);
   const [currentDocument, setCurrentDocument] = useState<CurrentDocumentState | null>(null);
@@ -39,9 +45,8 @@ export function AppController() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [ossSettings, setOssSettings] = useState<OssSettings | null>(null);
   const [appError, setAppError] = useState<string | null>(null);
-  const [outlineItems, setOutlineItems] = useState<LakeOutlineItem[]>([]);
   const [sidebarWidth, setSidebarWidth] = useState(296);
-  const [outlineWidth, setOutlineWidth] = useState(280);
+  const [textDialog, setTextDialog] = useState<TextDialogState | null>(null);
 
   useEffect(() => {
     void boot();
@@ -67,7 +72,6 @@ export function AppController() {
       const payload = await setWorkspaceRoot(selected);
       setWorkspace(payload);
       setCurrentDocument(null);
-      setOutlineItems([]);
       setSaveStatus(emptySaveStatus);
       setAppError(null);
     } catch (error) {
@@ -95,48 +99,55 @@ export function AppController() {
     }
   }, []);
 
-  const createDirectory = useCallback(async (parentPath = "") => {
-    const name = window.prompt("目录名称", "新目录");
-    if (!name) {
-      return;
-    }
-
-    try {
-      setWorkspace(await createLakeDirectory(parentPath, name));
-      setAppError(null);
-    } catch (error) {
-      setAppError(toMessage(error));
-    }
+  const createDirectory = useCallback((parentPath = "") => {
+    setTextDialog({
+      title: "新建目录",
+      label: "目录名称",
+      initialValue: "新目录",
+      submitLabel: "创建",
+      onSubmit: async (name) => {
+        try {
+          setWorkspace(await createLakeDirectory(parentPath, name));
+          setAppError(null);
+        } catch (error) {
+          setAppError(toMessage(error));
+        }
+      },
+    });
   }, []);
 
-  const renameCurrentWorkspace = useCallback(async () => {
+  const renameCurrentWorkspace = useCallback(() => {
     if (!workspace) {
       return;
     }
-    const name = window.prompt("知识库名称", basename(workspace.root));
-    if (!name) {
-      return;
-    }
 
-    try {
-      setWorkspace(await renameWorkspace(name));
-      setAppError(null);
-    } catch (error) {
-      setAppError(toMessage(error));
-    }
+    setTextDialog({
+      title: "重命名知识库",
+      label: "知识库名称",
+      initialValue: basename(workspace.root),
+      submitLabel: "保存",
+      onSubmit: async (name) => {
+        try {
+          setWorkspace(await renameWorkspace(name));
+          setAppError(null);
+        } catch (error) {
+          setAppError(toMessage(error));
+        }
+      },
+    });
   }, [workspace]);
 
-  const renameDocument = useCallback(async (document: WorkspaceDocument) => {
-    const title = window.prompt("文档名称", document.name);
-    if (!title) {
+  const renameDocumentTo = useCallback(async (document: WorkspaceDocument, title: string) => {
+    const nextName = safeName(title);
+    if (nextName === document.name) {
       return;
     }
 
     try {
-      const payload = await renameLakeDocument(document.path, title);
+      const payload = await renameLakeDocument(document.path, nextName);
       setWorkspace(payload);
       if (currentDocument?.entry.path === document.path) {
-        const nextPath = document.parentPath ? `${document.parentPath}/${safeName(title)}.lake` : `${safeName(title)}.lake`;
+        const nextPath = document.parentPath ? `${document.parentPath}/${nextName}.lake` : `${nextName}.lake`;
         const nextDocument = payload.documents.find((entry) => entry.path === nextPath);
         if (nextDocument) {
           setCurrentDocument({ entry: nextDocument, content: await readLakeDocument(nextDocument.path) });
@@ -147,6 +158,16 @@ export function AppController() {
       setAppError(toMessage(error));
     }
   }, [currentDocument?.entry.path]);
+
+  const renameDocument = useCallback((document: WorkspaceDocument) => {
+    setTextDialog({
+      title: "重命名文档",
+      label: "文档名称",
+      initialValue: document.name,
+      submitLabel: "保存",
+      onSubmit: (title) => renameDocumentTo(document, title),
+    });
+  }, [renameDocumentTo]);
 
   const deleteDocument = useCallback(async (document: WorkspaceDocument) => {
     if (!window.confirm(`删除文档「${document.name}」？`)) {
@@ -158,7 +179,6 @@ export function AppController() {
       setWorkspace(payload);
       if (currentDocument?.entry.path === document.path) {
         setCurrentDocument(null);
-        setOutlineItems([]);
       }
       setAppError(null);
     } catch (error) {
@@ -166,27 +186,35 @@ export function AppController() {
     }
   }, [currentDocument?.entry.path]);
 
-  const renameDirectory = useCallback(async (directory: { path: string; name: string; parentPath: string }) => {
-    const name = window.prompt("目录名称", directory.name);
-    if (!name) {
-      return;
-    }
-
-    try {
-      const payload = await renameLakeDirectory(directory.path, name);
-      setWorkspace(payload);
-      if (currentDocument?.entry.path.startsWith(`${directory.path}/`)) {
-        const nextPrefix = directory.parentPath ? `${directory.parentPath}/${safeName(name)}` : safeName(name);
-        const nextPath = currentDocument.entry.path.replace(directory.path, nextPrefix);
-        const nextDocument = payload.documents.find((entry) => entry.path === nextPath);
-        if (nextDocument) {
-          setCurrentDocument({ entry: nextDocument, content: await readLakeDocument(nextDocument.path) });
+  const renameDirectory = useCallback((directory: { path: string; name: string; parentPath: string }) => {
+    setTextDialog({
+      title: "重命名目录",
+      label: "目录名称",
+      initialValue: directory.name,
+      submitLabel: "保存",
+      onSubmit: async (name) => {
+        const nextName = safeName(name);
+        if (nextName === directory.name) {
+          return;
         }
-      }
-      setAppError(null);
-    } catch (error) {
-      setAppError(toMessage(error));
-    }
+
+        try {
+          const payload = await renameLakeDirectory(directory.path, nextName);
+          setWorkspace(payload);
+          if (currentDocument?.entry.path.startsWith(`${directory.path}/`)) {
+            const nextPrefix = directory.parentPath ? `${directory.parentPath}/${nextName}` : nextName;
+            const nextPath = currentDocument.entry.path.replace(directory.path, nextPrefix);
+            const nextDocument = payload.documents.find((entry) => entry.path === nextPath);
+            if (nextDocument) {
+              setCurrentDocument({ entry: nextDocument, content: await readLakeDocument(nextDocument.path) });
+            }
+          }
+          setAppError(null);
+        } catch (error) {
+          setAppError(toMessage(error));
+        }
+      },
+    });
   }, [currentDocument]);
 
   const deleteDirectory = useCallback(async (directory: { path: string; name: string }) => {
@@ -199,7 +227,6 @@ export function AppController() {
       setWorkspace(payload);
       if (currentDocument?.entry.path.startsWith(`${directory.path}/`)) {
         setCurrentDocument(null);
-        setOutlineItems([]);
       }
       setAppError(null);
     } catch (error) {
@@ -245,7 +272,12 @@ export function AppController() {
   const directories = useMemo(() => workspace?.directories ?? [], [workspace]);
   const order = useMemo(() => workspace?.order ?? [], [workspace]);
 
-  const moveNode = useCallback(async (sourceId: string, targetId: string) => {
+  const moveNode = useCallback(async (
+    sourceId: string,
+    targetId: string,
+    _parentPath: string,
+    placement: "before" | "after",
+  ) => {
     if (!workspace) {
       return;
     }
@@ -253,7 +285,8 @@ export function AppController() {
     const currentOrder = flattenTreeOrder(buildDocumentTree(workspace.documents, workspace.directories, workspace.order));
     const nextOrder = currentOrder.filter((itemId) => itemId !== sourceId);
     const targetIndex = nextOrder.indexOf(targetId);
-    nextOrder.splice(targetIndex >= 0 ? targetIndex : nextOrder.length, 0, sourceId);
+    const insertIndex = targetIndex >= 0 ? targetIndex + (placement === "after" ? 1 : 0) : nextOrder.length;
+    nextOrder.splice(insertIndex, 0, sourceId);
 
     try {
       setWorkspace(await saveWorkspaceOrder(nextOrder));
@@ -263,18 +296,14 @@ export function AppController() {
     }
   }, [workspace]);
 
-  const beginPaneResize = useCallback((pane: "sidebar" | "outline", event: PointerEvent<HTMLDivElement>) => {
+  const beginSidebarResize = useCallback((event: PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     const startX = event.clientX;
-    const startWidth = pane === "sidebar" ? sidebarWidth : outlineWidth;
+    const startWidth = sidebarWidth;
 
     const onPointerMove = (moveEvent: globalThis.PointerEvent) => {
       const delta = moveEvent.clientX - startX;
-      if (pane === "sidebar") {
-        setSidebarWidth(clamp(startWidth + delta, 220, 440));
-      } else {
-        setOutlineWidth(clamp(startWidth - delta, 220, 460));
-      }
+      setSidebarWidth(clamp(startWidth + delta, 220, 440));
     };
     const onPointerUp = () => {
       window.removeEventListener("pointermove", onPointerMove);
@@ -283,13 +312,13 @@ export function AppController() {
 
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
-  }, [outlineWidth, sidebarWidth]);
+  }, [sidebarWidth]);
 
   return (
     <div
       className="app-shell"
       style={{
-        gridTemplateColumns: `var(--rail-width) ${sidebarWidth}px 8px minmax(0, 1fr) 8px ${outlineWidth}px`,
+        gridTemplateColumns: `var(--rail-width) ${sidebarWidth}px 8px minmax(0, 1fr)`,
       }}
     >
       <AppRail
@@ -313,12 +342,17 @@ export function AppController() {
         onDeleteDirectory={deleteDirectory}
         onMoveNode={moveNode}
       />
-      <PaneResizer label="调整目录宽度" onPointerDown={(event) => beginPaneResize("sidebar", event)} />
+      <PaneResizer label="调整目录宽度" onPointerDown={beginSidebarResize} />
       <main className="editor-workspace">
         <TopBar
           document={currentDocument?.entry ?? null}
           saveStatus={saveStatus}
           onManualSave={() => setManualSaveRequest((current) => current + 1)}
+          onRenameDocument={(title) => {
+            if (currentDocument) {
+              return renameDocumentTo(currentDocument.entry, title);
+            }
+          }}
         />
         {appError ? <div className="app-error">{appError}</div> : null}
         <LakeEditor
@@ -327,18 +361,18 @@ export function AppController() {
           manualSaveRequest={manualSaveRequest}
           onSave={saveDocument}
           onUploadImage={uploadEditorImage}
-          onOutlineChange={setOutlineItems}
           onSaveStatusChange={setSaveStatus}
         />
       </main>
-      <PaneResizer label="调整大纲宽度" onPointerDown={(event) => beginPaneResize("outline", event)} />
-      <OutlinePanel items={outlineItems} />
       <OssSettingsPanel
         open={settingsOpen}
         settings={ossSettings}
         onClose={() => setSettingsOpen(false)}
         onSave={saveSettings}
       />
+      {textDialog ? (
+        <TextInputDialog dialog={textDialog} onClose={() => setTextDialog(null)} />
+      ) : null}
     </div>
   );
 }
@@ -375,4 +409,67 @@ function basename(path: string): string {
 
 function safeName(name: string): string {
   return name.trim().replace(/[\\/:*?"<>|\s]+/g, "-").replace(/^-+|-+$/g, "") || "未命名";
+}
+
+function TextInputDialog({
+  dialog,
+  onClose,
+}: {
+  dialog: TextDialogState;
+  onClose: () => void;
+}) {
+  const [value, setValue] = useState(dialog.initialValue);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    setValue(dialog.initialValue);
+  }, [dialog]);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const nextValue = value.trim();
+    if (!nextValue || submitting) {
+      return;
+    }
+
+    setSubmitting(true);
+    await dialog.onSubmit(nextValue);
+    setSubmitting(false);
+    onClose();
+  };
+
+  return (
+    <div className="text-dialog-backdrop" role="presentation" onMouseDown={onClose}>
+      <form
+        className="text-dialog"
+        aria-label={dialog.title}
+        onSubmit={submit}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <h2>{dialog.title}</h2>
+        <label>
+          <span>{dialog.label}</span>
+          <input
+            value={value}
+            autoFocus
+            onFocus={(event) => event.currentTarget.select()}
+            onChange={(event) => setValue(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                onClose();
+              }
+            }}
+          />
+        </label>
+        <div className="text-dialog__actions">
+          <button type="button" className="secondary-button" onClick={onClose}>
+            取消
+          </button>
+          <button type="submit" className="primary-button" disabled={!value.trim() || submitting}>
+            {dialog.submitLabel}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
 }
