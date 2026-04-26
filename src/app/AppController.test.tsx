@@ -10,6 +10,7 @@ import { AppController } from "./AppController";
 
 const createLakeDocument = vi.fn<(title: string, parentPath?: string) => Promise<CreateDocumentPayload>>();
 const deleteLakeDocument = vi.fn<(path: string) => Promise<WorkspacePayload>>();
+const downloadExternalFile = vi.fn<(url: string, filename: string) => Promise<string | null>>();
 const getRecentWorkspace = vi.fn<() => Promise<WorkspacePayload | null>>(async () => null);
 const moveWorkspaceItem = vi.fn<(input: MoveWorkspaceItemInput) => Promise<WorkspacePayload>>();
 const readLakeDocument = vi.fn<(path: string) => Promise<string>>(async () => "<p>hello</p>");
@@ -78,6 +79,7 @@ vi.mock("../lib/tauri", () => ({
   createLakeDocument: (title: string, parentPath?: string) => createLakeDocument(title, parentPath),
   deleteLakeDirectory: vi.fn(),
   deleteLakeDocument: (path: string) => deleteLakeDocument(path),
+  downloadExternalFile: (url: string, filename: string) => downloadExternalFile(url, filename),
   getOssSettings: vi.fn(async () => null),
   getRecentWorkspace: () => getRecentWorkspace(),
   moveWorkspaceItem: (input: MoveWorkspaceItemInput) => moveWorkspaceItem(input),
@@ -100,6 +102,8 @@ vi.mock("../lib/tauri", () => ({
 beforeEach(() => {
   createLakeDocument.mockReset();
   deleteLakeDocument.mockReset();
+  downloadExternalFile.mockReset();
+  downloadExternalFile.mockResolvedValue("/tmp/attachment.pdf");
   getRecentWorkspace.mockResolvedValue(null);
   moveWorkspaceItem.mockReset();
   readLakeDocument.mockResolvedValue("<p>hello</p>");

@@ -26,6 +26,11 @@ export interface UploadImageOutput {
   extname?: string;
 }
 
+export interface FileDownloadInput {
+  url: string;
+  filename: string;
+}
+
 export interface OssSettings {
   endpoint: string;
   bucket: string;

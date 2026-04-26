@@ -34,10 +34,10 @@ import {
   createLakeDocument,
   deleteLakeDirectory,
   deleteLakeDocument,
+  downloadExternalFile,
   getOssSettings,
   getRecentWorkspace,
   moveWorkspaceItem,
-  openExternalUrl,
   readLakeDocument,
   renameLakeDirectory,
   renameLakeDocument,
@@ -51,7 +51,14 @@ import {
   uploadImage,
   writeLakeDocument,
 } from "../lib/tauri";
-import type { CurrentDocumentState, OssSettings, SaveStatus, UploadImageInput, UploadImageOutput } from "./appState";
+import type {
+  CurrentDocumentState,
+  FileDownloadInput,
+  OssSettings,
+  SaveStatus,
+  UploadImageInput,
+  UploadImageOutput,
+} from "./appState";
 import { emptySaveStatus } from "./appState";
 
 interface TextDialogState {
@@ -370,9 +377,9 @@ export function AppController() {
     return uploadFile(input);
   }, [ossSettings]);
 
-  const openEditorFileUrl = useCallback(async (url: string) => {
+  const downloadEditorFile = useCallback(async (input: FileDownloadInput) => {
     try {
-      await openExternalUrl(url);
+      await downloadExternalFile(input.url, input.filename);
       setAppError(null);
     } catch (error) {
       setAppError(toMessage(error));
@@ -495,7 +502,7 @@ export function AppController() {
           onExportContent={writeDocumentExport}
           onUploadImage={uploadEditorImage}
           onUploadFile={uploadEditorFile}
-          onOpenFileUrl={openEditorFileUrl}
+          onDownloadFile={downloadEditorFile}
           onSaveStatusChange={setSaveStatus}
         />
       </main>

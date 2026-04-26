@@ -20,7 +20,7 @@ test("缺少 window.Doc 时报告运行时不可用", () => {
       onContentChange: vi.fn(),
       uploadImage: vi.fn(),
       uploadFile: vi.fn(),
-      openFileUrl: vi.fn(),
+      downloadFile: vi.fn(),
     }),
   ).toThrow("语雀编辑器资源未加载");
 });
@@ -40,7 +40,7 @@ test("创建编辑器时配置 Lake 图片、附件上传和大纲能力", () =>
     onContentChange: vi.fn(),
     uploadImage: vi.fn(),
     uploadFile: vi.fn(),
-    openFileUrl: vi.fn(),
+    downloadFile: vi.fn(),
   });
 
   expect(created).toBe(editor);
@@ -60,10 +60,10 @@ test("创建编辑器时配置 Lake 图片、附件上传和大纲能力", () =>
   destroyLakeEditor(created);
 });
 
-test("选中编辑态附件卡片后通过悬浮下载按钮打开 Lake 附件 src", () => {
+test("选中编辑态附件卡片后通过悬浮下载按钮使用 Lake 附件名称下载", () => {
   const value = `data:${encodeURIComponent(JSON.stringify({
-    src: "https://oss.example/files/archive.zip",
-    name: "archive.zip",
+    src: "https://oss.example/files/2026/04/f6873b30-50af-421e-a385-da468458972f.pdf",
+    name: "八期部署资源鲁池.pdf",
     download: true,
   }))}`;
   const editor: LakeEditorInstance = {
@@ -75,19 +75,19 @@ test("选中编辑态附件卡片后通过悬浮下载按钮打开 Lake 附件 s
   window.Doc = {
     createOpenEditor: vi.fn(() => editor),
   };
-  const openFileUrl = vi.fn();
+  const downloadFile = vi.fn();
   const root = document.createElement("div");
-  root.innerHTML = `<ne-card data-card-name="file" data-card-type="inline"><span class="ne-card-file" data-testid="ne-card-file">archive.zip</span></ne-card>`;
+  root.innerHTML = `<ne-card data-card-name="file" data-card-type="inline"><span class="ne-card-file" data-testid="ne-card-file">八期部署资源鲁池.pdf</span></ne-card>`;
 
   const created = createLakeEditor(root, {
     onContentChange: vi.fn(),
     uploadImage: vi.fn(),
     uploadFile: vi.fn(),
-    openFileUrl,
+    downloadFile,
   });
   root.querySelector("ne-card")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
-  expect(openFileUrl).not.toHaveBeenCalled();
+  expect(downloadFile).not.toHaveBeenCalled();
   const toolbar = document.body.querySelector(".lake-file-floating-toolbar");
   expect(toolbar).toBeInTheDocument();
   expect(toolbar).not.toHaveAttribute("hidden");
@@ -98,7 +98,10 @@ test("选中编辑态附件卡片后通过悬浮下载按钮打开 Lake 附件 s
     ?.querySelector("[data-lake-file-action='download']")
     ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
-  expect(openFileUrl).toHaveBeenCalledWith("https://oss.example/files/archive.zip");
+  expect(downloadFile).toHaveBeenCalledWith({
+    name: "八期部署资源鲁池.pdf",
+    src: "https://oss.example/files/2026/04/f6873b30-50af-421e-a385-da468458972f.pdf",
+  });
   destroyLakeEditor(created);
 });
 
@@ -123,7 +126,7 @@ test("点击附件文字节点时也能显示下载工具条", () => {
     onContentChange: vi.fn(),
     uploadImage: vi.fn(),
     uploadFile: vi.fn(),
-    openFileUrl: vi.fn(),
+    downloadFile: vi.fn(),
   });
   root.querySelector(".ne-card-file")?.firstChild?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 

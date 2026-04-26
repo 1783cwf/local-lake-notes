@@ -26,7 +26,7 @@ test("没有文档时显示工作台空状态", () => {
       onExportContent={vi.fn()}
       onUploadImage={vi.fn()}
       onUploadFile={vi.fn()}
-      onOpenFileUrl={vi.fn()}
+      onDownloadFile={vi.fn()}
       onSaveStatusChange={vi.fn()}
     />,
   );
@@ -55,7 +55,7 @@ test("打开文档时把 text/lake 内容设置进语雀编辑器", () => {
       onExportContent={vi.fn()}
       onUploadImage={vi.fn()}
       onUploadFile={vi.fn()}
-      onOpenFileUrl={vi.fn()}
+      onDownloadFile={vi.fn()}
       onSaveStatusChange={vi.fn()}
     />,
   );
@@ -86,7 +86,7 @@ test("关闭当前文档时在编辑器容器移除前销毁 Lake 实例", () =>
       onExportContent={vi.fn()}
       onUploadImage={vi.fn()}
       onUploadFile={vi.fn()}
-      onOpenFileUrl={vi.fn()}
+      onDownloadFile={vi.fn()}
       onSaveStatusChange={vi.fn()}
     />,
   );
@@ -101,7 +101,7 @@ test("关闭当前文档时在编辑器容器移除前销毁 Lake 实例", () =>
       onExportContent={vi.fn()}
       onUploadImage={vi.fn()}
       onUploadFile={vi.fn()}
-      onOpenFileUrl={vi.fn()}
+      onDownloadFile={vi.fn()}
       onSaveStatusChange={vi.fn()}
     />,
   );
@@ -126,7 +126,7 @@ test("创建 Lake 实例失败时显示错误状态", () => {
       onExportContent={vi.fn()}
       onUploadImage={vi.fn()}
       onUploadFile={vi.fn()}
-      onOpenFileUrl={vi.fn()}
+      onDownloadFile={vi.fn()}
       onSaveStatusChange={vi.fn()}
     />,
   );
@@ -157,7 +157,7 @@ test("收到 HTML 导出请求时读取语雀 HTML 内容", async () => {
       onExportContent={onExportContent}
       onUploadImage={vi.fn()}
       onUploadFile={vi.fn()}
-      onOpenFileUrl={vi.fn()}
+      onDownloadFile={vi.fn()}
       onSaveStatusChange={vi.fn()}
     />,
   );
@@ -193,7 +193,7 @@ test("收到 Markdown 导出请求时仍读取当前 Lake 内容", async () => {
       onExportContent={onExportContent}
       onUploadImage={vi.fn()}
       onUploadFile={vi.fn()}
-      onOpenFileUrl={vi.fn()}
+      onDownloadFile={vi.fn()}
       onSaveStatusChange={vi.fn()}
     />,
   );

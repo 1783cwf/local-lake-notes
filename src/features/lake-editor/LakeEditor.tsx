@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import type { SaveStatus, UploadImageInput, UploadImageOutput } from "../../app/appState";
+import type { FileDownloadInput, SaveStatus, UploadImageInput, UploadImageOutput } from "../../app/appState";
 import type { WorkspaceDocument } from "../workspace/workspaceStore";
 import type { LakeEditorInstance } from "./editorTypes";
 import type { LakeDocumentExportRequest } from "./lakeExport";
@@ -17,7 +17,7 @@ interface LakeEditorProps {
   onExportContent: (request: LakeDocumentExportRequest, content: string) => Promise<void>;
   onUploadImage: (input: UploadImageInput) => Promise<UploadImageOutput>;
   onUploadFile: (input: UploadImageInput) => Promise<UploadImageOutput>;
-  onOpenFileUrl: (url: string) => Promise<void>;
+  onDownloadFile: (input: FileDownloadInput) => Promise<void>;
   onSaveStatusChange: (status: SaveStatus) => void;
 }
 
@@ -30,7 +30,7 @@ export function LakeEditor({
   onExportContent,
   onUploadImage,
   onUploadFile,
-  onOpenFileUrl,
+  onDownloadFile,
   onSaveStatusChange,
 }: LakeEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -91,7 +91,7 @@ export function LakeEditor({
         },
         uploadImage: (request) => createEditorImageUpload(request, onUploadImage),
         uploadFile: (file) => createEditorFileUpload(file, onUploadFile),
-        openFileUrl: onOpenFileUrl,
+        downloadFile: (file) => onDownloadFile({ url: file.src, filename: file.name }),
       });
       editorRef.current = editor;
       editor.setDocument("text/lake", content);
@@ -108,7 +108,7 @@ export function LakeEditor({
         editorRef.current = null;
       }
     };
-  }, [content, document, onOpenFileUrl, onUploadFile, onUploadImage, scheduleSave, setStatus]);
+  }, [content, document, onDownloadFile, onUploadFile, onUploadImage, scheduleSave, setStatus]);
 
   useEffect(() => {
     if (manualSaveRequest > 0) {

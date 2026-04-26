@@ -4,8 +4,13 @@ import type { LakeEditorInstance } from "./editorTypes";
 export interface CreateLakeEditorOptions {
   uploadImage: (request: unknown) => Promise<UploadImageOutput>;
   uploadFile: (file: unknown) => Promise<UploadImageOutput>;
-  openFileUrl: (url: string) => void | Promise<void>;
+  downloadFile: (file: LakeFileDownload) => void | Promise<void>;
   onContentChange: () => void;
+}
+
+export interface LakeFileDownload {
+  name: string;
+  src: string;
 }
 
 interface LakeFileCard {
@@ -57,19 +62,19 @@ export function createLakeEditor(
         return Boolean(extractCardDataSrc(cardData));
       },
       downloadFileHandler(cardData: unknown) {
-        openFileCard(cardData, options.openFileUrl);
+        downloadFileCard(cardData, options.downloadFile);
       },
       previewFileHandler(cardData: unknown) {
-        openFileCard(cardData, options.openFileUrl);
+        downloadFileCard(cardData, options.downloadFile);
       },
       onViewerInlineFileClick(event: MouseEvent, ui: unknown) {
         event.preventDefault();
-        openFileCard(ui, options.openFileUrl);
+        downloadFileCard(ui, options.downloadFile);
       },
     },
   });
 
-  const unbindFileToolbar = bindRenderedFileToolbar(element, editor, options.openFileUrl);
+  const unbindFileToolbar = bindRenderedFileToolbar(element, editor, options.downloadFile);
   const destroy = editor.destroy?.bind(editor);
   const destory = editor.destory?.bind(editor);
   let destroyed = false;
@@ -128,21 +133,21 @@ export function extractLakeFileCards(content: string): LakeFileCard[] {
 function bindRenderedFileToolbar(
   element: HTMLElement,
   editor: LakeEditorInstance,
-  openFileUrl: (url: string) => void | Promise<void>,
+  downloadFile: (file: LakeFileDownload) => void | Promise<void>,
 ): () => void {
   const toolbar = createFileToolbar();
   let activeCard: HTMLElement | null = null;
-  let activeUrl: string | null = null;
+  let activeFile: LakeFileDownload | null = null;
 
   const showForCard = (fileCard: HTMLElement) => {
-    const downloadUrl = findRenderedFileDownloadUrl(element, editor, fileCard);
-    if (!downloadUrl) {
+    const file = findRenderedFileDownload(element, editor, fileCard);
+    if (!file) {
       return;
     }
 
     activeCard?.classList.remove("lake-file-card-active");
     activeCard = fileCard;
-    activeUrl = downloadUrl;
+    activeFile = file;
     activeCard.classList.add("lake-file-card-active");
     toolbar.hidden = false;
     positionFileToolbar(toolbar, activeCard);
@@ -151,7 +156,7 @@ function bindRenderedFileToolbar(
   const hideToolbar = () => {
     activeCard?.classList.remove("lake-file-card-active");
     activeCard = null;
-    activeUrl = null;
+    activeFile = null;
     toolbar.hidden = true;
   };
 
@@ -196,8 +201,8 @@ function bindRenderedFileToolbar(
   const onDownload = (event: Event) => {
     event.preventDefault();
     event.stopPropagation();
-    if (activeUrl) {
-      void openFileUrl(activeUrl);
+    if (activeFile) {
+      void downloadFile({ name: activeFile.name, src: activeFile.src });
     }
   };
 
@@ -246,16 +251,19 @@ function findRenderedFileCard(root: HTMLElement, target: Element | null): HTMLEl
   return null;
 }
 
-function findRenderedFileDownloadUrl(
+function findRenderedFileDownload(
   element: HTMLElement,
   editor: LakeEditorInstance,
   fileCard: HTMLElement,
-): string | null {
-  const href = fileCard instanceof HTMLAnchorElement
-    ? fileCard.href
-    : fileCard.querySelector("a[href]")?.getAttribute("href");
+): LakeFileDownload | null {
+  const link = fileCard instanceof HTMLAnchorElement ? fileCard : fileCard.querySelector("a[href]");
+  const href = link?.getAttribute("href");
   if (href) {
-    return normalizeFileUrl(href);
+    const src = normalizeFileUrl(href);
+    return {
+      name: readString(link?.getAttribute("download")) ?? readRenderedFileName(fileCard) ?? fileNameFromUrl(src),
+      src,
+    };
   }
 
   const renderedCards = listRenderedFileCards(element);
@@ -265,7 +273,8 @@ function findRenderedFileDownloadUrl(
   }
 
   const fileCards = extractLakeFileCards(editor.getDocument("text/lake"));
-  return fileCards[cardIndex]?.download === false ? null : fileCards[cardIndex]?.src ?? null;
+  const file = fileCards[cardIndex];
+  return file?.download === false ? null : file ?? null;
 }
 
 function listRenderedFileCards(element: HTMLElement): HTMLElement[] {
@@ -279,10 +288,13 @@ function listRenderedFileCards(element: HTMLElement): HTMLElement[] {
     .filter((card): card is HTMLElement => card instanceof HTMLElement);
 }
 
-function openFileCard(cardData: unknown, openFileUrl: (url: string) => void | Promise<void>): void {
-  const src = extractCardDataSrc(cardData);
-  if (src) {
-    void openFileUrl(normalizeFileUrl(src));
+function downloadFileCard(cardData: unknown, downloadFile: (file: LakeFileDownload) => void | Promise<void>): void {
+  const file = extractCardData(cardData);
+  if (file?.src && file.download !== false) {
+    void downloadFile({
+      name: file.name || fileNameFromUrl(file.src),
+      src: normalizeFileUrl(file.src),
+    });
   }
 }
 
@@ -324,6 +336,10 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function extractCardDataSrc(cardData: unknown): string | null {
+  return extractCardData(cardData)?.src ?? null;
+}
+
+function extractCardData(cardData: unknown): LakeFileCard | null {
   if (!cardData || typeof cardData !== "object") {
     return null;
   }
@@ -331,27 +347,35 @@ function extractCardDataSrc(cardData: unknown): string | null {
   const candidate = cardData as Record<string, unknown>;
   const directSrc = readString(candidate.src) ?? readString(candidate.url);
   if (directSrc) {
-    return directSrc;
+    return {
+      name: readString(candidate.name) ?? readString(candidate.filename) ?? readString(candidate.fileName) ?? "",
+      src: normalizeFileUrl(directSrc),
+      download: candidate.download !== false,
+    };
   }
 
   const getSrc = candidate.getSrc;
   if (typeof getSrc === "function") {
     const src = getSrc.call(cardData);
     if (typeof src === "string" && src.trim()) {
-      return src;
+      return {
+        name: readString(candidate.name) ?? readString(candidate.filename) ?? readString(candidate.fileName) ?? "",
+        src: normalizeFileUrl(src),
+        download: candidate.download !== false,
+      };
     }
   }
 
   const getCardValue = candidate.getCardValue;
   if (typeof getCardValue === "function") {
     const value = getCardValue.call(cardData);
-    const src = extractCardDataSrc(value);
-    if (src) {
-      return src;
+    const file = extractCardData(value);
+    if (file) {
+      return file;
     }
   }
 
-  return extractCardDataSrc(candidate.cardData) ?? extractCardDataSrc(candidate.props);
+  return extractCardData(candidate.cardData) ?? extractCardData(candidate.props);
 }
 
 function decodeLakeCardValue(value: string | null): LakeFileCard | null {
@@ -379,6 +403,19 @@ function decodeLakeCardValue(value: string | null): LakeFileCard | null {
 
 function normalizeFileUrl(src: string): string {
   return src.trim();
+}
+
+function readRenderedFileName(fileCard: HTMLElement): string | null {
+  return readString(fileCard.textContent);
+}
+
+function fileNameFromUrl(src: string): string {
+  try {
+    const url = new URL(src);
+    return decodeURIComponent(url.pathname.split("/").filter(Boolean).pop() ?? "") || "附件";
+  } catch {
+    return src.split("/").filter(Boolean).pop() ?? "附件";
+  }
 }
 
 function readString(value: unknown): string | null {

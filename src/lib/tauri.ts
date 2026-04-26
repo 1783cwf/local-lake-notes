@@ -448,9 +448,47 @@ export async function openExternalUrl(url: string): Promise<void> {
   return invoke<void>("open_external_url", { url });
 }
 
+export async function downloadExternalFile(url: string, filename: string): Promise<string | null> {
+  const defaultPath = safeDownloadFileName(filename) || fileNameFromUrl(url) || "附件";
+  if (!isTauriRuntime()) {
+    await downloadBrowserRemoteFile(url, defaultPath);
+    return defaultPath;
+  }
+
+  const selected = await save({
+    defaultPath,
+    filters: downloadFileFilters(defaultPath),
+    title: "下载附件",
+  });
+  if (typeof selected !== "string") {
+    return null;
+  }
+
+  await invoke("download_external_file", { url, path: selected });
+  return selected;
+}
+
 function fileExtension(filename: string): string | undefined {
   const extension = filename.split(".").pop();
   return extension && extension !== filename ? extension : undefined;
+}
+
+function downloadFileFilters(filename: string): Array<{ name: string; extensions: string[] }> {
+  const extension = fileExtension(filename);
+  return extension ? [{ name: extension.toUpperCase(), extensions: [extension] }] : [];
+}
+
+function safeDownloadFileName(filename: string): string {
+  return filename.trim().replace(/[\\/:*?"<>|\r\n\t]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function fileNameFromUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return safeDownloadFileName(decodeURIComponent(parsed.pathname.split("/").filter(Boolean).pop() ?? ""));
+  } catch {
+    return safeDownloadFileName(url.split("/").filter(Boolean).pop() ?? "");
+  }
 }
 
 function browserDocumentKey(relativePath: string): string {
@@ -468,6 +506,25 @@ function downloadBrowserFile(filename: string, blob: Blob): void {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+async function downloadBrowserRemoteFile(url: string, filename: string): Promise<void> {
+  try {
+    const response = await fetch(url);
+    if (response.ok) {
+      downloadBrowserFile(filename, await response.blob());
+      return;
+    }
+  } catch {
+    // 跨域资源可能不允许 fetch，退回到带 download 文件名的链接。
+  }
+
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.click();
 }
 
 function printBrowserHtml(html: string): void {
