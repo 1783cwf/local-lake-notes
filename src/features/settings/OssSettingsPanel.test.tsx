@@ -16,3 +16,18 @@ test("保存前校验 OSS 必填项", async () => {
   expect(await screen.findByText("请填写 endpoint")).toBeInTheDocument();
   expect(onSave).not.toHaveBeenCalled();
 });
+
+test("点击设置面板外的遮罩关闭设置", async () => {
+  const user = userEvent.setup();
+  const onClose = vi.fn();
+  const { container } = render(<OssSettingsPanel open settings={null} onClose={onClose} onSave={vi.fn()} />);
+
+  await user.click(screen.getByLabelText("Endpoint"));
+  expect(onClose).not.toHaveBeenCalled();
+
+  const backdrop = container.querySelector(".settings-backdrop");
+  expect(backdrop).toBeInTheDocument();
+  await user.click(backdrop!);
+
+  expect(onClose).toHaveBeenCalledTimes(1);
+});

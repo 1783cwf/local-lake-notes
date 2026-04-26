@@ -1,4 +1,4 @@
-import type { FormEvent } from "react";
+import type { FormEvent, MouseEvent } from "react";
 import { useEffect, useState } from "react";
 import { Check, CloudUpload, X } from "lucide-react";
 
@@ -54,9 +54,14 @@ export function OssSettingsPanel({ open, settings, onClose, onSave }: OssSetting
       setSaving(false);
     }
   };
+  const closeWhenBackdropClicked = (event: MouseEvent<HTMLDivElement>) => {
+    if (event.target === event.currentTarget) {
+      onClose();
+    }
+  };
 
   return (
-    <div className="settings-backdrop" role="presentation">
+    <div className="settings-backdrop" role="presentation" onMouseDown={closeWhenBackdropClicked}>
       <form className="settings-panel" onSubmit={submit} aria-label="设置">
         <div className="settings-panel__header">
           <h2>设置</h2>
