@@ -82,7 +82,9 @@ export function DocumentSidebar({
 }: DocumentSidebarProps) {
   const tree = useMemo(() => buildDocumentTree(documents, directories, order), [directories, documents, order]);
   const flatNodes = useMemo(() => flattenDocumentTree(tree), [tree]);
-  const itemIds = useMemo(() => flatNodes.map((node) => node.itemId), [flatNodes]);
+  const [collapsedFolderIds, setCollapsedFolderIds] = useState<Set<string>>(() => new Set());
+  const visibleNodes = useMemo(() => flattenVisibleDocumentTree(tree, collapsedFolderIds), [collapsedFolderIds, tree]);
+  const itemIds = useMemo(() => visibleNodes.map((node) => node.itemId), [visibleNodes]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [dropState, setDropState] = useState<{
     intent: WorkspaceDropIntent;
@@ -104,6 +106,27 @@ export function DocumentSidebar({
     const resolution = intent ? resolveWorkspaceMove(tree, sourceId, intent) : null;
     setDropState(intent && resolution ? { intent, resolution } : null);
   };
+  const toggleFolder = (itemId: string) => {
+    setCollapsedFolderIds((current) => {
+      const next = new Set(current);
+      if (next.has(itemId)) {
+        next.delete(itemId);
+      } else {
+        next.add(itemId);
+      }
+      return next;
+    });
+  };
+  const expandFolder = (itemId: string) => {
+    setCollapsedFolderIds((current) => {
+      if (!current.has(itemId)) {
+        return current;
+      }
+      const next = new Set(current);
+      next.delete(itemId);
+      return next;
+    });
+  };
 
   const onDragStart = (event: DragStartEvent) => {
     setActiveId(String(event.active.id));
@@ -119,6 +142,9 @@ export function DocumentSidebar({
     setDropState(null);
 
     if (intent && resolution?.ok && !resolution.noop) {
+      if (intent.placement === "inside" && intent.targetId) {
+        expandFolder(intent.targetId);
+      }
       onMoveNode(sourceId, intent);
     }
   };
@@ -149,7 +175,7 @@ export function DocumentSidebar({
 
       <div className="sidebar-section">
         <div className="sidebar-section__title">目录</div>
-        {flatNodes.length > 0 ? (
+        {visibleNodes.length > 0 ? (
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
@@ -161,13 +187,15 @@ export function DocumentSidebar({
           >
             <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
               <div className="document-tree" role="tree">
-                {flatNodes.map((node) => (
+                {visibleNodes.map((node) => (
                   <SortableTreeRow
                     key={node.itemId}
                     node={node}
+                    expanded={!collapsedFolderIds.has(node.itemId)}
                     activeId={activeId}
                     currentPath={currentPath}
                     dropState={dropState}
+                    onToggleFolder={toggleFolder}
                     onOpenDocument={onOpenDocument}
                     onCreateDocument={onCreateDocument}
                     onCreateDirectory={onCreateDirectory}
@@ -196,9 +224,11 @@ export function DocumentSidebar({
 
 function SortableTreeRow({
   node,
+  expanded,
   activeId,
   currentPath,
   dropState,
+  onToggleFolder,
   onOpenDocument,
   onCreateDocument,
   onCreateDirectory,
@@ -208,9 +238,11 @@ function SortableTreeRow({
   onDeleteDirectory,
 }: {
   node: FlatDocumentTreeNode;
+  expanded: boolean;
   activeId: string | null;
   currentPath: string | null;
   dropState: { intent: WorkspaceDropIntent; resolution: WorkspaceMoveResolution } | null;
+  onToggleFolder: (itemId: string) => void;
   onOpenDocument: (document: WorkspaceDocument) => void;
   onCreateDocument: (parentPath: string) => void;
   onCreateDirectory: (parentPath: string) => void;
@@ -250,6 +282,19 @@ function SortableTreeRow({
       event.preventDefault();
       onOpenDocument(node.document);
     }
+    if ((event.key === "Enter" || event.key === " ") && node.type === "folder" && node.hasChildren) {
+      event.preventDefault();
+      onToggleFolder(node.itemId);
+    }
+  };
+  const onRowClick = () => {
+    if (node.document) {
+      onOpenDocument(node.document);
+      return;
+    }
+    if (node.type === "folder" && node.hasChildren) {
+      onToggleFolder(node.itemId);
+    }
   };
 
   return (
@@ -259,10 +304,11 @@ function SortableTreeRow({
       style={style}
       data-tree-item-id={node.itemId}
       data-testid={`tree-row-${node.itemId}`}
-      onClick={() => node.document && onOpenDocument(node.document)}
+      onClick={onRowClick}
       role="treeitem"
       aria-level={node.depth + 1}
-      tabIndex={isDocument ? 0 : -1}
+      aria-expanded={node.type === "folder" && node.hasChildren ? expanded : undefined}
+      tabIndex={0}
       onKeyDown={onKeyDown}
     >
       <button
@@ -277,7 +323,20 @@ function SortableTreeRow({
       </button>
       {node.type === "folder" ? (
         <>
-          {node.hasChildren ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          <button
+            type="button"
+            className="tree-toggle-button"
+            aria-label={node.hasChildren ? `${expanded ? "收起" : "展开"}目录 ${node.name}` : `空目录 ${node.name}`}
+            disabled={!node.hasChildren}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (node.hasChildren) {
+                onToggleFolder(node.itemId);
+              }
+            }}
+          >
+            {node.hasChildren && expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          </button>
           <Folder size={15} />
           <span>{node.name}</span>
           {node.directory ? (
@@ -376,15 +435,15 @@ export function resolvePointerIntent(
   const targetElement = document.querySelector<HTMLElement>(`[data-tree-item-id="${escapeAttributeValue(overId)}"]`);
   const rect = targetElement?.getBoundingClientRect();
   if (!rect || clientY === null) {
-    return { placement: "after", targetId: overId };
+    return { placement: target.type === "folder" ? "inside" : "after", targetId: overId };
   }
 
   const ratio = rect.height > 0 ? (clientY - rect.top) / rect.height : 0.5;
   if (target.type === "folder") {
-    if (ratio < 0.25) {
+    if (ratio < 0.16) {
       return { placement: "before", targetId: overId };
     }
-    if (ratio > 0.75) {
+    if (ratio > 0.84) {
       return { placement: "after", targetId: overId };
     }
     return { placement: "inside", targetId: overId };
@@ -403,6 +462,14 @@ function pointerY(event: DragMoveEvent | DragOverEvent | DragEndEvent): number |
 
 function basename(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
+
+function flattenVisibleDocumentTree(
+  nodes: ReturnType<typeof buildDocumentTree>,
+  collapsedFolderIds: Set<string>,
+): FlatDocumentTreeNode[] {
+  const allNodes = flattenDocumentTree(nodes);
+  return allNodes.filter((node) => !node.ancestorIds.some((ancestorId) => collapsedFolderIds.has(ancestorId)));
 }
 
 function escapeAttributeValue(value: string): string {

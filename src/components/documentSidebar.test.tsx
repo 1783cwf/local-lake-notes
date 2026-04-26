@@ -58,6 +58,20 @@ test("目录树拖拽不再依赖原生 draggable 属性", () => {
   expect(screen.getByRole("button", { name: "拖拽a" })).toBeInTheDocument();
 });
 
+test("目录支持展开和收起", () => {
+  renderSidebar();
+
+  fireEvent.click(screen.getByRole("button", { name: "收起目录 notes" }));
+
+  expect(screen.queryByRole("treeitem", { name: /a/ })).not.toBeInTheDocument();
+  expect(screen.getByRole("treeitem", { name: /notes/ })).toHaveAttribute("aria-expanded", "false");
+
+  fireEvent.click(screen.getByRole("button", { name: "展开目录 notes" }));
+
+  expect(screen.getByRole("treeitem", { name: /a/ })).toBeInTheDocument();
+  expect(screen.getByRole("treeitem", { name: /notes/ })).toHaveAttribute("aria-expanded", "true");
+});
+
 test("按指针位置计算 after 和 inside 落点意图", () => {
   renderSidebar({
     currentPath: "a.lake",
@@ -82,11 +96,15 @@ test("按指针位置计算 after 和 inside 落点意图", () => {
     toJSON: () => undefined,
   });
 
-  expect(resolvePointerIntent(flatNodes, "folder:notes", 132)).toEqual({
+  expect(resolvePointerIntent(flatNodes, "folder:notes", 136)).toEqual({
     placement: "after",
     targetId: "folder:notes",
   });
   expect(resolvePointerIntent(flatNodes, "folder:notes", 118)).toEqual({
+    placement: "inside",
+    targetId: "folder:notes",
+  });
+  expect(resolvePointerIntent(flatNodes, "folder:notes", null)).toEqual({
     placement: "inside",
     targetId: "folder:notes",
   });
