@@ -49,6 +49,9 @@ test("创建编辑器时配置 Lake 图片、附件上传和大纲能力", () =>
     expect.objectContaining({
       input: {},
       toc: expect.objectContaining({ enable: true }),
+      codeblock: expect.objectContaining({
+        codemirrorURL: "/vendor/lakex-doc/codemirror.js",
+      }),
       image: expect.objectContaining({ createUploadPromise: expect.any(Function) }),
       file: expect.objectContaining({
         createUploadPromise: expect.any(Function),

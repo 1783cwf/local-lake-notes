@@ -41,6 +41,9 @@ export function createLakeEditor(
       enable: true,
       normalView: true,
     },
+    codeblock: {
+      codemirrorURL: "/vendor/lakex-doc/codemirror.js",
+    },
     image: {
       createUploadPromise: options.uploadImage,
       isCaptureImageURL(url: string) {
