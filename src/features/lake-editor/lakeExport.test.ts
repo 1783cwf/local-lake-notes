@@ -90,6 +90,12 @@ test("官方 Markdown 转换器使用 Lake setDocument 和 getDocument", async (
     expect.objectContaining({
       input: {},
       toc: { enable: false },
+      codeblock: expect.objectContaining({
+        codemirrorURL: "/vendor/lakex-doc/codemirror.js",
+      }),
+      math: expect.objectContaining({
+        KaTexURL: "/vendor/lakex-doc/katex.min.js",
+      }),
     }),
   );
   expect(editor.setDocument).toHaveBeenCalledWith("text/lake", "<p>正文</p>");

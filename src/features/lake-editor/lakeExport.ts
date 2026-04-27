@@ -352,6 +352,12 @@ export function createOfficialLakeMarkdownConverter(): OfficialLakeMarkdownConve
     editor = window.Doc.createOpenEditor(host, {
       input: {},
       toc: { enable: false },
+      codeblock: {
+        codemirrorURL: "/vendor/lakex-doc/codemirror.js",
+      },
+      math: {
+        KaTexURL: "/vendor/lakex-doc/katex.min.js",
+      },
       image: {},
       file: {},
     });

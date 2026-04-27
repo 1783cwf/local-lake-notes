@@ -44,6 +44,9 @@ export function createLakeEditor(
     codeblock: {
       codemirrorURL: "/vendor/lakex-doc/codemirror.js",
     },
+    math: {
+      KaTexURL: "/vendor/lakex-doc/katex.min.js",
+    },
     image: {
       createUploadPromise: options.uploadImage,
       isCaptureImageURL(url: string) {
