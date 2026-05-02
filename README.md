@@ -183,23 +183,70 @@ npm run build
 
 ## 打包桌面应用
 
+本项目使用 GitHub Actions 原生 runner 分别构建 macOS、Windows 和 Linux 安装包。不要在 macOS 本机直接交叉编译所有系统的安装包，Tauri 的安装包生成依赖各平台原生工具链。
+
+手动触发完整发布构建：
+
+1. 打开 GitHub 仓库的 Actions 页面。
+2. 选择 `Release` workflow。
+3. 点击 `Run workflow`。
+4. 构建完成后在 workflow artifacts 中下载各平台安装包。
+
+打 tag 时也会触发发布构建：
+
 ```bash
-npm run tauri build
+git tag v0.1.0
+git push origin v0.1.0
 ```
 
-当前 Tauri 配置只生成 macOS `.app`，产物路径：
+当前 GitHub Actions 会构建：
+
+| 平台 | 架构 | 产物 |
+| --- | --- | --- |
+| macOS | arm64 | `.dmg` |
+| macOS | x64 | `.dmg` |
+| Windows | x64 | NSIS `.exe` |
+| Windows | arm64 | NSIS `.exe` |
+| Linux | x64 | `.deb`、`.rpm`、`.AppImage` |
+| Linux | arm64 | `.deb`、`.rpm`、`.AppImage` |
+
+本地只建议构建当前系统可原生打包的产物。
+
+macOS `.dmg`：
+
+```bash
+npm run tauri -- build --bundles dmg --ci --no-sign
+```
+
+Windows NSIS `.exe`：
+
+```bash
+npm run tauri -- build --bundles nsis --ci --no-sign
+```
+
+Linux `.deb`、`.rpm`、`.AppImage`：
+
+```bash
+npm run tauri -- build --bundles deb,rpm,appimage --ci --no-sign
+```
+
+本地当前平台快捷构建：
+
+```bash
+npm run build:all
+```
+
+macOS 产物通常位于：
 
 ```text
-src-tauri/target/release/bundle/macos/Yuque Lake Notes.app
+src-tauri/target/<target-triple>/release/bundle/dmg/
 ```
 
-打开构建产物：
+说明：
 
-```bash
-open "src-tauri/target/release/bundle/macos/Yuque Lake Notes.app"
-```
-
-如需生成 `.dmg`，后续需要调整 `src-tauri/tauri.conf.json` 的 `bundle.targets`。
+- `--no-sign` 只适合本地验证和内部测试。macOS 未签名/未公证的应用下载后可能被 Gatekeeper 提示“已损坏”或“无法打开”。
+- Windows 未签名安装包可能触发 SmartScreen 风险提示。
+- 正式对外分发需要配置 macOS Developer ID 签名、公证，以及 Windows 代码签名证书。
 
 ## OSS 配置
 
