@@ -53,12 +53,14 @@ test("点击设置面板外的遮罩关闭设置", async () => {
 test("可以切换到备份恢复并设置密钥", async () => {
   const user = userEvent.setup();
   const onSetBackupKey = vi.fn().mockResolvedValue(undefined);
+  const onSave = vi.fn();
 
-  renderPanel({ onSetBackupKey });
+  renderPanel({ onSetBackupKey, onSave });
 
   await user.click(screen.getByRole("button", { name: "备份恢复" }));
   await user.type(screen.getByLabelText("加密密钥"), "test-secret-key");
   await user.click(screen.getByRole("button", { name: "设置密钥" }));
 
   expect(onSetBackupKey).toHaveBeenCalledWith("test-secret-key", false);
+  expect(onSave).not.toHaveBeenCalled();
 });

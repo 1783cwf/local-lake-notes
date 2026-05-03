@@ -82,7 +82,7 @@ export function OssSettingsPanel({
 
   return (
     <div className="settings-backdrop" role="presentation" onMouseDown={closeWhenBackdropClicked}>
-      <form className="settings-panel" onSubmit={submit} aria-label="设置">
+      <div className="settings-panel" role="dialog" aria-label="设置">
         <div className="settings-panel__header">
           <h2>设置</h2>
           <button type="button" className="icon-button" onClick={onClose} aria-label="关闭">
@@ -110,7 +110,7 @@ export function OssSettingsPanel({
             </button>
           </nav>
 
-          {activeTab === "upload" ? <section className="settings-content" aria-labelledby="upload-settings-title">
+          {activeTab === "upload" ? <form className="settings-content" onSubmit={submit} aria-labelledby="upload-settings-title">
             <h3 id="upload-settings-title">上传配置</h3>
 
             <label>
@@ -209,7 +209,7 @@ export function OssSettingsPanel({
                 保存
               </button>
             </div>
-          </section> : (
+          </form> : (
             <BackupSettingsPanel
               keyStatus={backupKeyStatus}
               backups={backupRecords}
@@ -220,7 +220,7 @@ export function OssSettingsPanel({
             />
           )}
         </div>
-      </form>
+      </div>
     </div>
   );
 }
