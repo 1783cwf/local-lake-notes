@@ -250,16 +250,19 @@ src-tauri/target/<target-triple>/release/bundle/dmg/
 
 ## OSS 配置
 
-当前图片上传使用兼容 S3 协议的配置项：
+当前图片和附件上传使用兼容 S3 协议的配置项：
 
 - endpoint
 - bucket
 - region
 - access key
 - secret key
-- public base URL
+- public base URL（可选，只用于兼容旧公开链接或显式 CDN 场景）
 - force path style
 - image prefix
+- file prefix
+- 默认导出资源策略
+- 签名链接默认/最大有效期
 
 上传后的图片对象 key 会按年份和月份分目录保存，例如：
 
@@ -267,10 +270,17 @@ src-tauri/target/<target-triple>/release/bundle/dmg/
 images/2026/04/<uuid>.png
 ```
 
+推荐把 bucket 保持为私有读写，不要配置公开只读 bucket policy。应用会把文档中的图片和附件保存为 `yuque-resource://...` 内部资源引用，编辑预览、附件下载、短时签名和导出资源读取都由 Tauri 后端通过 S3 凭据完成，前端不会持有 S3 secret。
+
+导出资源有两种策略：
+
+- 本地资源包：单篇 HTML/Markdown 会导出为 zip，包含正文文件和 `assets/`、`attachments/` 资源目录；知识库整体导出也会把资源放入 zip。适合长期留存和离线交付。
+- 短时签名链接：导出文件中的资源链接会改写为带有效期的 S3 presigned URL，适合临时在线交付。有效期结束后需要重新导出。
+
 ## 后续方向
 
 - 支持多知识库列表和知识库排序。
 - 支持 WebDAV 备份笔记和设置。
-- 补充 `.lake` 与 HTML/Markdown 的导入导出能力。
+- 补充 `.lake` 与 HTML/Markdown 的导入能力。
 - 增强拖拽能力，支持跨目录移动。
 - 增加更完整的打包格式，例如 `.dmg`。

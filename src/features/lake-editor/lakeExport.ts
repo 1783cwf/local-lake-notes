@@ -1,17 +1,27 @@
 import type { WorkspaceDocument, WorkspacePayload } from "../workspace/workspaceStore";
 import { buildDocumentTree, documentTitleFromPath, flattenDocumentTree } from "../workspace/workspaceStore";
 import type { LakeEditorInstance } from "./editorTypes";
+import {
+  decodeLakeCardValue,
+  encodeLakeCardValue,
+  parseResourceReference,
+} from "./resourceReference";
 
 export type DocumentExportFormat = "markdown" | "html" | "pdf";
+export type ExportResourceStrategy = "bundle" | "signed-url";
 export type LakeWorkspaceMarkdownConverter = (
   document: WorkspaceDocument,
   lakeContent: string,
 ) => Promise<string> | string;
+export type ExportResourceSigner = (resourceRef: string, filename: string | undefined, ttlSeconds: number) => Promise<string>;
+export type ExportResourceLoader = (resourceRef: string) => Promise<Uint8Array>;
 
 export interface LakeDocumentExportRequest {
   id: number;
   format: DocumentExportFormat;
   document: WorkspaceDocument;
+  resourceStrategy: ExportResourceStrategy;
+  signedUrlTtlSeconds: number;
 }
 
 export interface OfficialLakeMarkdownConverter {
@@ -29,6 +39,18 @@ interface ExportHeading {
   text: string;
 }
 
+export interface LakeDocumentResourceExportOptions {
+  strategy: ExportResourceStrategy;
+  signedUrlTtlSeconds: number;
+  signResource?: ExportResourceSigner;
+  loadResource?: ExportResourceLoader;
+}
+
+interface ResourceRewriteResult {
+  content: string;
+  resources: ZipEntryInput[];
+}
+
 export function lakeDocumentToMarkdown(title: string, content: string): string {
   return normalizeMarkdown(`# ${title}\n\n${lakeContentToMarkdown(content)}`);
 }
@@ -37,6 +59,30 @@ export function lakeContentToMarkdown(content: string): string {
   const template = document.createElement("template");
   template.innerHTML = content;
   return normalizeMarkdown(nodesToMarkdown(Array.from(template.content.childNodes)));
+}
+
+export async function lakeDocumentMarkdownToTextWithResources(
+  title: string,
+  markdown: string,
+  options: LakeDocumentResourceExportOptions,
+): Promise<string> {
+  const result = await rewriteMarkdownResourceReferences(markdown, options);
+  return markdownWithTitle(title, result.content);
+}
+
+export async function lakeDocumentMarkdownToBundle(
+  title: string,
+  markdown: string,
+  options: LakeDocumentResourceExportOptions,
+): Promise<Uint8Array> {
+  const result = await rewriteMarkdownResourceReferences(markdown, options, {
+    assetPrefix: "assets",
+    attachmentPrefix: "attachments",
+  });
+  return createZip([
+    { path: `${safeFileName(title)}.md`, content: markdownWithTitle(title, result.content) },
+    ...result.resources,
+  ]);
 }
 
 export async function lakeDocumentToHtml(title: string, content: string): Promise<string> {
@@ -138,6 +184,15 @@ export async function lakeDocumentToHtml(title: string, content: string): Promis
       th, td { padding: 8px 10px; border: 1px solid #dfe3e6; }
       pre { overflow: auto; padding: 14px; border-radius: 8px; background: #f6f8f7; }
       .lake-export-document-title { margin: 0 0 32px; }
+      .lake-export-expiration {
+        margin: 0 0 18px;
+        padding: 10px 12px;
+        border: 1px solid #ffe0a3;
+        border-radius: 6px;
+        background: #fff8e6;
+        color: #8a5a00;
+        font-size: 14px;
+      }
       .lake-export-attachment {
         display: inline-flex;
         align-items: center;
@@ -299,6 +354,39 @@ export async function lakeDocumentToHtml(title: string, content: string): Promis
 `;
 }
 
+export async function lakeDocumentToHtmlWithResources(
+  title: string,
+  content: string,
+  options: LakeDocumentResourceExportOptions,
+): Promise<string> {
+  const result = await rewriteExportResourceReferences(content, options, { inlineImages: options.strategy === "bundle" });
+  const nextContent = result.content;
+  const html = await lakeDocumentToHtml(title, nextContent);
+  if (options.strategy !== "signed-url") {
+    return html;
+  }
+  return html.replace(
+    "<main class=\"lake-export-document\">",
+    `<main class="lake-export-document">
+        <p class="lake-export-expiration">资源链接有效期：${formatTtl(options.signedUrlTtlSeconds)}</p>`,
+  );
+}
+
+export async function lakeDocumentToHtmlBundle(
+  title: string,
+  content: string,
+  options: LakeDocumentResourceExportOptions,
+): Promise<Uint8Array> {
+  const result = await rewriteExportResourceReferences(content, options, {
+    assetPrefix: "assets",
+    attachmentPrefix: "attachments",
+  });
+  return createZip([
+    { path: "index.html", content: await lakeDocumentToHtml(title, result.content) },
+    ...result.resources,
+  ]);
+}
+
 export async function lakeWorkspaceToMarkdownZip(
   workspace: WorkspacePayload,
   readDocument: (path: string) => Promise<string>,
@@ -322,6 +410,44 @@ export async function lakeWorkspaceToMarkdownZip(
         path: lakePathToMarkdownZipPath(node.document.path),
         content: await convertDocument(node.document, content),
       });
+    }
+  }
+
+  return createZip(entries);
+}
+
+export async function lakeWorkspaceToMarkdownZipWithResources(
+  workspace: WorkspacePayload,
+  readDocument: (path: string) => Promise<string>,
+  options: LakeDocumentResourceExportOptions,
+  convertDocument: LakeWorkspaceMarkdownConverter = (document, content) => (
+    lakeDocumentToMarkdown(documentTitleFromPath(document.path), content)
+  ),
+): Promise<Uint8Array> {
+  const tree = buildDocumentTree(workspace.documents, workspace.directories, workspace.order);
+  const nodes = flattenDocumentTree(tree);
+  const entries: ZipEntryInput[] = [];
+
+  for (const node of nodes) {
+    if (node.type === "folder") {
+      entries.push({ path: `${normalizeZipPath(node.path)}/`, content: "" });
+      continue;
+    }
+
+    if (node.document) {
+      const content = await readDocument(node.document.path);
+      const markdownPath = lakePathToMarkdownZipPath(node.document.path);
+      const markdownDirectory = dirname(markdownPath);
+      const result = await rewriteExportResourceReferences(content, options, {
+        assetPrefix: joinZipPath(markdownDirectory, "assets"),
+        attachmentPrefix: joinZipPath(markdownDirectory, "attachments"),
+        linkBasePath: markdownDirectory,
+      });
+      entries.push({
+        path: markdownPath,
+        content: await convertDocument(node.document, result.content),
+      });
+      entries.push(...result.resources);
     }
   }
 
@@ -480,11 +606,16 @@ function lakeCardToMarkdown(card: Element): string {
   }
 
   const value = decodeLakeCardValue(card.getAttribute("value"));
-  if (!value?.src) {
+  if (!value) {
+    return inlineText(card.textContent ?? "");
+  }
+  const src = value?.src;
+  if (typeof src !== "string") {
     return inlineText(card.textContent ?? "");
   }
 
-  return `[${value.name || value.src}](${value.src})`;
+  const fileName = typeof value.name === "string" && value.name.trim() ? value.name : src;
+  return `[${fileName}](${src})`;
 }
 
 function markdownWithTitle(title: string, markdown: string): string {
@@ -537,22 +668,28 @@ function collectAndMarkHeadings(root: DocumentFragment): ExportHeading[] {
 function renderAttachmentCards(root: DocumentFragment): void {
   root.querySelectorAll("card[name='file'], card[name='localdoc']").forEach((card) => {
     const value = decodeLakeCardValue(card.getAttribute("value"));
-    if (!value?.src) {
+    if (!value) {
+      return;
+    }
+    const src = value?.src;
+    if (typeof src !== "string") {
       return;
     }
 
     const link = document.createElement("a");
     link.className = "lake-export-attachment";
-    link.href = value.src;
+    link.href = src;
     link.target = "_blank";
     link.rel = "noopener noreferrer";
 
     const name = document.createElement("span");
     name.className = "lake-export-attachment__name";
-    name.textContent = value.name || value.src;
+    name.textContent = typeof value.name === "string" && value.name.trim() ? value.name : src;
     link.append(name);
 
-    const size = readFileSize(value);
+    const size = readFileSize({
+      size: typeof value.size === "number" || typeof value.size === "string" ? value.size : undefined,
+    });
     if (size) {
       const sizeNode = document.createElement("span");
       sizeNode.className = "lake-export-attachment__size";
@@ -562,6 +699,238 @@ function renderAttachmentCards(root: DocumentFragment): void {
 
     card.replaceWith(link);
   });
+}
+
+async function rewriteExportResourceReferences(
+  content: string,
+  options: LakeDocumentResourceExportOptions,
+  bundle?: ResourceBundleRewriteOptions,
+): Promise<ResourceRewriteResult> {
+  if (options.strategy === "bundle" && !bundle) {
+    return {
+      content: await inlineHtmlImages(content, options),
+      resources: [],
+    };
+  }
+  if (options.strategy === "bundle") {
+    return rewriteHtmlResourceReferencesToBundle(content, options, bundle);
+  }
+  if (!options.signResource) {
+    throw new Error("缺少短时签名链接生成器");
+  }
+
+  const template = document.createElement("template");
+  template.innerHTML = content;
+  const rewrites = new Map<string, string>();
+  const sign = async (resourceRef: string, filename?: string) => {
+    const cached = rewrites.get(resourceRef);
+    if (cached) {
+      return cached;
+    }
+    const signedUrl = await options.signResource?.(resourceRef, filename, options.signedUrlTtlSeconds);
+    if (!signedUrl) {
+      throw new Error("短时签名链接生成失败");
+    }
+    rewrites.set(resourceRef, signedUrl);
+    return signedUrl;
+  };
+
+  for (const image of Array.from(template.content.querySelectorAll("img[src]"))) {
+    const src = image.getAttribute("src");
+    if (src && parseResourceReference(src)) {
+      image.setAttribute("src", await sign(src, image.getAttribute("alt") ?? undefined));
+    }
+  }
+
+  for (const card of Array.from(template.content.querySelectorAll("card[name='file'], card[name='localdoc']"))) {
+    const value = decodeLakeCardValue(card.getAttribute("value"));
+    if (typeof value?.src !== "string" || !parseResourceReference(value.src)) {
+      continue;
+    }
+    value.src = await sign(value.src, typeof value.name === "string" ? value.name : undefined);
+    card.setAttribute("value", encodeLakeCardValue(value));
+  }
+
+  return { content: template.innerHTML, resources: [] };
+}
+
+interface ResourceBundleRewriteOptions {
+  assetPrefix?: string;
+  attachmentPrefix?: string;
+  linkBasePath?: string;
+  inlineImages?: boolean;
+}
+
+async function rewriteHtmlResourceReferencesToBundle(
+  content: string,
+  options: LakeDocumentResourceExportOptions,
+  bundle?: ResourceBundleRewriteOptions,
+): Promise<ResourceRewriteResult> {
+  if (!options.loadResource) {
+    throw new Error("缺少本地资源包读取器");
+  }
+  const template = document.createElement("template");
+  template.innerHTML = content;
+  const writer = createBundleResourceWriter(options.loadResource);
+
+  for (const image of Array.from(template.content.querySelectorAll("img[src]"))) {
+    const src = image.getAttribute("src");
+    const resource = src ? parseResourceReference(src) : null;
+    if (!src || !resource) {
+      continue;
+    }
+    if (bundle?.inlineImages) {
+      image.setAttribute("src", await resourceToDataUrl(src, options.loadResource, resource.mimeType));
+      continue;
+    }
+    const path = await writer.add(src, resource.name ?? image.getAttribute("alt") ?? basename(resource.key), bundle?.assetPrefix ?? "assets");
+    image.setAttribute("src", relativeZipLink(path, bundle?.linkBasePath));
+  }
+
+  for (const card of Array.from(template.content.querySelectorAll("card[name='file'], card[name='localdoc']"))) {
+    const value = decodeLakeCardValue(card.getAttribute("value"));
+    const src = value?.src;
+    if (!value || typeof src !== "string" || !parseResourceReference(src)) {
+      continue;
+    }
+    const resource = parseResourceReference(src);
+    const path = await writer.add(src, typeof value.name === "string" ? value.name : resource?.name ?? resource?.key ?? "附件", bundle?.attachmentPrefix ?? "attachments");
+    value.src = relativeZipLink(path, bundle?.linkBasePath);
+    card.setAttribute("value", encodeLakeCardValue(value));
+  }
+
+  return { content: template.innerHTML, resources: writer.entries() };
+}
+
+async function inlineHtmlImages(
+  content: string,
+  options: LakeDocumentResourceExportOptions,
+): Promise<string> {
+  if (!options.loadResource) {
+    return content;
+  }
+  const template = document.createElement("template");
+  template.innerHTML = content;
+
+  for (const image of Array.from(template.content.querySelectorAll("img[src]"))) {
+    const src = image.getAttribute("src");
+    const resource = src ? parseResourceReference(src) : null;
+    if (src && resource) {
+      image.setAttribute("src", await resourceToDataUrl(src, options.loadResource, resource.mimeType));
+    }
+  }
+
+  return template.innerHTML;
+}
+
+async function rewriteMarkdownResourceReferences(
+  markdown: string,
+  options: LakeDocumentResourceExportOptions,
+  bundle?: ResourceBundleRewriteOptions,
+): Promise<ResourceRewriteResult> {
+  if (options.strategy === "signed-url") {
+    if (!options.signResource) {
+      throw new Error("缺少短时签名链接生成器");
+    }
+    return {
+      content: await replaceMarkdownLinks(markdown, async (url, label) => {
+        const resource = parseResourceReference(url);
+        return resource ? options.signResource?.(url, label || resource.name, options.signedUrlTtlSeconds) ?? url : url;
+      }),
+      resources: [],
+    };
+  }
+  if (!bundle) {
+    return { content: markdown, resources: [] };
+  }
+  if (!options.loadResource) {
+    throw new Error("缺少本地资源包读取器");
+  }
+
+  const writer = createBundleResourceWriter(options.loadResource);
+  const content = await replaceMarkdownLinks(markdown, async (url, label, isImage) => {
+    const resource = parseResourceReference(url);
+    if (!resource) {
+      return url;
+    }
+    const prefix = isImage ? bundle.assetPrefix ?? "assets" : bundle.attachmentPrefix ?? "attachments";
+    const path = await writer.add(url, resource.name || basename(resource.key) || label, prefix);
+    return relativeZipLink(path, bundle.linkBasePath);
+  });
+
+  return { content, resources: writer.entries() };
+}
+
+async function replaceMarkdownLinks(
+  markdown: string,
+  replace: (url: string, label: string, isImage: boolean) => Promise<string>,
+): Promise<string> {
+  const linkPattern = /(!?)\[([^\]]*)\]\(([^)\s]+)\)/g;
+  let output = "";
+  let lastIndex = 0;
+
+  for (const match of markdown.matchAll(linkPattern)) {
+    const index = match.index ?? 0;
+    output += markdown.slice(lastIndex, index);
+    const isImage = match[1] === "!";
+    const label = match[2] ?? "";
+    const url = match[3] ?? "";
+    output += `${isImage ? "!" : ""}[${label}](${await replace(url, label, isImage)})`;
+    lastIndex = index + match[0].length;
+  }
+
+  return output + markdown.slice(lastIndex);
+}
+
+function createBundleResourceWriter(loadResource: ExportResourceLoader) {
+  const usedPaths = new Set<string>();
+  const resources = new Map<string, ZipEntryInput>();
+  return {
+    add: async (resourceRef: string, filename: string, prefix: string) => {
+      const cached = resources.get(resourceRef);
+      if (cached) {
+        return cached.path;
+      }
+      const path = uniqueBundleResourcePath(prefix, filename, usedPaths);
+      const bytes = await loadResource(resourceRef);
+      const entry = { path, content: bytes };
+      resources.set(resourceRef, entry);
+      return path;
+    },
+    entries: () => Array.from(resources.values()),
+  };
+}
+
+function uniqueBundleResourcePath(prefix: string, filename: string, usedPaths: Set<string>): string {
+  const safePrefix = normalizeZipPath(prefix) || "assets";
+  const safeName = safeFileName(filename || "resource");
+  const extensionIndex = safeName.lastIndexOf(".");
+  const stem = extensionIndex > 0 ? safeName.slice(0, extensionIndex) : safeName;
+  const extension = extensionIndex > 0 ? safeName.slice(extensionIndex) : "";
+  let candidate = `${safePrefix}/${safeName}`;
+  let index = 2;
+  while (usedPaths.has(candidate)) {
+    candidate = `${safePrefix}/${stem}-${index}${extension}`;
+    index += 1;
+  }
+  usedPaths.add(candidate);
+  return candidate;
+}
+
+async function resourceToDataUrl(resourceRef: string, loadResource: ExportResourceLoader, mimeType?: string): Promise<string> {
+  const bytes = await loadResource(resourceRef);
+  const binary = Array.from(bytes).map((byte) => String.fromCharCode(byte)).join("");
+  return `data:${mimeType ?? "application/octet-stream"};base64,${btoa(binary)}`;
+}
+
+function formatTtl(seconds: number): string {
+  if (seconds < 3600) {
+    return `${Math.round(seconds / 60)} 分钟`;
+  }
+  if (seconds < 24 * 3600) {
+    return `${Math.round(seconds / 3600)} 小时`;
+  }
+  return `${Math.round(seconds / 86400)} 天`;
 }
 
 function renderOutline(headings: ExportHeading[]): string {
@@ -575,19 +944,6 @@ function renderOutline(headings: ExportHeading[]): string {
         <p class="lake-export-outline__title">大纲</p>
         ${items}
       </aside>`;
-}
-
-function decodeLakeCardValue(value: string | null): { name?: string; src?: string; size?: number | string } | null {
-  if (!value) {
-    return null;
-  }
-
-  const payload = value.startsWith("data:") ? value.slice("data:".length) : value;
-  try {
-    return JSON.parse(decodeURIComponent(payload)) as { name?: string; src?: string };
-  } catch {
-    return null;
-  }
 }
 
 function readFileSize(value: { size?: number | string }): string | null {
@@ -667,13 +1023,43 @@ function basename(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
+function dirname(path: string): string {
+  const parts = normalizeZipPath(path).split("/").filter(Boolean);
+  parts.pop();
+  return parts.join("/");
+}
+
+function joinZipPath(...parts: Array<string | undefined>): string {
+  return parts
+    .filter((part): part is string => Boolean(part?.trim()))
+    .flatMap((part) => part.split("/"))
+    .filter(Boolean)
+    .join("/");
+}
+
+function relativeZipLink(path: string, basePath?: string): string {
+  const normalizedPath = normalizeZipPath(path);
+  const normalizedBase = normalizeZipPath(basePath ?? "");
+  if (!normalizedBase) {
+    return normalizedPath;
+  }
+
+  const fromParts = normalizedBase.split("/").filter(Boolean);
+  const toParts = normalizedPath.split("/").filter(Boolean);
+  while (fromParts.length > 0 && toParts.length > 0 && fromParts[0] === toParts[0]) {
+    fromParts.shift();
+    toParts.shift();
+  }
+  return [...fromParts.map(() => ".."), ...toParts].join("/") || basename(normalizedPath);
+}
+
 function safeFileName(value: string): string {
   return value.trim().replace(/[\\/:*?"<>|\s]+/g, "-").replace(/^-+|-+$/g, "") || "未命名";
 }
 
 interface ZipEntryInput {
   path: string;
-  content: string;
+  content: string | Uint8Array;
 }
 
 interface ZipEntry {
@@ -694,7 +1080,7 @@ function createZip(inputs: ZipEntryInput[]): Uint8Array {
   for (const input of inputs) {
     const normalizedPath = normalizeZipPath(input.path);
     const path = input.path.endsWith("/") ? `${normalizedPath}/` : normalizedPath;
-    const contentBytes = input.path.endsWith("/") ? new Uint8Array() : utf8(input.content);
+    const contentBytes = input.path.endsWith("/") ? new Uint8Array() : bytesForZipContent(input.content);
     const pathBytes = utf8(path);
     const crc = crc32(contentBytes);
     const localHeaderOffset = byteLength(chunks);
@@ -810,6 +1196,10 @@ const crcTable = Array.from({ length: 256 }, (_, index) => {
 
 function utf8(value: string): Uint8Array {
   return new TextEncoder().encode(value);
+}
+
+function bytesForZipContent(content: string | Uint8Array): Uint8Array {
+  return typeof content === "string" ? utf8(content) : content;
 }
 
 function concatBytes(chunks: Uint8Array[]): Uint8Array {

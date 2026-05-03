@@ -1,22 +1,22 @@
 use aws_config::{BehaviorVersion, Region};
 use aws_credential_types::Credentials;
 use aws_sdk_s3::config::Builder as S3ConfigBuilder;
+use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client;
 use chrono::Utc;
+use std::time::Duration;
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
 use crate::models::OssSettings;
 
-const FILE_UPLOAD_PREFIX: &str = "files";
-
 pub fn build_image_object_key(prefix: &str, filename: &str) -> String {
     build_object_key(prefix, filename)
 }
 
-pub fn build_file_object_key(filename: &str) -> String {
-    build_object_key(FILE_UPLOAD_PREFIX, filename)
+pub fn build_file_object_key(prefix: &str, filename: &str) -> String {
+    build_object_key(prefix, filename)
 }
 
 fn build_object_key(prefix: &str, filename: &str) -> String {
@@ -45,12 +45,124 @@ pub fn build_public_url(base_url: &str, key: &str) -> String {
     )
 }
 
+pub fn build_resource_ref(
+    settings: &OssSettings,
+    key: &str,
+    kind: &str,
+    filename: &str,
+    size: usize,
+    content_type: &str,
+) -> String {
+    format!(
+        "yuque-resource://{}/{}?kind={}&name={}&size={}&type={}",
+        url_encode(&settings.bucket),
+        key.split('/').map(url_encode).collect::<Vec<_>>().join("/"),
+        url_encode(kind),
+        url_encode(filename),
+        size,
+        url_encode(content_type)
+    )
+}
+
+pub fn parse_resource_ref(resource_ref: &str) -> AppResult<(String, String)> {
+    let Some(rest) = resource_ref.strip_prefix("yuque-resource://") else {
+        return Err(AppError::InvalidExternalUrl);
+    };
+    let (target, _) = rest.split_once('?').unwrap_or((rest, ""));
+    let Some((bucket, key)) = target.split_once('/') else {
+        return Err(AppError::InvalidExternalUrl);
+    };
+    let bucket = percent_decode(bucket);
+    let key = key
+        .split('/')
+        .map(percent_decode)
+        .collect::<Vec<_>>()
+        .join("/");
+    if bucket.is_empty() || key.is_empty() {
+        return Err(AppError::InvalidExternalUrl);
+    }
+    Ok((bucket, key))
+}
+
 pub async fn put_object(
     settings: &OssSettings,
     key: &str,
     bytes: Vec<u8>,
     content_type: &str,
 ) -> AppResult<()> {
+    let client = s3_client(settings).await;
+
+    client
+        .put_object()
+        .bucket(&settings.bucket)
+        .key(key)
+        .content_type(content_type)
+        .body(ByteStream::from(bytes))
+        .send()
+        .await
+        .map_err(|error| AppError::S3(error.to_string()))?;
+
+    Ok(())
+}
+
+pub async fn get_object_bytes(settings: &OssSettings, key: &str) -> AppResult<Vec<u8>> {
+    let client = s3_client(settings).await;
+    let output = client
+        .get_object()
+        .bucket(&settings.bucket)
+        .key(key)
+        .send()
+        .await
+        .map_err(|error| AppError::S3(error.to_string()))?;
+
+    output
+        .body
+        .collect()
+        .await
+        .map(|bytes| bytes.into_bytes().to_vec())
+        .map_err(|error| AppError::S3(error.to_string()))
+}
+
+pub async fn presign_get_object_url(
+    settings: &OssSettings,
+    key: &str,
+    ttl_seconds: u64,
+    filename: Option<&str>,
+) -> AppResult<String> {
+    let client = s3_client(settings).await;
+    let config = PresigningConfig::expires_in(Duration::from_secs(ttl_seconds))
+        .map_err(|error| AppError::S3(error.to_string()))?;
+    let mut request = client.get_object().bucket(&settings.bucket).key(key);
+    if let Some(filename) = filename.filter(|name| !name.trim().is_empty()) {
+        request = request.response_content_disposition(content_disposition(filename));
+    }
+    let presigned = request
+        .presigned(config)
+        .await
+        .map_err(|error| AppError::S3(error.to_string()))?;
+    Ok(presigned.uri().to_string())
+}
+
+pub fn validate_resource_key(settings: &OssSettings, bucket: &str, key: &str) -> AppResult<()> {
+    if bucket != settings.bucket {
+        return Err(AppError::InvalidExternalUrl);
+    }
+    let allowed_prefixes = [
+        settings.image_prefix.trim_matches('/'),
+        settings.file_prefix.trim_matches('/'),
+    ];
+    if allowed_prefixes
+        .iter()
+        .filter(|prefix| !prefix.is_empty())
+        .any(|prefix| key == *prefix || key.starts_with(&format!("{prefix}/")))
+    {
+        Ok(())
+    } else {
+        Err(AppError::InvalidExternalUrl)
+    }
+}
+
+async fn s3_client(settings: &OssSettings) -> Client {
     let credentials = Credentials::new(
         settings.access_key_id.clone(),
         settings.secret_access_key.clone(),
@@ -66,19 +178,7 @@ pub async fn put_object(
         .await;
     let mut builder = S3ConfigBuilder::from(&shared_config);
     builder.set_force_path_style(Some(settings.force_path_style));
-    let client = Client::from_conf(builder.build());
-
-    client
-        .put_object()
-        .bucket(&settings.bucket)
-        .key(key)
-        .content_type(content_type)
-        .body(ByteStream::from(bytes))
-        .send()
-        .await
-        .map_err(|error| AppError::S3(error.to_string()))?;
-
-    Ok(())
+    Client::from_conf(builder.build())
 }
 
 fn sanitize_path_segment(value: &str) -> Option<String> {
@@ -122,4 +222,44 @@ fn sanitize_filename(filename: &str) -> String {
         last_dash = false;
     }
     output.trim_matches('-').to_string()
+}
+
+fn url_encode(value: &str) -> String {
+    value
+        .bytes()
+        .flat_map(|byte| {
+            let allowed = byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~');
+            if allowed {
+                vec![byte as char]
+            } else {
+                format!("%{byte:02X}").chars().collect()
+            }
+        })
+        .collect()
+}
+
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let Ok(hex) = u8::from_str_radix(&value[index + 1..index + 3], 16) {
+                output.push(hex);
+                index += 3;
+                continue;
+            }
+        }
+        output.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&output).to_string()
+}
+
+fn content_disposition(filename: &str) -> String {
+    format!(
+        "attachment; filename=\"{}\"; filename*=UTF-8''{}",
+        filename.replace('"', "'"),
+        url_encode(filename)
+    )
 }

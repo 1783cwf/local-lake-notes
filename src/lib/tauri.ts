@@ -1,7 +1,7 @@
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 
-import type { OssSettings, UploadImageInput, UploadImageOutput } from "../app/appState";
+import type { FileDownloadInput, OssSettings, UploadImageInput, UploadImageOutput } from "../app/appState";
 import type {
   CreateDocumentPayload,
   MoveWorkspaceItemInput,
@@ -415,28 +415,71 @@ export async function saveOssSettings(settings: OssSettings): Promise<OssSetting
 
 export async function uploadImage(input: UploadImageInput): Promise<UploadImageOutput> {
   if (!isTauriRuntime()) {
+    const resourceRef = `yuque-resource://browser/images/${encodeURIComponent(input.filename)}?kind=image&name=${encodeURIComponent(input.filename)}&size=${input.bytes.length}`;
     return {
-      url: `https://oss-preview.local/images/${encodeURIComponent(input.filename)}`,
+      url: resourceRef,
       size: input.bytes.length,
       filename: input.filename,
       extname: fileExtension(input.filename),
+      resourceRef,
+      previewUrl: `https://oss-preview.local/images/${encodeURIComponent(input.filename)}`,
     };
   }
 
-  return invoke<UploadImageOutput>("upload_image", { input });
+  return normalizeUploadOutputPreview(await invoke<UploadImageOutput>("upload_image", { input }));
 }
 
 export async function uploadFile(input: UploadImageInput): Promise<UploadImageOutput> {
   if (!isTauriRuntime()) {
+    const resourceRef = `yuque-resource://browser/files/${encodeURIComponent(input.filename)}?kind=file&name=${encodeURIComponent(input.filename)}&size=${input.bytes.length}`;
     return {
-      url: `https://oss-preview.local/files/${encodeURIComponent(input.filename)}`,
+      url: resourceRef,
       size: input.bytes.length,
       filename: input.filename,
       extname: fileExtension(input.filename),
+      resourceRef,
+      previewUrl: `https://oss-preview.local/files/${encodeURIComponent(input.filename)}`,
     };
   }
 
-  return invoke<UploadImageOutput>("upload_file", { input });
+  return normalizeUploadOutputPreview(await invoke<UploadImageOutput>("upload_file", { input }));
+}
+
+export async function prepareResourcePreview(resourceRef: string): Promise<string> {
+  if (!isTauriRuntime()) {
+    return resourceRef;
+  }
+
+  const output = await invoke<{ previewUrl: string; localPath: string }>("prepare_resource_preview", {
+    input: { resourceRef },
+  });
+  return convertFileSrc(output.localPath);
+}
+
+export async function createTemporaryResourceUrl(
+  resourceRef: string,
+  ttlSeconds: number,
+  filename?: string,
+): Promise<string> {
+  if (!isTauriRuntime()) {
+    return `${resourceRef}${resourceRef.includes("?") ? "&" : "?"}signed=preview&ttl=${ttlSeconds}`;
+  }
+
+  const output = await invoke<{ url: string }>("create_temporary_resource_url", {
+    input: { resourceRef, ttlSeconds, filename },
+  });
+  return output.url;
+}
+
+export async function readResourceBytes(resourceRef: string): Promise<Uint8Array> {
+  if (!isTauriRuntime()) {
+    return new TextEncoder().encode(resourceRef);
+  }
+
+  const bytes = await invoke<number[]>("read_resource_bytes", {
+    input: { resourceRef },
+  });
+  return new Uint8Array(bytes);
 }
 
 export async function openExternalUrl(url: string): Promise<void> {
@@ -468,6 +511,30 @@ export async function downloadExternalFile(url: string, filename: string): Promi
   return selected;
 }
 
+export async function downloadResourceFile(input: FileDownloadInput): Promise<string | null> {
+  if (!input.resourceRef) {
+    return downloadExternalFile(input.url, input.filename);
+  }
+
+  const defaultPath = safeDownloadFileName(input.filename) || "附件";
+  if (!isTauriRuntime()) {
+    await downloadBrowserRemoteFile(input.url, defaultPath);
+    return defaultPath;
+  }
+
+  const selected = await save({
+    defaultPath,
+    filters: downloadFileFilters(defaultPath),
+    title: "下载附件",
+  });
+  if (typeof selected !== "string") {
+    return null;
+  }
+
+  await invoke("download_resource", { input: { resourceRef: input.resourceRef, path: selected } });
+  return selected;
+}
+
 function fileExtension(filename: string): string | undefined {
   const extension = filename.split(".").pop();
   return extension && extension !== filename ? extension : undefined;
@@ -480,6 +547,16 @@ function downloadFileFilters(filename: string): Array<{ name: string; extensions
 
 function safeDownloadFileName(filename: string): string {
   return filename.trim().replace(/[\\/:*?"<>|\r\n\t]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function normalizeUploadOutputPreview(output: UploadImageOutput): UploadImageOutput {
+  if (!output.previewUrl || output.previewUrl === output.resourceRef || output.previewUrl.startsWith("http")) {
+    return output;
+  }
+  return {
+    ...output,
+    previewUrl: convertFileSrc(output.previewUrl),
+  };
 }
 
 function fileNameFromUrl(url: string): string {

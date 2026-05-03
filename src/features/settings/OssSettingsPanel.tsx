@@ -28,7 +28,7 @@ export function OssSettingsPanel({ open, settings, onClose, onSave }: OssSetting
     return null;
   }
 
-  const update = (key: keyof OssSettings, value: string | boolean) => {
+  const update = (key: keyof OssSettings, value: string | boolean | number) => {
     setDraft((current) => ({
       ...current,
       [key]: value,
@@ -106,12 +106,44 @@ export function OssSettingsPanel({ open, settings, onClose, onSave }: OssSetting
               />
             </label>
             <label>
-              公开访问 URL
+              公开访问 URL（兼容旧链接，可选）
               <input value={draft.publicBaseUrl} onChange={(event) => update("publicBaseUrl", event.target.value)} />
             </label>
             <label>
               图片目录
               <input value={draft.imagePrefix} onChange={(event) => update("imagePrefix", event.target.value)} />
+            </label>
+            <label>
+              附件目录
+              <input value={draft.filePrefix} onChange={(event) => update("filePrefix", event.target.value)} />
+            </label>
+            <label>
+              默认导出资源策略
+              <select
+                value={draft.defaultExportResourceStrategy}
+                onChange={(event) => update("defaultExportResourceStrategy", event.target.value)}
+              >
+                <option value="bundle">本地资源包</option>
+                <option value="signed-url">短时签名链接</option>
+              </select>
+            </label>
+            <label>
+              默认签名有效期（秒）
+              <input
+                type="number"
+                min={1}
+                value={draft.defaultSignedUrlTtlSeconds}
+                onChange={(event) => update("defaultSignedUrlTtlSeconds", Number(event.target.value))}
+              />
+            </label>
+            <label>
+              最大签名有效期（秒）
+              <input
+                type="number"
+                min={1}
+                value={draft.maxSignedUrlTtlSeconds}
+                onChange={(event) => update("maxSignedUrlTtlSeconds", Number(event.target.value))}
+              />
             </label>
             <label className="checkbox-label">
               <input
@@ -120,6 +152,14 @@ export function OssSettingsPanel({ open, settings, onClose, onSave }: OssSetting
                 onChange={(event) => update("forcePathStyle", event.target.checked)}
               />
               Path-style endpoint
+            </label>
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={draft.allowSignedUrlExport}
+                onChange={(event) => update("allowSignedUrlExport", event.target.checked)}
+              />
+              允许导出短时签名链接
             </label>
 
             {error ? <p className="settings-error">{error}</p> : null}

@@ -9,6 +9,9 @@ use commands::documents::{
     rename_lake_document, write_export_bytes, write_export_file, write_lake_document,
 };
 use commands::external::{download_external_file, open_external_url};
+use commands::resources::{
+    create_temporary_resource_url, download_resource, prepare_resource_preview, read_resource_bytes,
+};
 use commands::settings::{get_oss_settings, save_oss_settings};
 use commands::upload::{upload_file, upload_image};
 use commands::workspace::{
@@ -49,6 +52,10 @@ pub fn run() {
             write_export_bytes,
             export_pdf_from_html,
             download_external_file,
+            prepare_resource_preview,
+            download_resource,
+            read_resource_bytes,
+            create_temporary_resource_url,
             get_oss_settings,
             save_oss_settings,
             open_external_url,

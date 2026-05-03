@@ -611,12 +611,49 @@ button {
   right: 0;
   z-index: 20;
   display: grid;
-  min-width: 132px;
+  min-width: 178px;
   padding: 6px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 14px 34px rgb(31 38 45 / 14%);
+}
+
+.export-menu__section {
+  display: grid;
+  gap: 8px;
+  padding: 6px 6px 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.export-menu__section label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #4c535a;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.export-menu__section input {
+  width: 14px;
+  height: 14px;
+}
+
+.export-menu__section select {
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: #25292d;
+  background: #ffffff;
+  outline: none;
+}
+
+.export-menu__section select:focus {
+  border-color: var(--green);
 }
 
 .export-menu__content button {
@@ -868,16 +905,19 @@ button {
   font-weight: 600;
 }
 
-.settings-content input {
+.settings-content input,
+.settings-content select {
   width: 100%;
   height: 38px;
   padding: 0 10px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
+  background: #ffffff;
   outline: none;
 }
 
-.settings-content input:focus {
+.settings-content input:focus,
+.settings-content select:focus {
   border-color: var(--green);
 }
 

@@ -6,6 +6,14 @@ import type { LakeEditorInstance } from "./editorTypes";
 import type { LakeDocumentExportRequest } from "./lakeExport";
 import { createLakeEditor, destroyLakeEditor, hasLakeEditorRuntime } from "./lakeEditorAdapter";
 import { createEditorFileUpload, createEditorImageUpload } from "./uploadAdapter";
+import {
+  dehydrateLakeResources,
+  dehydrateResourceText,
+  hydrateLakeResources,
+  parseResourceReference,
+  resourceReferenceFromUpload,
+  type ResourcePreview,
+} from "./resourceReference";
 import { useLakeAutosave } from "./useLakeAutosave";
 
 interface LakeEditorProps {
@@ -18,6 +26,7 @@ interface LakeEditorProps {
   onUploadImage: (input: UploadImageInput) => Promise<UploadImageOutput>;
   onUploadFile: (input: UploadImageInput) => Promise<UploadImageOutput>;
   onDownloadFile: (input: FileDownloadInput) => Promise<void>;
+  onPrepareResourcePreview: (resourceRef: string) => Promise<string>;
   onSaveStatusChange: (status: SaveStatus) => void;
 }
 
@@ -31,22 +40,54 @@ export function LakeEditor({
   onUploadImage,
   onUploadFile,
   onDownloadFile,
+  onPrepareResourcePreview,
   onSaveStatusChange,
 }: LakeEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<LakeEditorInstance | null>(null);
   const handledExportRequestRef = useRef(0);
+  const resourcePreviewsRef = useRef<ResourcePreview[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const readContent = useCallback(() => {
-    return editorRef.current?.getDocument("text/lake") ?? content;
+  const readLakeContent = useCallback(() => {
+    return dehydrateLakeResources(editorRef.current?.getDocument("text/lake") ?? content, resourcePreviewsRef.current);
   }, [content]);
+
+  const rememberPreview = useCallback((resourceRef: string, previewUrl: string) => {
+    resourcePreviewsRef.current = rememberPreviewInList(resourcePreviewsRef.current, resourceRef, previewUrl);
+  }, []);
+
+  const registerUploadPreview = useCallback((output: UploadImageOutput): UploadImageOutput => {
+    const resourceRef = resourceReferenceFromUpload(output);
+    const previewUrl = output.previewUrl ?? output.url;
+    if (!resourceRef) {
+      return output;
+    }
+    rememberPreview(resourceRef, previewUrl);
+    return {
+      ...output,
+      url: previewUrl,
+      resourceRef,
+      previewUrl,
+    };
+  }, [rememberPreview]);
+
+  const resolveResourceRef = useCallback((url: string): string | undefined => {
+    if (parseResourceReference(url)) {
+      return url;
+    }
+    return resourcePreviewsRef.current.find((preview) => preview.previewUrl === url)?.resourceRef;
+  }, []);
+
+  const readContent = useCallback(() => {
+    return readLakeContent();
+  }, [readLakeContent]);
   const readExportContent = useCallback((request: LakeDocumentExportRequest) => {
     if (request.format === "html" || request.format === "pdf") {
-      return editorRef.current?.getDocument("text/html") ?? content;
+      return dehydrateLakeResources(editorRef.current?.getDocument("text/html") ?? content, resourcePreviewsRef.current);
     }
     if (request.format === "markdown") {
-      return editorRef.current?.getDocument("text/markdown") ?? content;
+      return dehydrateResourceText(editorRef.current?.getDocument("text/markdown") ?? content, resourcePreviewsRef.current);
     }
     return readContent();
   }, [content, readContent]);
@@ -86,18 +127,32 @@ export function LakeEditor({
 
     setLoadError(null);
     destroyLakeEditor(editorRef.current);
+    let cancelled = false;
     let editor: LakeEditorInstance;
     try {
       editor = createLakeEditor(containerRef.current, {
         onContentChange: () => {
           scheduleSave();
         },
-        uploadImage: (request) => createEditorImageUpload(request, onUploadImage),
-        uploadFile: (file) => createEditorFileUpload(file, onUploadFile),
-        downloadFile: (file) => onDownloadFile({ url: file.src, filename: file.name }),
+        uploadImage: async (request) => registerUploadPreview(await createEditorImageUpload(request, onUploadImage)),
+        uploadFile: async (file) => registerUploadPreview(await createEditorFileUpload(file, onUploadFile)),
+        downloadFile: (file) => onDownloadFile({ url: file.src, filename: file.name, resourceRef: resolveResourceRef(file.src) }),
       });
       editorRef.current = editor;
-      editor.setDocument("text/lake", content);
+      void hydrateLakeResources(content, async (resourceRef) => {
+        const previewUrl = await onPrepareResourcePreview(resourceRef);
+        rememberPreview(resourceRef, previewUrl);
+        return previewUrl;
+      }).then((hydratedContent) => {
+        if (!cancelled) {
+          editor.setDocument("text/lake", hydratedContent);
+          setStatus({ state: "clean" });
+        }
+      }).catch((error) => {
+        if (!cancelled) {
+          setLoadError(toMessage(error));
+        }
+      });
       setStatus({ state: "clean" });
     } catch (error) {
       editorRef.current = null;
@@ -106,12 +161,13 @@ export function LakeEditor({
     }
 
     return () => {
+      cancelled = true;
       destroyLakeEditor(editor);
       if (editorRef.current === editor) {
         editorRef.current = null;
       }
     };
-  }, [content, document, onDownloadFile, onUploadFile, onUploadImage, scheduleSave, setStatus]);
+  }, [content, document, onDownloadFile, onPrepareResourcePreview, onUploadFile, onUploadImage, scheduleSave, setStatus]);
 
   useEffect(() => {
     if (manualSaveRequest > 0) {
@@ -158,6 +214,13 @@ export function LakeEditor({
   }
 
   return <div ref={containerRef} className="lake-editor-root ne-doc-major-editor" />;
+}
+
+function rememberPreviewInList(previews: ResourcePreview[], resourceRef: string, previewUrl: string): ResourcePreview[] {
+  return [...previews.filter((preview) => preview.resourceRef !== resourceRef && preview.previewUrl !== previewUrl), {
+    resourceRef,
+    previewUrl,
+  }];
 }
 
 function toMessage(error: unknown): string {

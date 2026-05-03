@@ -27,6 +27,7 @@ test("没有文档时显示工作台空状态", () => {
       onUploadImage={vi.fn()}
       onUploadFile={vi.fn()}
       onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={vi.fn(async (resourceRef) => resourceRef)}
       onSaveStatusChange={vi.fn()}
     />,
   );
@@ -34,7 +35,7 @@ test("没有文档时显示工作台空状态", () => {
   expect(screen.getByText("选择或新建 Lake 文档")).toBeInTheDocument();
 });
 
-test("打开文档时把 text/lake 内容设置进语雀编辑器", () => {
+test("打开文档时把 text/lake 内容设置进语雀编辑器", async () => {
   const editor: LakeEditorInstance = {
     setDocument: vi.fn(),
     getDocument: vi.fn(() => "<p>内容</p>"),
@@ -56,11 +57,14 @@ test("打开文档时把 text/lake 内容设置进语雀编辑器", () => {
       onUploadImage={vi.fn()}
       onUploadFile={vi.fn()}
       onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={vi.fn(async (resourceRef) => resourceRef)}
       onSaveStatusChange={vi.fn()}
     />,
   );
 
-  expect(editor.setDocument).toHaveBeenCalledWith("text/lake", "<p>内容</p>");
+  await waitFor(() => {
+    expect(editor.setDocument).toHaveBeenCalledWith("text/lake", "<p>内容</p>");
+  });
 });
 
 test("关闭当前文档时在编辑器容器移除前销毁 Lake 实例", () => {
@@ -87,6 +91,7 @@ test("关闭当前文档时在编辑器容器移除前销毁 Lake 实例", () =>
       onUploadImage={vi.fn()}
       onUploadFile={vi.fn()}
       onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={vi.fn(async (resourceRef) => resourceRef)}
       onSaveStatusChange={vi.fn()}
     />,
   );
@@ -102,6 +107,7 @@ test("关闭当前文档时在编辑器容器移除前销毁 Lake 实例", () =>
       onUploadImage={vi.fn()}
       onUploadFile={vi.fn()}
       onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={vi.fn(async (resourceRef) => resourceRef)}
       onSaveStatusChange={vi.fn()}
     />,
   );
@@ -127,6 +133,7 @@ test("创建 Lake 实例失败时显示错误状态", () => {
       onUploadImage={vi.fn()}
       onUploadFile={vi.fn()}
       onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={vi.fn(async (resourceRef) => resourceRef)}
       onSaveStatusChange={vi.fn()}
     />,
   );
@@ -152,19 +159,32 @@ test("收到 HTML 导出请求时读取语雀 HTML 内容", async () => {
       document={documentEntry}
       content="<p>内容</p>"
       manualSaveRequest={0}
-      exportRequest={{ id: 1, format: "html", document: documentEntry }}
+      exportRequest={{
+        id: 1,
+        format: "html",
+        document: documentEntry,
+        resourceStrategy: "bundle",
+        signedUrlTtlSeconds: 86400,
+      }}
       onSave={vi.fn()}
       onExportContent={onExportContent}
       onUploadImage={vi.fn()}
       onUploadFile={vi.fn()}
       onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={vi.fn(async (resourceRef) => resourceRef)}
       onSaveStatusChange={vi.fn()}
     />,
   );
 
   await waitFor(() => {
     expect(onExportContent).toHaveBeenCalledWith(
-      { id: 1, format: "html", document: documentEntry },
+      {
+        id: 1,
+        format: "html",
+        document: documentEntry,
+        resourceStrategy: "bundle",
+        signedUrlTtlSeconds: 86400,
+      },
       "<p><img src=\"file:///tmp/a.png\"></p>",
     );
   });
@@ -188,19 +208,32 @@ test("收到 Markdown 导出请求时读取语雀原生 Markdown 内容", async 
       document={documentEntry}
       content="<p>内容</p>"
       manualSaveRequest={0}
-      exportRequest={{ id: 1, format: "markdown", document: documentEntry }}
+      exportRequest={{
+        id: 1,
+        format: "markdown",
+        document: documentEntry,
+        resourceStrategy: "bundle",
+        signedUrlTtlSeconds: 86400,
+      }}
       onSave={vi.fn()}
       onExportContent={onExportContent}
       onUploadImage={vi.fn()}
       onUploadFile={vi.fn()}
       onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={vi.fn(async (resourceRef) => resourceRef)}
       onSaveStatusChange={vi.fn()}
     />,
   );
 
   await waitFor(() => {
     expect(onExportContent).toHaveBeenCalledWith(
-      { id: 1, format: "markdown", document: documentEntry },
+      {
+        id: 1,
+        format: "markdown",
+        document: documentEntry,
+        resourceStrategy: "bundle",
+        signedUrlTtlSeconds: 86400,
+      },
       "## Markdown 内容",
     );
   });

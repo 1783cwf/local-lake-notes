@@ -10,7 +10,8 @@ import { AppController } from "./AppController";
 
 const createLakeDocument = vi.fn<(title: string, parentPath?: string) => Promise<CreateDocumentPayload>>();
 const deleteLakeDocument = vi.fn<(path: string) => Promise<WorkspacePayload>>();
-const downloadExternalFile = vi.fn<(url: string, filename: string) => Promise<string | null>>();
+const createTemporaryResourceUrl = vi.fn<(resourceRef: string, ttlSeconds: number, filename?: string) => Promise<string>>();
+const downloadResourceFile = vi.fn<(input: { url: string; filename: string; resourceRef?: string }) => Promise<string | null>>();
 const getRecentWorkspace = vi.fn<() => Promise<WorkspacePayload | null>>(async () => null);
 const moveWorkspaceItem = vi.fn<(input: MoveWorkspaceItemInput) => Promise<WorkspacePayload>>();
 const readLakeDocument = vi.fn<(path: string) => Promise<string>>(async () => "<p>hello</p>");
@@ -77,13 +78,17 @@ vi.mock("../lib/tauri", () => ({
   chooseWorkspaceDirectory: vi.fn(async () => "/tmp/kb"),
   createLakeDirectory: vi.fn(),
   createLakeDocument: (title: string, parentPath?: string) => createLakeDocument(title, parentPath),
+  createTemporaryResourceUrl: (resourceRef: string, ttlSeconds: number, filename?: string) => (
+    createTemporaryResourceUrl(resourceRef, ttlSeconds, filename)
+  ),
   deleteLakeDirectory: vi.fn(),
   deleteLakeDocument: (path: string) => deleteLakeDocument(path),
-  downloadExternalFile: (url: string, filename: string) => downloadExternalFile(url, filename),
+  downloadResourceFile: (input: { url: string; filename: string; resourceRef?: string }) => downloadResourceFile(input),
   getOssSettings: vi.fn(async () => null),
   getRecentWorkspace: () => getRecentWorkspace(),
   moveWorkspaceItem: (input: MoveWorkspaceItemInput) => moveWorkspaceItem(input),
   openExternalUrl: vi.fn(),
+  prepareResourcePreview: vi.fn(async (resourceRef: string) => resourceRef),
   readLakeDocument: (path: string) => readLakeDocument(path),
   renameLakeDirectory: vi.fn(),
   renameLakeDocument: vi.fn(),
@@ -92,6 +97,7 @@ vi.mock("../lib/tauri", () => ({
   saveBinaryExport: (defaultPath: string, bytes: Uint8Array, filters: Array<{ name: string; extensions: string[] }>) => saveBinaryExport(defaultPath, bytes, filters),
   savePdfExport: (defaultPath: string, html: string, filters: Array<{ name: string; extensions: string[] }>) => savePdfExport(defaultPath, html, filters),
   saveTextExport: (defaultPath: string, content: string, filters: Array<{ name: string; extensions: string[] }>) => saveTextExport(defaultPath, content, filters),
+  readResourceBytes: vi.fn(async () => new Uint8Array([1, 2, 3])),
   saveWorkspaceOrder: vi.fn(),
   setWorkspaceRoot: (path: string) => setWorkspaceRoot(path),
   uploadFile: vi.fn(),
@@ -101,9 +107,11 @@ vi.mock("../lib/tauri", () => ({
 
 beforeEach(() => {
   createLakeDocument.mockReset();
+  createTemporaryResourceUrl.mockReset();
+  createTemporaryResourceUrl.mockImplementation(async (resourceRef, ttlSeconds) => `${resourceRef}&ttl=${ttlSeconds}`);
   deleteLakeDocument.mockReset();
-  downloadExternalFile.mockReset();
-  downloadExternalFile.mockResolvedValue("/tmp/attachment.pdf");
+  downloadResourceFile.mockReset();
+  downloadResourceFile.mockResolvedValue("/tmp/attachment.pdf");
   getRecentWorkspace.mockResolvedValue(null);
   moveWorkspaceItem.mockReset();
   readLakeDocument.mockResolvedValue("<p>hello</p>");

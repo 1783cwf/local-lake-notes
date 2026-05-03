@@ -9,12 +9,15 @@ import { LakeEditor } from "../features/lake-editor/LakeEditor";
 import {
   createOfficialLakeMarkdownConverter,
   exportFileName,
-  lakeDocumentToHtml,
-  lakeDocumentToMarkdown,
-  lakeWorkspaceToMarkdownZip,
+  lakeDocumentToHtmlWithResources,
+  lakeDocumentToHtmlBundle,
+  lakeDocumentMarkdownToBundle,
+  lakeDocumentMarkdownToTextWithResources,
+  lakeWorkspaceToMarkdownZipWithResources,
   workspaceExportFileName,
   type DocumentExportFormat,
   type LakeDocumentExportRequest,
+  type LakeDocumentResourceExportOptions,
 } from "../features/lake-editor/lakeExport";
 import { OssSettingsPanel } from "../features/settings/OssSettingsPanel";
 import type {
@@ -35,7 +38,10 @@ import {
   createLakeDocument,
   deleteLakeDirectory,
   deleteLakeDocument,
-  downloadExternalFile,
+  createTemporaryResourceUrl,
+  downloadResourceFile,
+  prepareResourcePreview,
+  readResourceBytes,
   getOssSettings,
   getRecentWorkspace,
   moveWorkspaceItem,
@@ -303,40 +309,74 @@ export function AppController() {
     await writeLakeDocument(relativePath, content);
   }, []);
 
-  const exportDocument = useCallback((format: DocumentExportFormat) => {
+  const createResourceExportOptions = useCallback((
+    resourceStrategy?: LakeDocumentExportRequest["resourceStrategy"],
+    signedUrlTtlSeconds?: number,
+  ): LakeDocumentResourceExportOptions => ({
+    strategy: resourceStrategy ?? ossSettings?.defaultExportResourceStrategy ?? "bundle",
+    signedUrlTtlSeconds: signedUrlTtlSeconds ?? ossSettings?.defaultSignedUrlTtlSeconds ?? 24 * 60 * 60,
+    signResource: (resourceRef, filename, ttlSeconds) => createTemporaryResourceUrl(resourceRef, ttlSeconds, filename),
+    loadResource: readResourceBytes,
+  }), [ossSettings?.defaultExportResourceStrategy, ossSettings?.defaultSignedUrlTtlSeconds]);
+
+  const exportDocument = useCallback((
+    format: DocumentExportFormat,
+    resourceStrategy?: LakeDocumentExportRequest["resourceStrategy"],
+    signedUrlTtlSeconds?: number,
+  ) => {
     if (!currentDocument) {
       return;
     }
 
+    const exportOptions = createResourceExportOptions(resourceStrategy, signedUrlTtlSeconds);
     setExportRequest((request) => ({
       id: (request?.id ?? 0) + 1,
       format,
       document: currentDocument.entry,
+      resourceStrategy: exportOptions.strategy,
+      signedUrlTtlSeconds: exportOptions.signedUrlTtlSeconds,
     }));
-  }, [currentDocument]);
+  }, [createResourceExportOptions, currentDocument]);
 
   const writeDocumentExport = useCallback(async (
     request: LakeDocumentExportRequest,
     content: string,
   ) => {
     const title = documentTitleFromPath(request.document.path);
+    const exportOptions = createResourceExportOptions(request.resourceStrategy, request.signedUrlTtlSeconds);
     try {
       if (request.format === "markdown") {
-        await saveTextExport(
-          exportFileName(request.document, request.format),
-          lakeDocumentToMarkdown(title, content),
-          [{ name: "Markdown", extensions: ["md"] }],
-        );
+        if (request.resourceStrategy === "bundle") {
+          await saveBinaryExport(
+            exportFileName(request.document, "markdown").replace(/\.md$/i, ".zip"),
+            await lakeDocumentMarkdownToBundle(title, content, exportOptions),
+            [{ name: "ZIP", extensions: ["zip"] }],
+          );
+        } else {
+          await saveTextExport(
+            exportFileName(request.document, request.format),
+            await lakeDocumentMarkdownToTextWithResources(title, content, exportOptions),
+            [{ name: "Markdown", extensions: ["md"] }],
+          );
+        }
       } else if (request.format === "html") {
-        await saveTextExport(
-          exportFileName(request.document, request.format),
-          await lakeDocumentToHtml(title, content),
-          [{ name: "HTML", extensions: ["html"] }],
-        );
+        if (request.resourceStrategy === "bundle") {
+          await saveBinaryExport(
+            exportFileName(request.document, "html").replace(/\.html$/i, ".zip"),
+            await lakeDocumentToHtmlBundle(title, content, exportOptions),
+            [{ name: "ZIP", extensions: ["zip"] }],
+          );
+        } else {
+          await saveTextExport(
+            exportFileName(request.document, request.format),
+            await lakeDocumentToHtmlWithResources(title, content, exportOptions),
+            [{ name: "HTML", extensions: ["html"] }],
+          );
+        }
       } else {
         await savePdfExport(
           exportFileName(request.document, request.format),
-          await lakeDocumentToHtml(title, content),
+          await lakeDocumentToHtmlWithResources(title, content, exportOptions),
           [{ name: "PDF", extensions: ["pdf"] }],
         );
       }
@@ -344,7 +384,7 @@ export function AppController() {
     } catch (error) {
       setAppError(toMessage(error));
     }
-  }, []);
+  }, [createResourceExportOptions]);
 
   const exportWorkspaceMarkdownZip = useCallback(async () => {
     if (!workspace) {
@@ -355,7 +395,12 @@ export function AppController() {
       const converter = createOfficialLakeMarkdownConverter();
       let zip: Uint8Array;
       try {
-        zip = await lakeWorkspaceToMarkdownZip(workspace, readLakeDocument, converter.convert);
+        zip = await lakeWorkspaceToMarkdownZipWithResources(
+          workspace,
+          readLakeDocument,
+          createResourceExportOptions(),
+          converter.convert,
+        );
       } finally {
         converter.dispose();
       }
@@ -368,7 +413,7 @@ export function AppController() {
     } catch (error) {
       setAppError(toMessage(error));
     }
-  }, [workspace]);
+  }, [createResourceExportOptions, workspace]);
 
   const saveSettings = useCallback(async (settings: OssSettings) => {
     const saved = await saveOssSettings(settings);
@@ -393,10 +438,19 @@ export function AppController() {
 
   const downloadEditorFile = useCallback(async (input: FileDownloadInput) => {
     try {
-      await downloadExternalFile(input.url, input.filename);
+      await downloadResourceFile(input);
       setAppError(null);
     } catch (error) {
       setAppError(toMessage(error));
+    }
+  }, []);
+
+  const prepareEditorResourcePreview = useCallback(async (resourceRef: string) => {
+    try {
+      return await prepareResourcePreview(resourceRef);
+    } catch (error) {
+      setAppError(toMessage(error));
+      throw error;
     }
   }, []);
 
@@ -509,6 +563,8 @@ export function AppController() {
           saveStatus={saveStatus}
           onManualSave={() => setManualSaveRequest((current) => current + 1)}
           onExportDocument={exportDocument}
+          defaultExportResourceStrategy={ossSettings?.defaultExportResourceStrategy}
+          defaultSignedUrlTtlSeconds={ossSettings?.defaultSignedUrlTtlSeconds}
           onRenameDocument={(title) => {
             if (currentDocument) {
               return renameDocumentTo(currentDocument.entry, title);
@@ -526,6 +582,7 @@ export function AppController() {
           onUploadImage={uploadEditorImage}
           onUploadFile={uploadEditorFile}
           onDownloadFile={downloadEditorFile}
+          onPrepareResourcePreview={prepareEditorResourcePreview}
           onSaveStatusChange={setSaveStatus}
         />
       </main>

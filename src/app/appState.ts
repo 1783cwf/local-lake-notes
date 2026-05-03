@@ -24,11 +24,14 @@ export interface UploadImageOutput {
   size: number;
   filename: string;
   extname?: string;
+  resourceRef?: string;
+  previewUrl?: string;
 }
 
 export interface FileDownloadInput {
   url: string;
   filename: string;
+  resourceRef?: string;
 }
 
 export interface OssSettings {
@@ -37,10 +40,17 @@ export interface OssSettings {
   region: string;
   accessKeyId: string;
   secretAccessKey: string;
-  publicBaseUrl: string;
+  publicBaseUrl?: string;
   forcePathStyle: boolean;
   imagePrefix: string;
+  filePrefix: string;
+  defaultExportResourceStrategy: ExportResourceStrategy;
+  defaultSignedUrlTtlSeconds: number;
+  maxSignedUrlTtlSeconds: number;
+  allowSignedUrlExport: boolean;
 }
+
+export type ExportResourceStrategy = "bundle" | "signed-url";
 
 export const emptySaveStatus: SaveStatus = {
   state: "clean",

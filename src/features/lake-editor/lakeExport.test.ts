@@ -1,9 +1,14 @@
 import {
   createOfficialLakeMarkdownConverter,
   lakeDocumentToHtml,
+  lakeDocumentToHtmlBundle,
+  lakeDocumentToHtmlWithResources,
+  lakeDocumentMarkdownToBundle,
+  lakeDocumentMarkdownToTextWithResources,
   lakeDocumentToMarkdown,
   lakeWorkspaceToMarkdownZip,
 } from "./lakeExport";
+import { createResourceReference } from "./resourceReference";
 
 afterEach(() => {
   window.Doc = undefined;
@@ -42,6 +47,105 @@ test("HTML 导出保留 Lake 内容和打印样式", async () => {
   expect(html).toContain("批文历史数据.zip");
   expect(html).toContain("(35 kB)");
   expect(html).toContain("<p class=\"ne-p\">world</p>");
+});
+
+test("短时签名 HTML 导出会重写图片和附件链接", async () => {
+  const imageRef = createResourceReference({ bucket: "yuque", key: "images/a.png", kind: "image" });
+  const fileRef = createResourceReference({
+    bucket: "yuque",
+    key: "files/a.pdf",
+    kind: "file",
+    name: "资料.pdf",
+  });
+  const fileValue = `data:${encodeURIComponent(JSON.stringify({ src: fileRef, name: "资料.pdf" }))}`;
+  const html = await lakeDocumentToHtmlWithResources(
+    "标题",
+    `<p><img src="${imageRef}" alt="截图"></p><card name="file" value="${fileValue}"></card>`,
+    {
+      strategy: "signed-url",
+      signedUrlTtlSeconds: 3600,
+      signResource: async (_resourceRef, filename) => `https://signed.example/${filename ?? "image"}`,
+    },
+  );
+
+  expect(html).toContain("资源链接有效期：1 小时");
+  expect(html).toContain("https://signed.example/截图");
+  expect(html).toContain("https://signed.example/资料.pdf");
+});
+
+test("本地资源包 HTML 导出会生成 index 和资源文件", async () => {
+  const imageRef = createResourceReference({
+    bucket: "yuque",
+    key: "images/a.png",
+    kind: "image",
+    name: "截图.png",
+  });
+  const fileRef = createResourceReference({
+    bucket: "yuque",
+    key: "files/a.pdf",
+    kind: "file",
+    name: "资料.pdf",
+  });
+  const fileValue = `data:${encodeURIComponent(JSON.stringify({ src: fileRef, name: "资料.pdf" }))}`;
+  const zip = await lakeDocumentToHtmlBundle(
+    "标题",
+    `<p><img src="${imageRef}" alt="截图"></p><card name="file" value="${fileValue}"></card>`,
+    {
+      strategy: "bundle",
+      signedUrlTtlSeconds: 3600,
+      loadResource: async () => new Uint8Array([65]),
+    },
+  );
+  const entries = readStoredZipEntries(zip);
+
+  expect(entries.map((entry) => entry.path)).toEqual(["index.html", "assets/截图.png", "attachments/资料.pdf"]);
+  expect(entries[0].content).toContain("assets/截图.png");
+  expect(entries[0].content).toContain("attachments/资料.pdf");
+  expect(entries[1].content).toBe("A");
+  expect(entries[2].content).toBe("A");
+});
+
+test("Markdown 本地资源包导出会生成 md 和资源文件", async () => {
+  const imageRef = createResourceReference({
+    bucket: "yuque",
+    key: "images/a.png",
+    kind: "image",
+    name: "截图.png",
+  });
+  const zip = await lakeDocumentMarkdownToBundle(
+    "标题",
+    `![截图](${imageRef})`,
+    {
+      strategy: "bundle",
+      signedUrlTtlSeconds: 3600,
+      loadResource: async () => new Uint8Array([66]),
+    },
+  );
+  const entries = readStoredZipEntries(zip);
+
+  expect(entries.map((entry) => entry.path)).toEqual(["标题.md", "assets/截图.png"]);
+  expect(entries[0].content).toContain("![截图](assets/截图.png)");
+  expect(entries[1].content).toBe("B");
+});
+
+test("Markdown 短时签名导出保持单文件并重写链接", async () => {
+  const imageRef = createResourceReference({
+    bucket: "yuque",
+    key: "images/a.png",
+    kind: "image",
+    name: "截图.png",
+  });
+  const markdown = await lakeDocumentMarkdownToTextWithResources(
+    "标题",
+    `![截图](${imageRef})`,
+    {
+      strategy: "signed-url",
+      signedUrlTtlSeconds: 3600,
+      signResource: async () => "https://signed.example/a.png",
+    },
+  );
+
+  expect(markdown).toContain("![截图](https://signed.example/a.png)");
 });
 
 test("知识库 Markdown 按目录树导出为 ZIP", async () => {

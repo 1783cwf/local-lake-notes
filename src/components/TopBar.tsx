@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ChevronDown, Cloud, Download, Save, Share2 } from "lucide-react";
 
 import type { SaveStatus } from "../app/appState";
-import type { DocumentExportFormat } from "../features/lake-editor/lakeExport";
+import type { DocumentExportFormat, ExportResourceStrategy } from "../features/lake-editor/lakeExport";
 import type { WorkspaceDocument } from "../features/workspace/workspaceStore";
 import { documentTitleFromPath } from "../features/workspace/workspaceStore";
 import { IconButton } from "./IconButton";
@@ -12,20 +12,39 @@ interface TopBarProps {
   saveStatus: SaveStatus;
   onManualSave: () => void;
   onRenameDocument?: (title: string) => void | Promise<void>;
-  onExportDocument?: (format: DocumentExportFormat) => void;
+  onExportDocument?: (format: DocumentExportFormat, resourceStrategy: ExportResourceStrategy, signedUrlTtlSeconds: number) => void;
+  defaultExportResourceStrategy?: ExportResourceStrategy;
+  defaultSignedUrlTtlSeconds?: number;
 }
 
-export function TopBar({ document, saveStatus, onManualSave, onRenameDocument, onExportDocument }: TopBarProps) {
+export function TopBar({
+  document,
+  saveStatus,
+  onManualSave,
+  onRenameDocument,
+  onExportDocument,
+  defaultExportResourceStrategy = "bundle",
+  defaultSignedUrlTtlSeconds = 24 * 60 * 60,
+}: TopBarProps) {
   const title = document ? documentTitleFromPath(document.path) : "Lake 本地笔记";
   const [editingTitle, setEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(title);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [resourceStrategy, setResourceStrategy] = useState<ExportResourceStrategy>(defaultExportResourceStrategy);
+  const [ttlSeconds, setTtlSeconds] = useState(defaultSignedUrlTtlSeconds);
+  const ttlOptions = Array.from(new Set([ttlSeconds, 3600, 24 * 3600, 7 * 24 * 3600])).sort((left, right) => left - right);
 
   useEffect(() => {
     if (!editingTitle) {
       setDraftTitle(title);
     }
   }, [editingTitle, title]);
+  useEffect(() => {
+    setResourceStrategy(defaultExportResourceStrategy);
+  }, [defaultExportResourceStrategy]);
+  useEffect(() => {
+    setTtlSeconds(defaultSignedUrlTtlSeconds);
+  }, [defaultSignedUrlTtlSeconds]);
 
   const submitTitle = () => {
     const nextTitle = draftTitle.trim();
@@ -36,7 +55,7 @@ export function TopBar({ document, saveStatus, onManualSave, onRenameDocument, o
   };
   const exportDocument = (format: DocumentExportFormat) => {
     setExportMenuOpen(false);
-    onExportDocument?.(format);
+    onExportDocument?.(format, resourceStrategy, ttlSeconds);
   };
 
   return (
@@ -104,6 +123,37 @@ export function TopBar({ document, saveStatus, onManualSave, onRenameDocument, o
           </button>
           {exportMenuOpen ? (
             <div className="export-menu__content" role="menu">
+              <div className="export-menu__section" role="presentation">
+                <label>
+                  <input
+                    type="radio"
+                    name="export-resource-strategy"
+                    checked={resourceStrategy === "bundle"}
+                    onChange={() => setResourceStrategy("bundle")}
+                  />
+                  本地资源包
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="export-resource-strategy"
+                    checked={resourceStrategy === "signed-url"}
+                    onChange={() => setResourceStrategy("signed-url")}
+                  />
+                  短时签名链接
+                </label>
+                {resourceStrategy === "signed-url" ? (
+                  <select
+                    aria-label="签名链接有效期"
+                    value={ttlSeconds}
+                    onChange={(event) => setTtlSeconds(Number(event.target.value))}
+                  >
+                    {ttlOptions.map((seconds) => (
+                      <option key={seconds} value={seconds}>{formatTtlLabel(seconds)}</option>
+                    ))}
+                  </select>
+                ) : null}
+              </div>
               <button type="button" role="menuitem" onClick={() => exportDocument("markdown")}>
                 Markdown
               </button>
@@ -122,6 +172,16 @@ export function TopBar({ document, saveStatus, onManualSave, onRenameDocument, o
       </div>
     </header>
   );
+}
+
+function formatTtlLabel(seconds: number): string {
+  if (seconds < 3600) {
+    return `${Math.round(seconds / 60)} 分钟`;
+  }
+  if (seconds < 24 * 3600) {
+    return `${Math.round(seconds / 3600)} 小时`;
+  }
+  return `${Math.round(seconds / (24 * 3600))} 天`;
 }
 
 function saveStatusLabel(status: SaveStatus): string {

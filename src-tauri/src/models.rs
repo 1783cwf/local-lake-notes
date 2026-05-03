@@ -62,9 +62,20 @@ pub struct OssSettings {
     pub region: String,
     pub access_key_id: String,
     pub secret_access_key: String,
+    #[serde(default)]
     pub public_base_url: String,
     pub force_path_style: bool,
     pub image_prefix: String,
+    #[serde(default = "default_file_prefix")]
+    pub file_prefix: String,
+    #[serde(default = "default_export_resource_strategy")]
+    pub default_export_resource_strategy: String,
+    #[serde(default = "default_signed_url_ttl_seconds")]
+    pub default_signed_url_ttl_seconds: u64,
+    #[serde(default = "default_max_signed_url_ttl_seconds")]
+    pub max_signed_url_ttl_seconds: u64,
+    #[serde(default = "default_allow_signed_url_export")]
+    pub allow_signed_url_export: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,4 +94,64 @@ pub struct UploadImageOutput {
     pub filename: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extname: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource_ref: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourcePreviewInput {
+    pub resource_ref: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourcePreviewOutput {
+    pub resource_ref: String,
+    pub preview_url: String,
+    pub local_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceDownloadInput {
+    pub resource_ref: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SignedResourceUrlInput {
+    pub resource_ref: String,
+    pub ttl_seconds: u64,
+    pub filename: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SignedResourceUrlOutput {
+    pub url: String,
+    pub expires_in_seconds: u64,
+}
+
+fn default_file_prefix() -> String {
+    "files".to_string()
+}
+
+fn default_export_resource_strategy() -> String {
+    "bundle".to_string()
+}
+
+fn default_signed_url_ttl_seconds() -> u64 {
+    24 * 60 * 60
+}
+
+fn default_max_signed_url_ttl_seconds() -> u64 {
+    7 * 24 * 60 * 60
+}
+
+fn default_allow_signed_url_export() -> bool {
+    true
 }

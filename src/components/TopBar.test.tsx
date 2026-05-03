@@ -52,5 +52,5 @@ test("右上角导出菜单可以选择文档导出格式", async () => {
   await user.click(screen.getByRole("button", { name: "导出文档" }));
   await user.click(screen.getByRole("menuitem", { name: "PDF" }));
 
-  expect(onExportDocument).toHaveBeenCalledWith("pdf");
+  expect(onExportDocument).toHaveBeenCalledWith("pdf", "bundle", 86400);
 });

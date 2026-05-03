@@ -13,7 +13,7 @@ fn builds_image_object_key_under_type_directory() {
 
 #[test]
 fn builds_file_object_key_under_files_directory() {
-    let key = build_file_object_key("hello world.zip");
+    let key = build_file_object_key("files", "hello world.zip");
 
     assert!(key.starts_with("files/"));
     assert!(key.ends_with(".zip"));
