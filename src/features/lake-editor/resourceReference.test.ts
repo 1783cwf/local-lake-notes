@@ -46,24 +46,24 @@ test("附件卡片资源在 hydrate 与 dehydrate 之间保留原文件名", asy
     bucket: "yuque",
     key: "files/a.pdf",
     kind: "file",
-    name: "八期部署资源鲁池.pdf",
+    name: "测试资料.pdf",
     size: 43325,
   });
-  const value = `data:${encodeURIComponent(JSON.stringify({ src: ref, name: "八期部署资源鲁池.pdf", size: 43325 }))}`;
+  const value = `data:${encodeURIComponent(JSON.stringify({ src: ref, name: "测试资料.pdf", size: 43325 }))}`;
   const content = `<card name="file" value="${value}"></card>`;
 
   const hydrated = await hydrateLakeResources(content, async () => "asset://preview/a.pdf");
-  expect(decodeURIComponent(hydrated)).toContain("八期部署资源鲁池.pdf");
+  expect(decodeURIComponent(hydrated)).toContain("测试资料.pdf");
   expect(decodeURIComponent(hydrated)).toContain("asset://preview/a.pdf");
 
   const dehydrated = dehydrateLakeResources(hydrated, [{ resourceRef: ref, previewUrl: "asset://preview/a.pdf" }]);
-  expect(decodeURIComponent(dehydrated)).toContain("八期部署资源鲁池.pdf");
+  expect(decodeURIComponent(dehydrated)).toContain("测试资料.pdf");
   expect(decodeURIComponent(dehydrated)).toContain("yuque-resource://");
 });
 
 test("导出时可以把公共 URL 还原为私有资源引用", () => {
   const ref = resourceReferenceFromPublicUrl(
-    "https://oss.weistuday.com:16666/yuque/files/2026/04/f6873b30-50af.pdf",
+    "https://oss.weistuday.com:16666/yuque/files/2026/04/test-file.pdf",
     {
       bucket: "yuque",
       publicBaseUrl: "https://oss.weistuday.com:16666/yuque",
@@ -72,15 +72,15 @@ test("导出时可以把公共 URL 还原为私有资源引用", () => {
     },
     {
       kind: "file",
-      name: "八期部署资源鲁池.pdf",
+      name: "测试资料.pdf",
     },
   );
 
   expect(parseResourceReference(ref ?? "")).toEqual({
     bucket: "yuque",
-    key: "files/2026/04/f6873b30-50af.pdf",
+    key: "files/2026/04/test-file.pdf",
     kind: "file",
-    name: "八期部署资源鲁池.pdf",
+    name: "测试资料.pdf",
     size: undefined,
     mimeType: undefined,
   });

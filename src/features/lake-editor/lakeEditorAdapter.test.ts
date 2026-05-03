@@ -63,13 +63,18 @@ test("创建编辑器时配置 Lake 图片、附件上传和大纲能力", () =>
       }),
     }),
   );
+  const editorOptions = vi.mocked(window.Doc.createOpenEditor).mock.calls[0]?.[1] as {
+    image?: { isCaptureImageURL?: (url: string) => boolean };
+  };
+  expect(editorOptions.image?.isCaptureImageURL?.("asset://localhost/preview.png")).toBe(false);
+  expect(editorOptions.image?.isCaptureImageURL?.("yuque-resource://yuque/images/a.png?kind=image")).toBe(true);
   destroyLakeEditor(created);
 });
 
 test("选中编辑态附件卡片后通过悬浮下载按钮使用 Lake 附件名称下载", () => {
   const value = `data:${encodeURIComponent(JSON.stringify({
-    src: "https://oss.example/files/2026/04/f6873b30-50af-421e-a385-da468458972f.pdf",
-    name: "八期部署资源鲁池.pdf",
+    src: "https://oss.example/files/2026/04/test-file.pdf",
+    name: "测试资料.pdf",
     download: true,
   }))}`;
   const editor: LakeEditorInstance = {
@@ -83,7 +88,7 @@ test("选中编辑态附件卡片后通过悬浮下载按钮使用 Lake 附件�
   };
   const downloadFile = vi.fn();
   const root = document.createElement("div");
-  root.innerHTML = `<ne-card data-card-name="file" data-card-type="inline"><span class="ne-card-file" data-testid="ne-card-file">八期部署资源鲁池.pdf</span></ne-card>`;
+  root.innerHTML = `<ne-card data-card-name="file" data-card-type="inline"><span class="ne-card-file" data-testid="ne-card-file">测试资料.pdf</span></ne-card>`;
 
   const created = createLakeEditor(root, {
     onContentChange: vi.fn(),
@@ -105,8 +110,8 @@ test("选中编辑态附件卡片后通过悬浮下载按钮使用 Lake 附件�
     ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
   expect(downloadFile).toHaveBeenCalledWith({
-    name: "八期部署资源鲁池.pdf",
-    src: "https://oss.example/files/2026/04/f6873b30-50af-421e-a385-da468458972f.pdf",
+    name: "测试资料.pdf",
+    src: "https://oss.example/files/2026/04/test-file.pdf",
   });
   destroyLakeEditor(created);
 });

@@ -45,6 +45,7 @@ interface ExportHeading {
 export interface LakeDocumentResourceExportOptions {
   strategy: ExportResourceStrategy;
   signedUrlTtlSeconds: number;
+  embedImages?: boolean;
   bucket?: string;
   publicBaseUrl?: string;
   imagePrefix?: string;
@@ -366,7 +367,9 @@ export async function lakeDocumentToHtmlWithResources(
   content: string,
   options: LakeDocumentResourceExportOptions,
 ): Promise<string> {
-  const result = await rewriteExportResourceReferences(content, options, { inlineImages: options.strategy === "bundle" });
+  const result = await rewriteExportResourceReferences(content, options, {
+    inlineImages: options.embedImages || options.strategy === "bundle",
+  });
   const nextContent = result.content;
   const html = await lakeDocumentToHtml(title, nextContent);
   if (options.strategy !== "signed-url") {
@@ -387,6 +390,7 @@ export async function lakeDocumentToHtmlBundle(
   const result = await rewriteExportResourceReferences(content, options, {
     assetPrefix: "assets",
     attachmentPrefix: "attachments",
+    inlineImages: true,
   });
   return createZip([
     { path: "index.html", content: await lakeDocumentToHtml(title, result.content) },
@@ -749,7 +753,14 @@ async function rewriteExportResourceReferences(
       name: image.getAttribute("alt") ?? undefined,
     }) : null;
     if (resource) {
-      image.setAttribute("src", await sign(resource.resourceRef, resourceFileName(resource.resource, image.getAttribute("alt") ?? undefined)));
+      if (bundle?.inlineImages) {
+        if (!options.loadResource) {
+          throw new Error("缺少本地资源包读取器");
+        }
+        image.setAttribute("src", await resourceToOptimizedImageDataUrl(resource.resourceRef, options.loadResource, resourceMimeType(resource.resource)));
+      } else {
+        image.setAttribute("src", await sign(resource.resourceRef, resourceFileName(resource.resource, image.getAttribute("alt") ?? undefined)));
+      }
     }
   }
 
@@ -821,7 +832,7 @@ async function rewriteHtmlResourceReferencesToBundle(
       continue;
     }
     if (bundle?.inlineImages) {
-      image.setAttribute("src", await resourceToDataUrl(resource.resourceRef, options.loadResource, resource.resource.mimeType));
+      image.setAttribute("src", await resourceToOptimizedImageDataUrl(resource.resourceRef, options.loadResource, resourceMimeType(resource.resource)));
       continue;
     }
     const path = await writer.add(
@@ -888,7 +899,7 @@ async function inlineHtmlImages(
       name: image.getAttribute("alt") ?? undefined,
     }) : null;
     if (resource?.resource.kind === "image") {
-      image.setAttribute("src", await resourceToDataUrl(resource.resourceRef, options.loadResource, resource.resource.mimeType));
+      image.setAttribute("src", await resourceToOptimizedImageDataUrl(resource.resourceRef, options.loadResource, resourceMimeType(resource.resource)));
     }
   }
 
@@ -980,6 +991,10 @@ function resourceFileName(resource: LakeResourceReference, fallback?: string): s
   return resource.name || fallback || basename(resource.key) || "resource";
 }
 
+function resourceMimeType(resource: LakeResourceReference): string | undefined {
+  return resource.mimeType || mimeTypeFromFilename(resource.name || resource.key);
+}
+
 function markExportAttachmentLink(link: Element): void {
   link.classList.add("lake-export-attachment");
   link.setAttribute("target", "_blank");
@@ -1021,10 +1036,99 @@ function uniqueBundleResourcePath(prefix: string, filename: string, usedPaths: S
   return candidate;
 }
 
-async function resourceToDataUrl(resourceRef: string, loadResource: ExportResourceLoader, mimeType?: string): Promise<string> {
+async function resourceToOptimizedImageDataUrl(
+  resourceRef: string,
+  loadResource: ExportResourceLoader,
+  mimeType?: string,
+): Promise<string> {
   const bytes = await loadResource(resourceRef);
-  const binary = Array.from(bytes).map((byte) => String.fromCharCode(byte)).join("");
-  return `data:${mimeType ?? "application/octet-stream"};base64,${btoa(binary)}`;
+  const normalizedMimeType = mimeType ?? "application/octet-stream";
+  const original = bytesToDataUrl(bytes, normalizedMimeType);
+  const optimized = await tryOptimizeImageDataUrl(bytes, normalizedMimeType);
+  return optimized && optimized.length < original.length ? optimized : original;
+}
+
+function bytesToDataUrl(bytes: Uint8Array, mimeType: string): string {
+  const chunkSize = 0x8000;
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
+  }
+  return `data:${mimeType};base64,${btoa(binary)}`;
+}
+
+async function tryOptimizeImageDataUrl(bytes: Uint8Array, mimeType: string): Promise<string | null> {
+  if (!shouldOptimizeImage(mimeType) || typeof createImageBitmap !== "function") {
+    return null;
+  }
+
+  try {
+    const bitmap = await createImageBitmap(new Blob([copyBytesToArrayBuffer(bytes)], { type: mimeType }));
+    const scale = Math.min(1, 2560 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) {
+      bitmap.close?.();
+      return null;
+    }
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close?.();
+
+    const blob = await canvasToBlob(canvas, "image/webp", scale < 1 ? 0.92 : 0.9);
+    return blob ? blobToDataUrl(blob) : null;
+  } catch {
+    return null;
+  }
+}
+
+function shouldOptimizeImage(mimeType: string): boolean {
+  const normalized = mimeType.toLowerCase();
+  return normalized.startsWith("image/") &&
+    normalized !== "image/gif" &&
+    normalized !== "image/svg+xml" &&
+    normalized !== "image/webp";
+}
+
+function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), type, quality);
+  });
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(String(reader.result)));
+    reader.addEventListener("error", () => reject(reader.error));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function mimeTypeFromFilename(filename: string): string | undefined {
+  const extension = filename.split(".").pop()?.toLowerCase();
+  switch (extension) {
+    case "png":
+      return "image/png";
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "webp":
+      return "image/webp";
+    case "gif":
+      return "image/gif";
+    case "svg":
+      return "image/svg+xml";
+    default:
+      return undefined;
+  }
 }
 
 function formatTtl(seconds: number): string {

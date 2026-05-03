@@ -7,7 +7,7 @@ use crate::commands::settings::{load_oss_settings, validate_oss_settings};
 use crate::error::{AppError, AppResult};
 use crate::models::{UploadImageInput, UploadImageOutput};
 use crate::storage::s3::{
-    build_file_object_key, build_image_object_key, build_public_url, build_resource_ref, put_object,
+    build_file_object_key, build_image_object_key, build_resource_ref, put_object,
 };
 
 #[tauri::command]
@@ -56,12 +56,10 @@ async fn upload_object(
         input.bytes.len(),
         &content_type,
     );
-    let preview_url = if settings.public_base_url.trim().is_empty() {
-        let preview_path = write_upload_preview_cache(&app, &key, &input.bytes)?;
-        preview_path.to_string_lossy().to_string()
-    } else {
-        build_public_url(&settings.public_base_url, &key)
-    };
+    // 上传后的编辑器回显不能依赖公共访问 URL。桶保持私有时，预览走本地缓存；
+    // 文档保存仍写入 resource_ref，后续打开时可从 S3 重新生成缓存。
+    let preview_path = write_upload_preview_cache(&app, &key, &input.bytes)?;
+    let preview_url = preview_path.to_string_lossy().to_string();
 
     Ok(UploadImageOutput {
         url: resource_ref.clone(),

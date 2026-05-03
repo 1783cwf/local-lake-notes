@@ -371,16 +371,17 @@ export function AppController() {
           );
         }
       } else if (request.format === "html") {
+        const htmlExportOptions = { ...exportOptions, embedImages: true };
         if (request.resourceStrategy === "bundle") {
           await saveBinaryExport(
             exportFileName(request.document, "html").replace(/\.html$/i, ".zip"),
-            await lakeDocumentToHtmlBundle(title, content, exportOptions),
+            await lakeDocumentToHtmlBundle(title, content, htmlExportOptions),
             [{ name: "ZIP", extensions: ["zip"] }],
           );
         } else {
           await saveTextExport(
             exportFileName(request.document, request.format),
-            await lakeDocumentToHtmlWithResources(title, content, exportOptions),
+            await lakeDocumentToHtmlWithResources(title, content, htmlExportOptions),
             [{ name: "HTML", extensions: ["html"] }],
           );
         }

@@ -27,8 +27,8 @@ test("Lake 内容可以导出为 Markdown", () => {
 
 test("HTML 导出保留 Lake 内容和打印样式", async () => {
   const fileValue = `data:${encodeURIComponent(JSON.stringify({
-    name: "批文历史数据.zip",
-    src: "file:///tmp/批文历史数据.zip",
+    name: "测试附件.zip",
+    src: "file:///tmp/测试附件.zip",
     size: 35 * 1024,
   }))}`;
   const html = await lakeDocumentToHtml(
@@ -44,7 +44,7 @@ test("HTML 导出保留 Lake 内容和打印样式", async () => {
   expect(html).toContain("yuque-lake-export-outline-width");
   expect(html).toContain("href=\"#heading-hello\"");
   expect(html).toContain("lake-export-attachment");
-  expect(html).toContain("批文历史数据.zip");
+  expect(html).toContain("测试附件.zip");
   expect(html).toContain("(35 kB)");
   expect(html).toContain("<p class=\"ne-p\">world</p>");
 });
@@ -73,6 +73,32 @@ test("短时签名 HTML 导出会重写图片和附件链接", async () => {
   expect(html).toContain("https://signed.example/资料.pdf");
 });
 
+test("短时签名 HTML 导出可将图片内嵌为 base64 并保留附件签名链接", async () => {
+  const imageRef = createResourceReference({ bucket: "yuque", key: "images/a.png", kind: "image", mimeType: "image/png" });
+  const fileRef = createResourceReference({
+    bucket: "yuque",
+    key: "files/a.pdf",
+    kind: "file",
+    name: "资料.pdf",
+  });
+  const fileValue = `data:${encodeURIComponent(JSON.stringify({ src: fileRef, name: "资料.pdf" }))}`;
+  const html = await lakeDocumentToHtmlWithResources(
+    "标题",
+    `<p><img src="${imageRef}" alt="截图"></p><card name="file" value="${fileValue}"></card>`,
+    {
+      strategy: "signed-url",
+      signedUrlTtlSeconds: 3600,
+      embedImages: true,
+      signResource: async (_resourceRef, filename) => `https://signed.example/${filename ?? "file"}`,
+      loadResource: async () => new Uint8Array([65]),
+    },
+  );
+
+  expect(html).toContain("src=\"data:image/png;base64,QQ==\"");
+  expect(html).toContain("https://signed.example/资料.pdf");
+  expect(html).not.toContain("https://signed.example/截图");
+});
+
 test("短时签名 HTML 导出会把公共 URL 按资源规则重写", async () => {
   const signedRefs: string[] = [];
   const html = await lakeDocumentToHtmlWithResources(
@@ -82,7 +108,7 @@ test("短时签名 HTML 导出会把公共 URL 按资源规则重写", async () 
       "<img src=\"https://oss.weistuday.com:16666/yuque/images/2026/05/a.png\" alt=\"截图.png\">",
       "</p>",
       "<p>",
-      "<a href=\"https://oss.weistuday.com:16666/yuque/files/2026/04/f6873b30-50af.pdf\">八期部署资源鲁池.pdf</a>",
+      "<a href=\"https://oss.weistuday.com:16666/yuque/files/2026/04/test-file.pdf\">测试资料.pdf</a>",
       "</p>",
     ].join(""),
     {
@@ -101,11 +127,11 @@ test("短时签名 HTML 导出会把公共 URL 按资源规则重写", async () 
 
   expect(html).not.toContain("https://oss.weistuday.com:16666/yuque/");
   expect(html).toContain("https://signed.example/截图.png");
-  expect(html).toContain("https://signed.example/八期部署资源鲁池.pdf");
+  expect(html).toContain("https://signed.example/测试资料.pdf");
   expect(html).toContain("lake-export-attachment");
   expect(signedRefs).toHaveLength(2);
   expect(signedRefs[0]).toContain("yuque-resource://yuque/images/2026/05/a.png");
-  expect(signedRefs[1]).toContain("yuque-resource://yuque/files/2026/04/f6873b30-50af.pdf");
+  expect(signedRefs[1]).toContain("yuque-resource://yuque/files/2026/04/test-file.pdf");
 });
 
 test("本地资源包 HTML 导出会生成 index 和资源文件", async () => {
@@ -133,11 +159,10 @@ test("本地资源包 HTML 导出会生成 index 和资源文件", async () => {
   );
   const entries = readStoredZipEntries(zip);
 
-  expect(entries.map((entry) => entry.path)).toEqual(["index.html", "assets/截图.png", "attachments/资料.pdf"]);
-  expect(entries[0].content).toContain("assets/截图.png");
+  expect(entries.map((entry) => entry.path)).toEqual(["index.html", "attachments/资料.pdf"]);
+  expect(entries[0].content).toContain("data:image/png;base64,QQ==");
   expect(entries[0].content).toContain("attachments/资料.pdf");
   expect(entries[1].content).toBe("A");
-  expect(entries[2].content).toBe("A");
 });
 
 test("本地资源包 HTML 导出会把公共 URL 打进资源目录", async () => {

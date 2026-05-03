@@ -50,7 +50,7 @@ export function createLakeEditor(
     image: {
       createUploadPromise: options.uploadImage,
       isCaptureImageURL(url: string) {
-        return !url.startsWith("http://") && !url.startsWith("https://");
+        return !isPreviewUrl(url) && !url.startsWith("http://") && !url.startsWith("https://");
       },
     },
     file: {
@@ -409,6 +409,11 @@ function decodeLakeCardValue(value: string | null): LakeFileCard | null {
 
 function normalizeFileUrl(src: string): string {
   return src.trim();
+}
+
+function isPreviewUrl(src: string): boolean {
+  const value = src.trim();
+  return value.startsWith("asset://") || value.startsWith("tauri://") || value.startsWith("file://");
 }
 
 function readRenderedFileName(fileCard: HTMLElement): string | null {
