@@ -59,7 +59,7 @@ export function LakeEditor({
 
   const registerUploadPreview = useCallback((output: UploadImageOutput): UploadImageOutput => {
     const resourceRef = resourceReferenceFromUpload(output);
-    const previewUrl = output.previewUrl ?? output.url;
+    const previewUrl = output.previewUrl ?? output.src ?? output.url;
     if (!resourceRef) {
       return output;
     }
@@ -67,6 +67,7 @@ export function LakeEditor({
     return {
       ...output,
       url: previewUrl,
+      src: previewUrl,
       resourceRef,
       previewUrl,
     };

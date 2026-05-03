@@ -21,6 +21,7 @@ export interface UploadImageInput {
 
 export interface UploadImageOutput {
   url: string;
+  src?: string;
   size: number;
   filename: string;
   extname?: string;

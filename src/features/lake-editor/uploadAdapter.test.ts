@@ -1,6 +1,11 @@
 import { createEditorFileUpload, createEditorImageUpload } from "./uploadAdapter";
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 test("把 File 转成 Tauri 上传输入并返回编辑器需要的数据", async () => {
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:local-preview");
   const uploadImage = vi.fn(async () => ({
     url: "https://oss.example/images/a.png",
     size: 4,
@@ -16,6 +21,8 @@ test("把 File 转成 Tauri 上传输入并返回编辑器需要的数据", asyn
     mimeType: "image/png",
   });
   expect(result.url).toBe("https://oss.example/images/a.png");
+  expect(result.src).toBe("blob:local-preview");
+  expect(result.previewUrl).toBe("blob:local-preview");
 });
 
 test("支持 data URL 图片上传", async () => {
@@ -25,13 +32,15 @@ test("支持 data URL 图片上传", async () => {
     filename: "image.png",
   }));
 
-  await createEditorImageUpload({ type: "base64", data: "data:image/png;base64,AQI=" }, uploadImage);
+  const result = await createEditorImageUpload({ type: "base64", data: "data:image/png;base64,AQI=" }, uploadImage);
 
   expect(uploadImage).toHaveBeenCalledWith({
     bytes: [1, 2],
     filename: "image.png",
     mimeType: "image/png",
   });
+  expect(result.src).toBe("data:image/png;base64,AQI=");
+  expect(result.previewUrl).toBe("data:image/png;base64,AQI=");
 });
 
 test("远程 URL 转存第一版明确失败", async () => {

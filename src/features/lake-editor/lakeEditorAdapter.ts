@@ -413,7 +413,15 @@ function normalizeFileUrl(src: string): string {
 
 function isPreviewUrl(src: string): boolean {
   const value = src.trim();
-  return value.startsWith("asset://") || value.startsWith("tauri://") || value.startsWith("file://");
+  return (
+    value.startsWith("asset://") ||
+    value.startsWith("tauri://") ||
+    value.startsWith("file://") ||
+    value.startsWith("blob:") ||
+    value.startsWith("data:") ||
+    value.startsWith("http://asset.localhost/") ||
+    value.startsWith("https://asset.localhost/")
+  );
 }
 
 function readRenderedFileName(fileCard: HTMLElement): string | null {

@@ -67,6 +67,9 @@ test("创建编辑器时配置 Lake 图片、附件上传和大纲能力", () =>
     image?: { isCaptureImageURL?: (url: string) => boolean };
   };
   expect(editorOptions.image?.isCaptureImageURL?.("asset://localhost/preview.png")).toBe(false);
+  expect(editorOptions.image?.isCaptureImageURL?.("blob:local-preview")).toBe(false);
+  expect(editorOptions.image?.isCaptureImageURL?.("data:image/png;base64,AQI=")).toBe(false);
+  expect(editorOptions.image?.isCaptureImageURL?.("http://asset.localhost/preview.png")).toBe(false);
   expect(editorOptions.image?.isCaptureImageURL?.("yuque-resource://yuque/images/a.png?kind=image")).toBe(true);
   destroyLakeEditor(created);
 });
