@@ -1,17 +1,21 @@
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 use crate::error::AppResult;
-use crate::models::{OssSettings, WorkspaceOrder};
+use crate::models::{KnownWorkspace, OssSettings, WorkspaceOrder};
 
 const DATABASE_FILE: &str = "yuque-lake-notes.sqlite3";
 const RECENT_WORKSPACE_KEY: &str = "recent_workspace";
 const OSS_SETTINGS_KEY: &str = "oss_settings";
+const BACKUP_KEY_METADATA_KEY: &str = "backup_key_metadata";
+const BACKUP_DEVICE_ID_KEY: &str = "backup_device_id";
+const BACKUP_LAST_MANIFEST_KEY: &str = "backup_last_manifest";
 const LEGACY_WORKSPACE_META_DIR: &str = ".yuque-lake-notes";
 const LEGACY_WORKSPACE_ORDER_FILE: &str = "order.json";
 
@@ -25,6 +29,21 @@ pub fn database_path(app: &AppHandle) -> AppResult<PathBuf> {
     let dir = database_dir(app)?;
     fs::create_dir_all(&dir)?;
     Ok(dir.join(DATABASE_FILE))
+}
+
+pub fn snapshot_database(app: &AppHandle, destination: &Path) -> AppResult<()> {
+    let source_path = database_path(app)?;
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let source = Connection::open(source_path)?;
+    let mut target = Connection::open(destination)?;
+    {
+        let backup = rusqlite::backup::Backup::new(&source, &mut target)?;
+        // SQLite 在线备份 API 能在应用运行时拿到一致性快照，避免直接复制 wal 中的半写入状态。
+        backup.run_to_completion(100, Duration::from_millis(25), None)?;
+    }
+    Ok(())
 }
 
 #[cfg(debug_assertions)]
@@ -50,11 +69,8 @@ pub fn load_recent_workspace_root(app: &AppHandle) -> AppResult<Option<String>> 
 }
 
 pub fn save_recent_workspace_root(app: &AppHandle, root: &Path) -> AppResult<()> {
-    set_setting_at(
-        &database_path(app)?,
-        RECENT_WORKSPACE_KEY,
-        &root.to_string_lossy(),
-    )
+    let path = database_path(app)?;
+    set_recent_workspace_root_at(&path, root)
 }
 
 pub fn load_oss_settings(app: &AppHandle) -> AppResult<Option<OssSettings>> {
@@ -130,7 +146,38 @@ pub fn move_workspace_order(app: &AppHandle, from_root: &Path, to_root: &Path) -
         "UPDATE workspace_order SET workspace_root = ?1 WHERE workspace_root = ?2",
         params![workspace_key(to_root), workspace_key(from_root)],
     )?;
+    move_known_workspace_at(&path, from_root, to_root)?;
     remove_legacy_workspace_order(from_root)
+}
+
+pub fn list_known_workspaces(app: &AppHandle) -> AppResult<Vec<KnownWorkspace>> {
+    let path = database_path(app)?;
+    migrate_legacy_app_settings(app, &path)?;
+    list_known_workspaces_at(&path)
+}
+
+pub fn load_backup_key_metadata(app: &AppHandle) -> AppResult<Option<String>> {
+    get_setting_at(&database_path(app)?, BACKUP_KEY_METADATA_KEY)
+}
+
+pub fn save_backup_key_metadata(app: &AppHandle, metadata: &str) -> AppResult<()> {
+    set_setting_at(&database_path(app)?, BACKUP_KEY_METADATA_KEY, metadata)
+}
+
+pub fn load_backup_device_id(app: &AppHandle) -> AppResult<Option<String>> {
+    get_setting_at(&database_path(app)?, BACKUP_DEVICE_ID_KEY)
+}
+
+pub fn save_backup_device_id(app: &AppHandle, device_id: &str) -> AppResult<()> {
+    set_setting_at(&database_path(app)?, BACKUP_DEVICE_ID_KEY, device_id)
+}
+
+pub fn load_backup_last_manifest(app: &AppHandle) -> AppResult<Option<String>> {
+    get_setting_at(&database_path(app)?, BACKUP_LAST_MANIFEST_KEY)
+}
+
+pub fn save_backup_last_manifest(app: &AppHandle, manifest: &str) -> AppResult<()> {
+    set_setting_at(&database_path(app)?, BACKUP_LAST_MANIFEST_KEY, manifest)
 }
 
 pub fn load_oss_settings_at(database_path: &Path) -> AppResult<Option<OssSettings>> {
@@ -222,11 +269,76 @@ pub fn prune_workspace_order_path_at(
 }
 
 pub fn set_recent_workspace_root_at(database_path: &Path, root: &Path) -> AppResult<()> {
-    set_setting_at(database_path, RECENT_WORKSPACE_KEY, &root.to_string_lossy())
+    set_setting_at(database_path, RECENT_WORKSPACE_KEY, &root.to_string_lossy())?;
+    upsert_known_workspace_at(database_path, root)
 }
 
 pub fn load_recent_workspace_root_at(database_path: &Path) -> AppResult<Option<String>> {
     get_setting_at(database_path, RECENT_WORKSPACE_KEY)
+}
+
+pub fn upsert_known_workspace_at(database_path: &Path, root: &Path) -> AppResult<()> {
+    let name = root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or("知识库");
+    connect_at(database_path)?.execute(
+        "
+        INSERT INTO known_workspaces (workspace_root, name, last_opened_at)
+        VALUES (?1, ?2, CURRENT_TIMESTAMP)
+        ON CONFLICT(workspace_root) DO UPDATE SET
+            name = excluded.name,
+            last_opened_at = CURRENT_TIMESTAMP
+        ",
+        params![workspace_key(root), name],
+    )?;
+    Ok(())
+}
+
+pub fn move_known_workspace_at(
+    database_path: &Path,
+    from_root: &Path,
+    to_root: &Path,
+) -> AppResult<()> {
+    let name = to_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or("知识库");
+    connect_at(database_path)?.execute(
+        "
+        UPDATE known_workspaces
+        SET workspace_root = ?1, name = ?2, last_opened_at = CURRENT_TIMESTAMP
+        WHERE workspace_root = ?3
+        ",
+        params![workspace_key(to_root), name, workspace_key(from_root)],
+    )?;
+    Ok(())
+}
+
+pub fn list_known_workspaces_at(database_path: &Path) -> AppResult<Vec<KnownWorkspace>> {
+    migrate_recent_workspace_to_known(database_path)?;
+    let connection = connect_at(database_path)?;
+    let mut statement = connection.prepare(
+        "
+        SELECT workspace_root, name, last_opened_at
+        FROM known_workspaces
+        ORDER BY last_opened_at DESC, name ASC
+        ",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(KnownWorkspace {
+            root: row.get(0)?,
+            name: row.get(1)?,
+            last_opened_at: row.get(2)?,
+        })
+    })?;
+    let mut workspaces = Vec::new();
+    for row in rows {
+        workspaces.push(row?);
+    }
+    Ok(workspaces)
 }
 
 fn connect_at(database_path: &Path) -> AppResult<Connection> {
@@ -258,6 +370,12 @@ fn initialize_schema(connection: &Connection) -> AppResult<()> {
 
         CREATE INDEX IF NOT EXISTS idx_workspace_order_position
             ON workspace_order (workspace_root, position);
+
+        CREATE TABLE IF NOT EXISTS known_workspaces (
+            workspace_root TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            last_opened_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
         ",
     )?;
     Ok(())
@@ -299,7 +417,10 @@ fn migrate_legacy_app_settings(app: &AppHandle, database_path: &Path) -> AppResu
             RECENT_WORKSPACE_KEY,
             &config.recent_workspace,
         )?;
+        upsert_known_workspace_at(database_path, Path::new(&config.recent_workspace))?;
     }
+
+    migrate_recent_workspace_to_known(database_path)?;
 
     let oss_path = config_dir.join("oss-settings.json");
     if get_setting_at(database_path, OSS_SETTINGS_KEY)?.is_none() && oss_path.exists() {
@@ -309,6 +430,15 @@ fn migrate_legacy_app_settings(app: &AppHandle, database_path: &Path) -> AppResu
     }
 
     Ok(())
+}
+
+fn migrate_recent_workspace_to_known(database_path: &Path) -> AppResult<()> {
+    let Some(recent_workspace) = get_setting_at(database_path, RECENT_WORKSPACE_KEY)? else {
+        return Ok(());
+    };
+    let recent_path = Path::new(&recent_workspace);
+    // 只用 recent workspace 做已知知识库的兜底迁移，避免旧版本用户首次备份时漏掉当前知识库。
+    upsert_known_workspace_at(database_path, recent_path)
 }
 
 fn read_legacy_workspace_order(root: &Path) -> AppResult<Option<Vec<String>>> {

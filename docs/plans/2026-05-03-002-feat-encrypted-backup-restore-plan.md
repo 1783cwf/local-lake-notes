@@ -1,7 +1,7 @@
 ---
 title: "feat: Encrypted backup and restore for app data"
 type: feat
-status: active
+status: completed
 date: 2026-05-03
 origin: docs/brainstorms/2026-04-26-lake-first-notes-requirements.md
 ---
@@ -519,4 +519,3 @@ backups/
 - External docs: `https://docs.rs/tar/latest/tar/struct.Builder.html`
 - External docs: `https://docs.rs/zstd/latest/zstd/`
 - External docs: `https://docs.rs/tempfile/latest/tempfile/`
-

@@ -45,10 +45,53 @@ export interface OssSettings {
   forcePathStyle: boolean;
   imagePrefix: string;
   filePrefix: string;
+  backupPrefix: string;
   defaultExportResourceStrategy: ExportResourceStrategy;
   defaultSignedUrlTtlSeconds: number;
   maxSignedUrlTtlSeconds: number;
   allowSignedUrlExport: boolean;
+}
+
+export interface BackupKeyStatus {
+  configured: boolean;
+  needsKey: boolean;
+  fingerprint?: string;
+  createdAt?: string;
+}
+
+export type BackupRecordType = "full" | "incremental";
+
+export interface BackupRecord {
+  id: string;
+  backupType: BackupRecordType;
+  createdAt: string;
+  baseBackupId?: string;
+  keyFingerprint: string;
+  encryptedSize: number;
+  archiveHash: string;
+  objectKey: string;
+  canRestore: boolean;
+}
+
+export interface CreateBackupInput {
+  forceFull: boolean;
+}
+
+export interface BackupOperationOutput {
+  record: BackupRecord;
+  warnings: string[];
+}
+
+export interface RestoreBackupInput {
+  backupId: string;
+  allowKeyMismatch?: boolean;
+}
+
+export interface RestoreBackupOutput {
+  restoredBackupId: string;
+  restoredAt: string;
+  requiresRestart: boolean;
+  warnings: string[];
 }
 
 export type ExportResourceStrategy = "bundle" | "signed-url";

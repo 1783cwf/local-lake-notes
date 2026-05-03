@@ -1,8 +1,9 @@
 import type { FormEvent, MouseEvent } from "react";
 import { useEffect, useState } from "react";
-import { Check, CloudUpload, X } from "lucide-react";
+import { Check, CloudUpload, DatabaseBackup, X } from "lucide-react";
 
-import type { OssSettings } from "../../app/appState";
+import type { BackupKeyStatus, BackupRecord, OssSettings, RestoreBackupOutput } from "../../app/appState";
+import { BackupSettingsPanel } from "./BackupSettingsPanel";
 import { mergeOssSettings, validateOssSettings } from "./ossSettingsStore";
 
 interface OssSettingsPanelProps {
@@ -10,17 +11,36 @@ interface OssSettingsPanelProps {
   settings: OssSettings | null;
   onClose: () => void;
   onSave: (settings: OssSettings) => Promise<void>;
+  backupKeyStatus: BackupKeyStatus;
+  backupRecords: BackupRecord[];
+  backupBusy: boolean;
+  onSetBackupKey: (secret: string, reset: boolean) => Promise<void>;
+  onCreateBackup: (forceFull: boolean) => Promise<void>;
+  onRestoreBackup: (backupId: string, allowKeyMismatch: boolean) => Promise<RestoreBackupOutput>;
 }
 
-export function OssSettingsPanel({ open, settings, onClose, onSave }: OssSettingsPanelProps) {
+export function OssSettingsPanel({
+  open,
+  settings,
+  onClose,
+  onSave,
+  backupKeyStatus,
+  backupRecords,
+  backupBusy,
+  onSetBackupKey,
+  onCreateBackup,
+  onRestoreBackup,
+}: OssSettingsPanelProps) {
   const [draft, setDraft] = useState(() => mergeOssSettings(settings));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState<"upload" | "backup">("upload");
 
   useEffect(() => {
     if (open) {
       setDraft(mergeOssSettings(settings));
       setError(null);
+      setActiveTab("upload");
     }
   }, [open, settings]);
 
@@ -72,13 +92,25 @@ export function OssSettingsPanel({ open, settings, onClose, onSave }: OssSetting
 
         <div className="settings-panel__body">
           <nav className="settings-menu" aria-label="设置菜单">
-            <button type="button" className="settings-menu__item is-active">
+            <button
+              type="button"
+              className={`settings-menu__item${activeTab === "upload" ? " is-active" : ""}`}
+              onClick={() => setActiveTab("upload")}
+            >
               <CloudUpload size={16} />
               上传配置
             </button>
+            <button
+              type="button"
+              className={`settings-menu__item${activeTab === "backup" ? " is-active" : ""}`}
+              onClick={() => setActiveTab("backup")}
+            >
+              <DatabaseBackup size={16} />
+              备份恢复
+            </button>
           </nav>
 
-          <section className="settings-content" aria-labelledby="upload-settings-title">
+          {activeTab === "upload" ? <section className="settings-content" aria-labelledby="upload-settings-title">
             <h3 id="upload-settings-title">上传配置</h3>
 
             <label>
@@ -116,6 +148,10 @@ export function OssSettingsPanel({ open, settings, onClose, onSave }: OssSetting
             <label>
               附件目录
               <input value={draft.filePrefix} onChange={(event) => update("filePrefix", event.target.value)} />
+            </label>
+            <label>
+              备份目录
+              <input value={draft.backupPrefix} onChange={(event) => update("backupPrefix", event.target.value)} />
             </label>
             <label>
               默认导出资源策略
@@ -173,7 +209,16 @@ export function OssSettingsPanel({ open, settings, onClose, onSave }: OssSetting
                 保存
               </button>
             </div>
-          </section>
+          </section> : (
+            <BackupSettingsPanel
+              keyStatus={backupKeyStatus}
+              backups={backupRecords}
+              busy={backupBusy}
+              onSetKey={onSetBackupKey}
+              onCreateBackup={onCreateBackup}
+              onRestoreBackup={onRestoreBackup}
+            />
+          )}
         </div>
       </form>
     </div>

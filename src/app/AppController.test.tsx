@@ -77,6 +77,19 @@ vi.mock("../components/DocumentSidebar", () => ({
 vi.mock("../lib/tauri", () => ({
   chooseWorkspaceDirectory: vi.fn(async () => "/tmp/kb"),
   createLakeDirectory: vi.fn(),
+  createBackup: vi.fn(async () => ({
+    record: {
+      id: "backup",
+      backupType: "full",
+      createdAt: new Date().toISOString(),
+      keyFingerprint: "fingerprint",
+      encryptedSize: 1,
+      archiveHash: "hash",
+      objectKey: "backup.ylbackup",
+      canRestore: true,
+    },
+    warnings: [],
+  })),
   createLakeDocument: (title: string, parentPath?: string) => createLakeDocument(title, parentPath),
   createTemporaryResourceUrl: (resourceRef: string, ttlSeconds: number, filename?: string) => (
     createTemporaryResourceUrl(resourceRef, ttlSeconds, filename)
@@ -85,7 +98,9 @@ vi.mock("../lib/tauri", () => ({
   deleteLakeDocument: (path: string) => deleteLakeDocument(path),
   downloadResourceFile: (input: { url: string; filename: string; resourceRef?: string }) => downloadResourceFile(input),
   getOssSettings: vi.fn(async () => null),
+  getBackupKeyStatus: vi.fn(async () => ({ configured: false, needsKey: false })),
   getRecentWorkspace: () => getRecentWorkspace(),
+  listBackups: vi.fn(async () => []),
   moveWorkspaceItem: (input: MoveWorkspaceItemInput) => moveWorkspaceItem(input),
   openExternalUrl: vi.fn(),
   prepareResourcePreview: vi.fn(async (resourceRef: string) => resourceRef),
@@ -97,8 +112,16 @@ vi.mock("../lib/tauri", () => ({
   saveBinaryExport: (defaultPath: string, bytes: Uint8Array, filters: Array<{ name: string; extensions: string[] }>) => saveBinaryExport(defaultPath, bytes, filters),
   savePdfExport: (defaultPath: string, html: string, filters: Array<{ name: string; extensions: string[] }>) => savePdfExport(defaultPath, html, filters),
   saveTextExport: (defaultPath: string, content: string, filters: Array<{ name: string; extensions: string[] }>) => saveTextExport(defaultPath, content, filters),
+  resetBackupKey: vi.fn(async () => ({ configured: true, needsKey: false, fingerprint: "fingerprint" })),
+  restoreBackup: vi.fn(async () => ({
+    restoredBackupId: "backup",
+    restoredAt: new Date().toISOString(),
+    requiresRestart: false,
+    warnings: [],
+  })),
   readResourceBytes: vi.fn(async () => new Uint8Array([1, 2, 3])),
   saveWorkspaceOrder: vi.fn(),
+  setBackupKey: vi.fn(async () => ({ configured: true, needsKey: false, fingerprint: "fingerprint" })),
   setWorkspaceRoot: (path: string) => setWorkspaceRoot(path),
   uploadFile: vi.fn(),
   uploadImage: vi.fn(),

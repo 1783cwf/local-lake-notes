@@ -937,6 +937,99 @@ button {
   font-size: 13px;
 }
 
+.settings-success {
+  margin: 0;
+  color: var(--green-dark);
+  font-size: 13px;
+}
+
+.settings-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfc;
+}
+
+.settings-card__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #22282e;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.settings-card__text,
+.settings-card__muted {
+  margin: 0;
+  color: #4c535a;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.settings-card__muted {
+  color: var(--muted);
+}
+
+.backup-settings {
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.backup-key-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.backup-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.backup-list {
+  gap: 8px;
+}
+
+.backup-record {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.backup-record div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.backup-record strong,
+.backup-record span,
+.backup-record small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.backup-record strong {
+  color: #252b31;
+  font-size: 13px;
+}
+
+.backup-record span,
+.backup-record small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .settings-actions {
   display: flex;
   justify-content: flex-end;

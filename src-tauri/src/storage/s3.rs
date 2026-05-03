@@ -123,6 +123,34 @@ pub async fn get_object_bytes(settings: &OssSettings, key: &str) -> AppResult<Ve
         .map_err(|error| AppError::S3(error.to_string()))
 }
 
+pub async fn list_object_keys(settings: &OssSettings, prefix: &str) -> AppResult<Vec<String>> {
+    let client = s3_client(settings).await;
+    let mut token = None;
+    let mut keys = Vec::new();
+    loop {
+        let output = client
+            .list_objects_v2()
+            .bucket(&settings.bucket)
+            .prefix(prefix)
+            .set_continuation_token(token)
+            .send()
+            .await
+            .map_err(|error| AppError::S3(error.to_string()))?;
+
+        for object in output.contents() {
+            if let Some(key) = object.key() {
+                keys.push(key.to_string());
+            }
+        }
+
+        token = output.next_continuation_token().map(ToString::to_string);
+        if token.is_none() {
+            break;
+        }
+    }
+    Ok(keys)
+}
+
 pub async fn presign_get_object_url(
     settings: &OssSettings,
     key: &str,

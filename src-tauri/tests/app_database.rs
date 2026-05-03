@@ -1,9 +1,10 @@
 use tempfile::tempdir;
 use yuque_lake_notes_lib::models::OssSettings;
 use yuque_lake_notes_lib::storage::app_database::{
-    load_oss_settings_at, load_recent_workspace_root_at, prune_workspace_order_path_at,
-    read_workspace_order_at, rewrite_workspace_order_items, rewrite_workspace_order_path_at,
-    save_oss_settings_at, set_recent_workspace_root_at, set_workspace_order_at,
+    list_known_workspaces_at, load_oss_settings_at, load_recent_workspace_root_at,
+    prune_workspace_order_path_at, read_workspace_order_at, rewrite_workspace_order_items,
+    rewrite_workspace_order_path_at, save_oss_settings_at, set_recent_workspace_root_at,
+    set_workspace_order_at,
 };
 
 fn valid_settings() -> OssSettings {
@@ -17,6 +18,7 @@ fn valid_settings() -> OssSettings {
         force_path_style: true,
         image_prefix: "images".to_string(),
         file_prefix: "files".to_string(),
+        backup_prefix: "backups".to_string(),
         default_export_resource_strategy: "bundle".to_string(),
         default_signed_url_ttl_seconds: 24 * 60 * 60,
         max_signed_url_ttl_seconds: 7 * 24 * 60 * 60,
@@ -41,6 +43,20 @@ fn stores_app_settings_in_sqlite() {
         load_oss_settings_at(&database).unwrap(),
         Some(valid_settings())
     );
+}
+
+#[test]
+fn tracks_known_workspaces_from_recent_workspace() {
+    let dir = tempdir().unwrap();
+    let database = dir.path().join("app.sqlite3");
+    let workspace = dir.path().join("workspace");
+
+    set_recent_workspace_root_at(&database, &workspace).unwrap();
+
+    let workspaces = list_known_workspaces_at(&database).unwrap();
+    assert_eq!(workspaces.len(), 1);
+    assert_eq!(workspaces[0].root, workspace.to_string_lossy());
+    assert_eq!(workspaces[0].name, "workspace");
 }
 
 #[test]

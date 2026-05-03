@@ -36,6 +36,7 @@ import {
   chooseWorkspaceDirectory,
   createLakeDirectory,
   createLakeDocument,
+  createBackup,
   deleteLakeDirectory,
   deleteLakeDocument,
   createTemporaryResourceUrl,
@@ -44,6 +45,8 @@ import {
   readResourceBytes,
   getOssSettings,
   getRecentWorkspace,
+  getBackupKeyStatus,
+  listBackups,
   moveWorkspaceItem,
   readLakeDocument,
   renameLakeDirectory,
@@ -53,6 +56,9 @@ import {
   saveBinaryExport,
   savePdfExport,
   saveTextExport,
+  resetBackupKey,
+  restoreBackup,
+  setBackupKey,
   setWorkspaceRoot,
   uploadFile,
   uploadImage,
@@ -60,8 +66,11 @@ import {
 } from "../lib/tauri";
 import type {
   CurrentDocumentState,
+  BackupKeyStatus,
+  BackupRecord,
   FileDownloadInput,
   OssSettings,
+  RestoreBackupOutput,
   SaveStatus,
   UploadImageInput,
   UploadImageOutput,
@@ -84,6 +93,9 @@ export function AppController() {
   const [exportRequest, setExportRequest] = useState<LakeDocumentExportRequest | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [ossSettings, setOssSettings] = useState<OssSettings | null>(null);
+  const [backupKeyStatus, setBackupKeyStatus] = useState<BackupKeyStatus>({ configured: false, needsKey: false });
+  const [backupRecords, setBackupRecords] = useState<BackupRecord[]>([]);
+  const [backupBusy, setBackupBusy] = useState(false);
   const [appError, setAppError] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(296);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -107,11 +119,25 @@ export function AppController() {
 
   const boot = async () => {
     try {
-      const [recentWorkspace, settings] = await Promise.all([getRecentWorkspace(), getOssSettings()]);
+      const [recentWorkspace, settings, keyStatus] = await Promise.all([
+        getRecentWorkspace(),
+        getOssSettings(),
+        getBackupKeyStatus(),
+      ]);
       setWorkspace(recentWorkspace);
       setOssSettings(settings);
+      setBackupKeyStatus(keyStatus);
+      await refreshBackupRecords();
     } catch (error) {
       setAppError(toMessage(error));
+    }
+  };
+
+  const refreshBackupRecords = async () => {
+    try {
+      setBackupRecords(await listBackups());
+    } catch {
+      setBackupRecords([]);
     }
   };
 
@@ -432,6 +458,41 @@ export function AppController() {
     setOssSettings(saved);
   }, []);
 
+  const updateBackupKey = useCallback(async (secret: string, reset: boolean) => {
+    setBackupBusy(true);
+    try {
+      setBackupKeyStatus(reset ? await resetBackupKey(secret) : await setBackupKey(secret));
+      await refreshBackupRecords();
+    } finally {
+      setBackupBusy(false);
+    }
+  }, []);
+
+  const runBackup = useCallback(async (forceFull: boolean) => {
+    setBackupBusy(true);
+    try {
+      await createBackup({ forceFull });
+      setBackupRecords(await listBackups());
+      setBackupKeyStatus(await getBackupKeyStatus());
+    } finally {
+      setBackupBusy(false);
+    }
+  }, []);
+
+  const runRestore = useCallback(async (
+    backupId: string,
+    allowKeyMismatch: boolean,
+  ): Promise<RestoreBackupOutput> => {
+    setBackupBusy(true);
+    try {
+      const output = await restoreBackup({ backupId, allowKeyMismatch });
+      await boot();
+      return output;
+    } finally {
+      setBackupBusy(false);
+    }
+  }, []);
+
   const uploadEditorImage = useCallback(async (input: UploadImageInput): Promise<UploadImageOutput> => {
     if (!ossSettings) {
       setSettingsOpen(true);
@@ -603,6 +664,12 @@ export function AppController() {
         settings={ossSettings}
         onClose={() => setSettingsOpen(false)}
         onSave={saveSettings}
+        backupKeyStatus={backupKeyStatus}
+        backupRecords={backupRecords}
+        backupBusy={backupBusy}
+        onSetBackupKey={updateBackupKey}
+        onCreateBackup={runBackup}
+        onRestoreBackup={runRestore}
       />
       {textDialog ? (
         <TextInputDialog dialog={textDialog} onClose={() => setTextDialog(null)} />

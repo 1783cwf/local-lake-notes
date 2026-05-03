@@ -1,7 +1,18 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 
-import type { FileDownloadInput, OssSettings, UploadImageInput, UploadImageOutput } from "../app/appState";
+import type {
+  BackupKeyStatus,
+  BackupOperationOutput,
+  BackupRecord,
+  CreateBackupInput,
+  FileDownloadInput,
+  OssSettings,
+  RestoreBackupInput,
+  RestoreBackupOutput,
+  UploadImageInput,
+  UploadImageOutput,
+} from "../app/appState";
 import type {
   CreateDocumentPayload,
   MoveWorkspaceItemInput,
@@ -11,6 +22,8 @@ import type {
 
 const browserWorkspaceKey = "yuque-lake-notes.browser-workspace";
 const browserSettingsKey = "yuque-lake-notes.browser-oss-settings";
+const browserBackupKeyStatusKey = "yuque-lake-notes.browser-backup-key-status";
+const browserBackupsKey = "yuque-lake-notes.browser-backups";
 
 function isTauriRuntime(): boolean {
   return (
@@ -413,6 +426,84 @@ export async function saveOssSettings(settings: OssSettings): Promise<OssSetting
   return invoke<OssSettings>("save_oss_settings", { settings });
 }
 
+export async function getBackupKeyStatus(): Promise<BackupKeyStatus> {
+  if (!isTauriRuntime()) {
+    return readBrowserBackupKeyStatus();
+  }
+
+  return invoke<BackupKeyStatus>("get_backup_key_status");
+}
+
+export async function setBackupKey(secret: string): Promise<BackupKeyStatus> {
+  if (!isTauriRuntime()) {
+    const status: BackupKeyStatus = {
+      configured: true,
+      needsKey: false,
+      fingerprint: browserFingerprint(secret),
+      createdAt: new Date().toISOString(),
+    };
+    window.localStorage.setItem(browserBackupKeyStatusKey, JSON.stringify(status));
+    return status;
+  }
+
+  return invoke<BackupKeyStatus>("set_backup_key", { input: { secret } });
+}
+
+export async function resetBackupKey(secret: string): Promise<BackupKeyStatus> {
+  if (!isTauriRuntime()) {
+    return setBackupKey(secret);
+  }
+
+  return invoke<BackupKeyStatus>("reset_backup_key", { input: { secret, confirmReset: true } });
+}
+
+export async function listBackups(): Promise<BackupRecord[]> {
+  if (!isTauriRuntime()) {
+    return readBrowserBackups();
+  }
+
+  return invoke<BackupRecord[]>("list_backups");
+}
+
+export async function createBackup(input: CreateBackupInput): Promise<BackupOperationOutput> {
+  if (!isTauriRuntime()) {
+    const status = readBrowserBackupKeyStatus();
+    if (!status.configured || !status.fingerprint) {
+      throw new Error("请先设置备份加密密钥");
+    }
+    const existing = readBrowserBackups();
+    const record: BackupRecord = {
+      id: crypto.randomUUID(),
+      backupType: input.forceFull || existing.length === 0 ? "full" : "incremental",
+      createdAt: new Date().toISOString(),
+      baseBackupId: input.forceFull || existing.length === 0 ? undefined : existing[0].id,
+      keyFingerprint: status.fingerprint,
+      encryptedSize: 1024,
+      archiveHash: "browser-preview",
+      objectKey: "browser-preview.ylbackup",
+      canRestore: true,
+    };
+    const backups = [record, ...existing];
+    window.localStorage.setItem(browserBackupsKey, JSON.stringify(backups));
+    return { record, warnings: [] };
+  }
+
+  return invoke<BackupOperationOutput>("create_backup", { input });
+}
+
+export async function restoreBackup(input: RestoreBackupInput): Promise<RestoreBackupOutput> {
+  if (!isTauriRuntime()) {
+    return {
+      restoredBackupId: input.backupId,
+      restoredAt: new Date().toISOString(),
+      requiresRestart: false,
+      warnings: [],
+    };
+  }
+
+  return invoke<RestoreBackupOutput>("restore_backup", { input });
+}
+
 export async function uploadImage(input: UploadImageInput): Promise<UploadImageOutput> {
   if (!isTauriRuntime()) {
     const resourceRef = `yuque-resource://browser/images/${encodeURIComponent(input.filename)}?kind=image&name=${encodeURIComponent(input.filename)}&size=${input.bytes.length}`;
@@ -547,6 +638,26 @@ function downloadFileFilters(filename: string): Array<{ name: string; extensions
 
 function safeDownloadFileName(filename: string): string {
   return filename.trim().replace(/[\\/:*?"<>|\r\n\t]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function readBrowserBackupKeyStatus(): BackupKeyStatus {
+  const stored = window.localStorage.getItem(browserBackupKeyStatusKey);
+  return stored
+    ? JSON.parse(stored) as BackupKeyStatus
+    : { configured: false, needsKey: false };
+}
+
+function readBrowserBackups(): BackupRecord[] {
+  const stored = window.localStorage.getItem(browserBackupsKey);
+  return stored ? JSON.parse(stored) as BackupRecord[] : [];
+}
+
+function browserFingerprint(secret: string): string {
+  let hash = 0;
+  for (const char of secret) {
+    hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
+  }
+  return `browser-${Math.abs(hash).toString(16).padStart(8, "0")}`;
 }
 
 function normalizeUploadOutputPreview(output: UploadImageOutput): UploadImageOutput {

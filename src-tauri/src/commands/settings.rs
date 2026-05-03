@@ -43,6 +43,9 @@ pub fn validate_oss_settings(settings: &OssSettings) -> AppResult<()> {
     if settings.file_prefix.trim().is_empty() {
         return Err(AppError::InvalidOssSettings("附件目录".to_string()));
     }
+    if settings.backup_prefix.trim().is_empty() {
+        return Err(AppError::InvalidOssSettings("备份目录".to_string()));
+    }
     if settings.default_signed_url_ttl_seconds == 0
         || settings.default_signed_url_ttl_seconds > settings.max_signed_url_ttl_seconds
     {

@@ -10,6 +10,7 @@ export const defaultOssSettings: OssSettings = {
   forcePathStyle: true,
   imagePrefix: "images",
   filePrefix: "files",
+  backupPrefix: "backups",
   defaultExportResourceStrategy: "bundle",
   defaultSignedUrlTtlSeconds: 24 * 60 * 60,
   maxSignedUrlTtlSeconds: 7 * 24 * 60 * 60,
@@ -44,6 +45,9 @@ export function validateOssSettings(settings: OssSettings): string | null {
   }
   if (!settings.filePrefix.trim()) {
     return "请填写附件目录";
+  }
+  if (!settings.backupPrefix.trim()) {
+    return "请填写备份目录";
   }
   if (settings.defaultSignedUrlTtlSeconds <= 0 || settings.defaultSignedUrlTtlSeconds > settings.maxSignedUrlTtlSeconds) {
     return "签名链接默认有效期不能超过最大有效期";

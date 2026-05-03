@@ -1,3 +1,4 @@
+pub mod backup;
 pub mod documents;
 pub mod external;
 pub mod resources;

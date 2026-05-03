@@ -68,6 +68,8 @@ pub struct OssSettings {
     pub image_prefix: String,
     #[serde(default = "default_file_prefix")]
     pub file_prefix: String,
+    #[serde(default = "default_backup_prefix")]
+    pub backup_prefix: String,
     #[serde(default = "default_export_resource_strategy")]
     pub default_export_resource_strategy: String,
     #[serde(default = "default_signed_url_ttl_seconds")]
@@ -136,8 +138,86 @@ pub struct SignedResourceUrlOutput {
     pub expires_in_seconds: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct KnownWorkspace {
+    pub root: String,
+    pub name: String,
+    pub last_opened_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupKeyStatus {
+    pub configured: bool,
+    pub needs_key: bool,
+    pub fingerprint: Option<String>,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SetBackupKeyInput {
+    pub secret: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetBackupKeyInput {
+    pub secret: String,
+    pub confirm_reset: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateBackupInput {
+    pub force_full: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupRecord {
+    pub id: String,
+    pub backup_type: String,
+    pub created_at: String,
+    pub base_backup_id: Option<String>,
+    pub key_fingerprint: String,
+    pub encrypted_size: u64,
+    pub archive_hash: String,
+    pub object_key: String,
+    pub can_restore: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupOperationOutput {
+    pub record: BackupRecord,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreBackupInput {
+    pub backup_id: String,
+    #[serde(default)]
+    pub allow_key_mismatch: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreBackupOutput {
+    pub restored_backup_id: String,
+    pub restored_at: String,
+    pub requires_restart: bool,
+    pub warnings: Vec<String>,
+}
+
 fn default_file_prefix() -> String {
     "files".to_string()
+}
+
+fn default_backup_prefix() -> String {
+    "backups".to_string()
 }
 
 fn default_export_resource_strategy() -> String {

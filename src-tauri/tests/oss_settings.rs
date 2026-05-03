@@ -12,6 +12,7 @@ fn valid_settings() -> OssSettings {
         force_path_style: true,
         image_prefix: "images".to_string(),
         file_prefix: "files".to_string(),
+        backup_prefix: "backups".to_string(),
         default_export_resource_strategy: "bundle".to_string(),
         default_signed_url_ttl_seconds: 24 * 60 * 60,
         max_signed_url_ttl_seconds: 7 * 24 * 60 * 60,

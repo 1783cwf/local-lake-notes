@@ -35,6 +35,8 @@ pub enum AppError {
     S3(String),
     #[error("{0}")]
     Export(String),
+    #[error("{0}")]
+    Backup(String),
 }
 
 impl Serialize for AppError {

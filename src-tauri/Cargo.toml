@@ -17,18 +17,24 @@ tauri-build = { version = "2", features = [] }
 aws-config = "1"
 aws-credential-types = "1"
 aws-sdk-s3 = "1"
+age = "0.11.3"
+blake3 = "1"
 chrono = { version = "0.4", features = ["serde"] }
+keyring = "4.0.0"
+keyring-core = "1.0.0"
 mime_guess = "2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
-rusqlite = { version = "0.39.0", features = ["bundled"] }
+rusqlite = { version = "0.39.0", features = ["bundled", "backup"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tar = "0.4"
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 uuid = { version = "1", features = ["v4"] }
 walkdir = "2"
+zstd = "0.13"
 
 [dev-dependencies]
-tempfile = "3"
