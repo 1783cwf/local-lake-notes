@@ -73,6 +73,41 @@ test("短时签名 HTML 导出会重写图片和附件链接", async () => {
   expect(html).toContain("https://signed.example/资料.pdf");
 });
 
+test("短时签名 HTML 导出会把公共 URL 按资源规则重写", async () => {
+  const signedRefs: string[] = [];
+  const html = await lakeDocumentToHtmlWithResources(
+    "标题",
+    [
+      "<p>",
+      "<img src=\"https://oss.weistuday.com:16666/yuque/images/2026/05/a.png\" alt=\"截图.png\">",
+      "</p>",
+      "<p>",
+      "<a href=\"https://oss.weistuday.com:16666/yuque/files/2026/04/f6873b30-50af.pdf\">八期部署资源鲁池.pdf</a>",
+      "</p>",
+    ].join(""),
+    {
+      strategy: "signed-url",
+      signedUrlTtlSeconds: 3600,
+      bucket: "yuque",
+      publicBaseUrl: "https://oss.weistuday.com:16666/yuque",
+      imagePrefix: "images",
+      filePrefix: "files",
+      signResource: async (resourceRef, filename) => {
+        signedRefs.push(resourceRef);
+        return `https://signed.example/${filename ?? "resource"}`;
+      },
+    },
+  );
+
+  expect(html).not.toContain("https://oss.weistuday.com:16666/yuque/");
+  expect(html).toContain("https://signed.example/截图.png");
+  expect(html).toContain("https://signed.example/八期部署资源鲁池.pdf");
+  expect(html).toContain("lake-export-attachment");
+  expect(signedRefs).toHaveLength(2);
+  expect(signedRefs[0]).toContain("yuque-resource://yuque/images/2026/05/a.png");
+  expect(signedRefs[1]).toContain("yuque-resource://yuque/files/2026/04/f6873b30-50af.pdf");
+});
+
 test("本地资源包 HTML 导出会生成 index 和资源文件", async () => {
   const imageRef = createResourceReference({
     bucket: "yuque",
@@ -103,6 +138,28 @@ test("本地资源包 HTML 导出会生成 index 和资源文件", async () => {
   expect(entries[0].content).toContain("attachments/资料.pdf");
   expect(entries[1].content).toBe("A");
   expect(entries[2].content).toBe("A");
+});
+
+test("本地资源包 HTML 导出会把公共 URL 打进资源目录", async () => {
+  const zip = await lakeDocumentToHtmlBundle(
+    "标题",
+    "<p><a href=\"https://oss.weistuday.com:16666/yuque/files/a.pdf\">资料.pdf</a></p>",
+    {
+      strategy: "bundle",
+      signedUrlTtlSeconds: 3600,
+      bucket: "yuque",
+      publicBaseUrl: "https://oss.weistuday.com:16666/yuque",
+      imagePrefix: "images",
+      filePrefix: "files",
+      loadResource: async () => new Uint8Array([67]),
+    },
+  );
+  const entries = readStoredZipEntries(zip);
+
+  expect(entries.map((entry) => entry.path)).toEqual(["index.html", "attachments/资料.pdf"]);
+  expect(entries[0].content).not.toContain("https://oss.weistuday.com:16666/yuque/");
+  expect(entries[0].content).toContain("attachments/资料.pdf");
+  expect(entries[1].content).toBe("C");
 });
 
 test("Markdown 本地资源包导出会生成 md 和资源文件", async () => {

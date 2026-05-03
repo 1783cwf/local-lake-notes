@@ -3,6 +3,7 @@ import {
   dehydrateLakeResources,
   hydrateLakeResources,
   parseResourceReference,
+  resourceReferenceFromPublicUrl,
 } from "./resourceReference";
 
 test("创建并解析私有资源引用", () => {
@@ -58,6 +59,45 @@ test("附件卡片资源在 hydrate 与 dehydrate 之间保留原文件名", asy
   const dehydrated = dehydrateLakeResources(hydrated, [{ resourceRef: ref, previewUrl: "asset://preview/a.pdf" }]);
   expect(decodeURIComponent(dehydrated)).toContain("八期部署资源鲁池.pdf");
   expect(decodeURIComponent(dehydrated)).toContain("yuque-resource://");
+});
+
+test("导出时可以把公共 URL 还原为私有资源引用", () => {
+  const ref = resourceReferenceFromPublicUrl(
+    "https://oss.weistuday.com:16666/yuque/files/2026/04/f6873b30-50af.pdf",
+    {
+      bucket: "yuque",
+      publicBaseUrl: "https://oss.weistuday.com:16666/yuque",
+      imagePrefix: "images",
+      filePrefix: "files",
+    },
+    {
+      kind: "file",
+      name: "八期部署资源鲁池.pdf",
+    },
+  );
+
+  expect(parseResourceReference(ref ?? "")).toEqual({
+    bucket: "yuque",
+    key: "files/2026/04/f6873b30-50af.pdf",
+    kind: "file",
+    name: "八期部署资源鲁池.pdf",
+    size: undefined,
+    mimeType: undefined,
+  });
+});
+
+test("非当前公共访问地址不会被还原为私有资源引用", () => {
+  const ref = resourceReferenceFromPublicUrl(
+    "https://example.com/files/a.pdf",
+    {
+      bucket: "yuque",
+      publicBaseUrl: "https://oss.weistuday.com:16666/yuque",
+      imagePrefix: "images",
+      filePrefix: "files",
+    },
+  );
+
+  expect(ref).toBeNull();
 });
 
 test("外部链接不会被误改", async () => {

@@ -16,6 +16,20 @@ export interface ResourcePreview {
   previewUrl: string;
 }
 
+export interface PublicResourceReferenceOptions {
+  bucket?: string;
+  publicBaseUrl?: string;
+  imagePrefix?: string;
+  filePrefix?: string;
+}
+
+export interface PublicResourceReferenceMetadata {
+  kind?: ResourceKind;
+  name?: string;
+  size?: number;
+  mimeType?: string;
+}
+
 const resourceProtocol = "yuque-resource:";
 
 export function createResourceReference(input: LakeResourceReference): string {
@@ -43,7 +57,8 @@ export function parseResourceReference(value: string): LakeResourceReference | n
     const bucket = decodeURIComponent(url.hostname);
     const key = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
     const kind = url.searchParams.get("kind") === "file" ? "file" : "image";
-    const sizeValue = Number(url.searchParams.get("size"));
+    const sizeText = url.searchParams.get("size");
+    const sizeValue = sizeText === null ? Number.NaN : Number(sizeText);
     if (!bucket || !key) {
       return null;
     }
@@ -62,6 +77,32 @@ export function parseResourceReference(value: string): LakeResourceReference | n
 
 export function resourceReferenceFromUpload(output: UploadImageOutput): string | null {
   return output.resourceRef ?? parseMaybeResourceUrl(output.url);
+}
+
+export function resourceReferenceFromPublicUrl(
+  value: string,
+  options: PublicResourceReferenceOptions,
+  metadata: PublicResourceReferenceMetadata = {},
+): string | null {
+  if (parseResourceReference(value)) {
+    return value;
+  }
+
+  const bucket = options.bucket?.trim();
+  const key = resourceKeyFromPublicUrl(value, options.publicBaseUrl);
+  const kind = key ? inferResourceKindFromKey(key, options, metadata.kind) : null;
+  if (!bucket || !key || !kind) {
+    return null;
+  }
+
+  return createResourceReference({
+    bucket,
+    key,
+    kind,
+    name: metadata.name,
+    size: metadata.size,
+    mimeType: metadata.mimeType,
+  });
 }
 
 export function dehydrateLakeResources(content: string, previews: ResourcePreview[]): string {
@@ -150,6 +191,57 @@ export function encodeLakeCardValue(value: Record<string, unknown>): string {
 
 function parseMaybeResourceUrl(value: string): string | null {
   return parseResourceReference(value) ? value : null;
+}
+
+function resourceKeyFromPublicUrl(value: string, publicBaseUrl?: string): string | null {
+  if (!publicBaseUrl?.trim()) {
+    return null;
+  }
+
+  try {
+    const inputUrl = new URL(value);
+    const baseUrl = new URL(publicBaseUrl);
+    if (inputUrl.origin !== baseUrl.origin) {
+      return null;
+    }
+
+    const inputPath = normalizeUrlPath(inputUrl.pathname);
+    const basePath = normalizeUrlPath(baseUrl.pathname);
+    if (!basePath) {
+      return inputPath || null;
+    }
+    if (inputPath === basePath || !inputPath.startsWith(`${basePath}/`)) {
+      return null;
+    }
+    return inputPath.slice(basePath.length + 1) || null;
+  } catch {
+    return null;
+  }
+}
+
+function inferResourceKindFromKey(
+  key: string,
+  options: PublicResourceReferenceOptions,
+  fallback?: ResourceKind,
+): ResourceKind | null {
+  const prefixes: Array<{ kind: ResourceKind; prefix: string }> = [
+    { kind: "image", prefix: normalizePrefix(options.imagePrefix || "images") },
+    { kind: "file", prefix: normalizePrefix(options.filePrefix || "files") },
+  ];
+  const matched = prefixes.find(({ prefix }) => prefix && (key === prefix || key.startsWith(`${prefix}/`)));
+  return matched?.kind ?? fallback ?? null;
+}
+
+function normalizeUrlPath(path: string): string {
+  try {
+    return decodeURIComponent(path).replace(/^\/+|\/+$/g, "");
+  } catch {
+    return path.replace(/^\/+|\/+$/g, "");
+  }
+}
+
+function normalizePrefix(path: string): string {
+  return path.trim().replace(/^\/+|\/+$/g, "");
 }
 
 function encodePath(path: string): string {

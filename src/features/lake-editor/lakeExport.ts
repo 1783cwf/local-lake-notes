@@ -4,7 +4,10 @@ import type { LakeEditorInstance } from "./editorTypes";
 import {
   decodeLakeCardValue,
   encodeLakeCardValue,
+  resourceReferenceFromPublicUrl,
   parseResourceReference,
+  type LakeResourceReference,
+  type ResourceKind,
 } from "./resourceReference";
 
 export type DocumentExportFormat = "markdown" | "html" | "pdf";
@@ -42,6 +45,10 @@ interface ExportHeading {
 export interface LakeDocumentResourceExportOptions {
   strategy: ExportResourceStrategy;
   signedUrlTtlSeconds: number;
+  bucket?: string;
+  publicBaseUrl?: string;
+  imagePrefix?: string;
+  filePrefix?: string;
   signResource?: ExportResourceSigner;
   loadResource?: ExportResourceLoader;
 }
@@ -737,18 +744,44 @@ async function rewriteExportResourceReferences(
 
   for (const image of Array.from(template.content.querySelectorAll("img[src]"))) {
     const src = image.getAttribute("src");
-    if (src && parseResourceReference(src)) {
-      image.setAttribute("src", await sign(src, image.getAttribute("alt") ?? undefined));
+    const resource = src ? resolveExportResource(src, options, {
+      kind: "image",
+      name: image.getAttribute("alt") ?? undefined,
+    }) : null;
+    if (resource) {
+      image.setAttribute("src", await sign(resource.resourceRef, resourceFileName(resource.resource, image.getAttribute("alt") ?? undefined)));
     }
   }
 
   for (const card of Array.from(template.content.querySelectorAll("card[name='file'], card[name='localdoc']"))) {
     const value = decodeLakeCardValue(card.getAttribute("value"));
-    if (typeof value?.src !== "string" || !parseResourceReference(value.src)) {
+    if (!value || typeof value.src !== "string") {
       continue;
     }
-    value.src = await sign(value.src, typeof value.name === "string" ? value.name : undefined);
+    const resource = resolveExportResource(value.src, options, {
+      kind: "file",
+      name: typeof value.name === "string" ? value.name : undefined,
+      size: typeof value.size === "number" ? value.size : undefined,
+      mimeType: typeof value.type === "string" ? value.type : undefined,
+    });
+    if (!resource) {
+      continue;
+    }
+    value.src = await sign(resource.resourceRef, resourceFileName(resource.resource, typeof value.name === "string" ? value.name : undefined));
     card.setAttribute("value", encodeLakeCardValue(value));
+  }
+
+  for (const link of Array.from(template.content.querySelectorAll("a[href]"))) {
+    const href = link.getAttribute("href");
+    const resource = href ? resolveExportResource(href, options, {
+      kind: "file",
+      name: exportLinkName(link),
+    }) : null;
+    if (!resource) {
+      continue;
+    }
+    link.setAttribute("href", await sign(resource.resourceRef, resourceFileName(resource.resource, exportLinkName(link))));
+    markExportAttachmentLink(link);
   }
 
   return { content: template.innerHTML, resources: [] };
@@ -759,6 +792,11 @@ interface ResourceBundleRewriteOptions {
   attachmentPrefix?: string;
   linkBasePath?: string;
   inlineImages?: boolean;
+}
+
+interface ResolvedExportResource {
+  resourceRef: string;
+  resource: LakeResourceReference;
 }
 
 async function rewriteHtmlResourceReferencesToBundle(
@@ -775,28 +813,59 @@ async function rewriteHtmlResourceReferencesToBundle(
 
   for (const image of Array.from(template.content.querySelectorAll("img[src]"))) {
     const src = image.getAttribute("src");
-    const resource = src ? parseResourceReference(src) : null;
+    const resource = src ? resolveExportResource(src, options, {
+      kind: "image",
+      name: image.getAttribute("alt") ?? undefined,
+    }) : null;
     if (!src || !resource) {
       continue;
     }
     if (bundle?.inlineImages) {
-      image.setAttribute("src", await resourceToDataUrl(src, options.loadResource, resource.mimeType));
+      image.setAttribute("src", await resourceToDataUrl(resource.resourceRef, options.loadResource, resource.resource.mimeType));
       continue;
     }
-    const path = await writer.add(src, resource.name ?? image.getAttribute("alt") ?? basename(resource.key), bundle?.assetPrefix ?? "assets");
+    const path = await writer.add(
+      resource.resourceRef,
+      resourceFileName(resource.resource, image.getAttribute("alt") ?? undefined),
+      bundle?.assetPrefix ?? "assets",
+    );
     image.setAttribute("src", relativeZipLink(path, bundle?.linkBasePath));
   }
 
   for (const card of Array.from(template.content.querySelectorAll("card[name='file'], card[name='localdoc']"))) {
     const value = decodeLakeCardValue(card.getAttribute("value"));
     const src = value?.src;
-    if (!value || typeof src !== "string" || !parseResourceReference(src)) {
+    const resource = typeof src === "string" ? resolveExportResource(src, options, {
+      kind: "file",
+      name: typeof value?.name === "string" ? value.name : undefined,
+      size: typeof value?.size === "number" ? value.size : undefined,
+      mimeType: typeof value?.type === "string" ? value.type : undefined,
+    }) : null;
+    if (!value || typeof src !== "string" || !resource) {
       continue;
     }
-    const resource = parseResourceReference(src);
-    const path = await writer.add(src, typeof value.name === "string" ? value.name : resource?.name ?? resource?.key ?? "附件", bundle?.attachmentPrefix ?? "attachments");
+    const path = await writer.add(
+      resource.resourceRef,
+      resourceFileName(resource.resource, typeof value.name === "string" ? value.name : undefined),
+      bundle?.attachmentPrefix ?? "attachments",
+    );
     value.src = relativeZipLink(path, bundle?.linkBasePath);
     card.setAttribute("value", encodeLakeCardValue(value));
+  }
+
+  for (const link of Array.from(template.content.querySelectorAll("a[href]"))) {
+    const href = link.getAttribute("href");
+    const resource = href ? resolveExportResource(href, options, {
+      kind: "file",
+      name: exportLinkName(link),
+    }) : null;
+    if (!href || !resource) {
+      continue;
+    }
+    const prefix = resource.resource.kind === "image" ? bundle?.assetPrefix ?? "assets" : bundle?.attachmentPrefix ?? "attachments";
+    const path = await writer.add(resource.resourceRef, resourceFileName(resource.resource, exportLinkName(link)), prefix);
+    link.setAttribute("href", relativeZipLink(path, bundle?.linkBasePath));
+    markExportAttachmentLink(link);
   }
 
   return { content: template.innerHTML, resources: writer.entries() };
@@ -814,9 +883,12 @@ async function inlineHtmlImages(
 
   for (const image of Array.from(template.content.querySelectorAll("img[src]"))) {
     const src = image.getAttribute("src");
-    const resource = src ? parseResourceReference(src) : null;
-    if (src && resource) {
-      image.setAttribute("src", await resourceToDataUrl(src, options.loadResource, resource.mimeType));
+    const resource = src ? resolveExportResource(src, options, {
+      kind: "image",
+      name: image.getAttribute("alt") ?? undefined,
+    }) : null;
+    if (resource?.resource.kind === "image") {
+      image.setAttribute("src", await resourceToDataUrl(resource.resourceRef, options.loadResource, resource.resource.mimeType));
     }
   }
 
@@ -834,8 +906,10 @@ async function rewriteMarkdownResourceReferences(
     }
     return {
       content: await replaceMarkdownLinks(markdown, async (url, label) => {
-        const resource = parseResourceReference(url);
-        return resource ? options.signResource?.(url, label || resource.name, options.signedUrlTtlSeconds) ?? url : url;
+        const resource = resolveExportResource(url, options, { kind: "file", name: label || undefined });
+        return resource
+          ? options.signResource?.(resource.resourceRef, label || resource.resource.name, options.signedUrlTtlSeconds) ?? url
+          : url;
       }),
       resources: [],
     };
@@ -849,12 +923,15 @@ async function rewriteMarkdownResourceReferences(
 
   const writer = createBundleResourceWriter(options.loadResource);
   const content = await replaceMarkdownLinks(markdown, async (url, label, isImage) => {
-    const resource = parseResourceReference(url);
+    const resource = resolveExportResource(url, options, {
+      kind: isImage ? "image" : "file",
+      name: label || undefined,
+    });
     if (!resource) {
       return url;
     }
     const prefix = isImage ? bundle.assetPrefix ?? "assets" : bundle.attachmentPrefix ?? "attachments";
-    const path = await writer.add(url, resource.name || basename(resource.key) || label, prefix);
+    const path = await writer.add(resource.resourceRef, resourceFileName(resource.resource, label), prefix);
     return relativeZipLink(path, bundle.linkBasePath);
   });
 
@@ -880,6 +957,33 @@ async function replaceMarkdownLinks(
   }
 
   return output + markdown.slice(lastIndex);
+}
+
+function resolveExportResource(
+  value: string,
+  options: LakeDocumentResourceExportOptions,
+  metadata: { kind?: ResourceKind; name?: string; size?: number; mimeType?: string } = {},
+): ResolvedExportResource | null {
+  const resourceRef = parseResourceReference(value)
+    ? value
+    : resourceReferenceFromPublicUrl(value, options, metadata);
+  const resource = resourceRef ? parseResourceReference(resourceRef) : null;
+  return resourceRef && resource ? { resourceRef, resource } : null;
+}
+
+function exportLinkName(link: Element): string | undefined {
+  const label = inlineText(link.textContent ?? "");
+  return label || link.getAttribute("download") || link.getAttribute("title") || undefined;
+}
+
+function resourceFileName(resource: LakeResourceReference, fallback?: string): string {
+  return resource.name || fallback || basename(resource.key) || "resource";
+}
+
+function markExportAttachmentLink(link: Element): void {
+  link.classList.add("lake-export-attachment");
+  link.setAttribute("target", "_blank");
+  link.setAttribute("rel", "noopener noreferrer");
 }
 
 function createBundleResourceWriter(loadResource: ExportResourceLoader) {

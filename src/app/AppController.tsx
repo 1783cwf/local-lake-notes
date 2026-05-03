@@ -315,9 +315,20 @@ export function AppController() {
   ): LakeDocumentResourceExportOptions => ({
     strategy: resourceStrategy ?? ossSettings?.defaultExportResourceStrategy ?? "bundle",
     signedUrlTtlSeconds: signedUrlTtlSeconds ?? ossSettings?.defaultSignedUrlTtlSeconds ?? 24 * 60 * 60,
+    bucket: ossSettings?.bucket,
+    publicBaseUrl: ossSettings?.publicBaseUrl,
+    imagePrefix: ossSettings?.imagePrefix,
+    filePrefix: ossSettings?.filePrefix,
     signResource: (resourceRef, filename, ttlSeconds) => createTemporaryResourceUrl(resourceRef, ttlSeconds, filename),
     loadResource: readResourceBytes,
-  }), [ossSettings?.defaultExportResourceStrategy, ossSettings?.defaultSignedUrlTtlSeconds]);
+  }), [
+    ossSettings?.bucket,
+    ossSettings?.defaultExportResourceStrategy,
+    ossSettings?.defaultSignedUrlTtlSeconds,
+    ossSettings?.filePrefix,
+    ossSettings?.imagePrefix,
+    ossSettings?.publicBaseUrl,
+  ]);
 
   const exportDocument = useCallback((
     format: DocumentExportFormat,
