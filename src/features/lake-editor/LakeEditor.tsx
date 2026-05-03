@@ -45,6 +45,9 @@ export function LakeEditor({
     if (request.format === "html" || request.format === "pdf") {
       return editorRef.current?.getDocument("text/html") ?? content;
     }
+    if (request.format === "markdown") {
+      return editorRef.current?.getDocument("text/markdown") ?? content;
+    }
     return readContent();
   }, [content, readContent]);
 

@@ -171,11 +171,11 @@ test("收到 HTML 导出请求时读取语雀 HTML 内容", async () => {
   expect(editor.getDocument).toHaveBeenCalledWith("text/html");
 });
 
-test("收到 Markdown 导出请求时仍读取当前 Lake 内容", async () => {
+test("收到 Markdown 导出请求时读取语雀原生 Markdown 内容", async () => {
   const onExportContent = vi.fn();
   const editor: LakeEditorInstance = {
     setDocument: vi.fn(),
-    getDocument: vi.fn((type) => type === "text/lake" ? "<p>Lake 内容</p>" : "<p>HTML 内容</p>"),
+    getDocument: vi.fn((type) => type === "text/markdown" ? "## Markdown 内容" : "<p>Lake 内容</p>"),
     on: vi.fn(),
     destroy: vi.fn(),
   };
@@ -201,8 +201,8 @@ test("收到 Markdown 导出请求时仍读取当前 Lake 内容", async () => {
   await waitFor(() => {
     expect(onExportContent).toHaveBeenCalledWith(
       { id: 1, format: "markdown", document: documentEntry },
-      "<p>Lake 内容</p>",
+      "## Markdown 内容",
     );
   });
-  expect(editor.getDocument).toHaveBeenCalledWith("text/lake");
+  expect(editor.getDocument).toHaveBeenCalledWith("text/markdown");
 });
