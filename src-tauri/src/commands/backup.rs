@@ -22,7 +22,7 @@ use crate::storage::backup_key::{
 };
 use crate::storage::backup_manifest::{
     BackupManifest, DATABASE_LOGICAL_PATH, build_full_manifest, build_incremental_manifest,
-    parse_manifest,
+    file_hash, parse_manifest,
 };
 use crate::storage::backup_store::{
     BackupIndex, download_backup_archive, list_backup_indexes, upload_backup,
@@ -211,7 +211,7 @@ fn backup_chain(indexes: &[BackupIndex], backup_id: &str) -> AppResult<Vec<Backu
     Ok(reversed)
 }
 
-fn stage_restore_chain(
+pub fn stage_restore_chain(
     extracted_chain: &[crate::storage::backup_archive::ExtractedBackup],
     stage: &Path,
 ) -> AppResult<BackupManifest> {
@@ -224,6 +224,11 @@ fn stage_restore_chain(
         }
         for file in &manifest.files {
             let source = extracted.root.join(&file.logical_path);
+            if !source.exists() {
+                // 增量备份的 manifest 表示“恢复到该版本后的完整状态”，但包里只包含变化文件。
+                // 链式恢复时，未变化文件应沿用前序 full/incremental 已 staged 的内容。
+                continue;
+            }
             let target = stage.join(&file.logical_path);
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent)?;
@@ -247,8 +252,29 @@ fn stage_restore_chain(
         stage.join("manifest.json"),
         serde_json::to_vec_pretty(&latest_manifest)?,
     )?;
+    verify_staged_manifest(stage, &latest_manifest)?;
 
     Ok(latest_manifest)
+}
+
+fn verify_staged_manifest(stage: &Path, manifest: &BackupManifest) -> AppResult<()> {
+    for file in &manifest.files {
+        let staged_file = stage.join(&file.logical_path);
+        if !staged_file.exists() {
+            return Err(AppError::Backup(format!(
+                "恢复链缺少文件：{}",
+                file.logical_path
+            )));
+        }
+        let actual_hash = file_hash(&staged_file)?;
+        if actual_hash != file.hash {
+            return Err(AppError::Backup(format!(
+                "恢复链文件校验失败：{}",
+                file.logical_path
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn apply_staged_restore(app: &AppHandle, stage: &Path) -> AppResult<()> {
