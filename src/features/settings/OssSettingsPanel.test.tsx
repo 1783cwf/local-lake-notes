@@ -67,28 +67,45 @@ test("可以切换到备份恢复并设置密钥", async () => {
   expect(onSave).not.toHaveBeenCalled();
 });
 
-test("备份列表支持删除备份", async () => {
+test("删除备份前需要二次确认并提示依赖增量备份", async () => {
   const user = userEvent.setup();
   const onDeleteBackup = vi.fn().mockResolvedValue(undefined);
-  vi.spyOn(window, "confirm").mockReturnValue(true);
 
   renderPanel({
     onDeleteBackup,
-    backupRecords: [{
-      id: "backup-1",
-      backupType: "full",
-      createdAt: "2026-05-04T01:07:23Z",
-      keyFingerprint: "fingerprint",
-      encryptedSize: 1024,
-      archiveHash: "hash",
-      objectKey: "backup.ylbackup",
-      canRestore: true,
-    }],
+    backupRecords: [
+      {
+        id: "backup-2",
+        backupType: "incremental",
+        baseBackupId: "backup-1",
+        createdAt: "2026-05-04T01:08:23Z",
+        keyFingerprint: "fingerprint",
+        encryptedSize: 2048,
+        archiveHash: "hash-2",
+        objectKey: "backup-2.ylbackup",
+        canRestore: true,
+      },
+      {
+        id: "backup-1",
+        backupType: "full",
+        createdAt: "2026-05-04T01:07:23Z",
+        keyFingerprint: "fingerprint",
+        encryptedSize: 1024,
+        archiveHash: "hash",
+        objectKey: "backup.ylbackup",
+        canRestore: true,
+      },
+    ],
   });
 
   await user.click(screen.getByRole("button", { name: "备份恢复" }));
-  await user.click(screen.getByRole("button", { name: /删除备份/ }));
+  await user.click(screen.getAllByRole("button", { name: /删除备份/ })[1]);
 
+  expect(onDeleteBackup).not.toHaveBeenCalled();
+  expect(screen.getByText("删除当前备份会同时删除以下依赖增量备份：")).toBeInTheDocument();
+  expect(screen.getByText(/增量 ·/)).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "确认删除" }));
   expect(onDeleteBackup).toHaveBeenCalledWith("backup-1");
 });
 

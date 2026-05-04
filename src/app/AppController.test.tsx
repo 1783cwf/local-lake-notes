@@ -479,6 +479,7 @@ test("可以删除备份并刷新备份列表", async () => {
   await user.click(screen.getByRole("button", { name: "设置" }));
   await user.click(screen.getByRole("button", { name: "备份恢复" }));
   await user.click(await screen.findByRole("button", { name: /删除备份/ }));
+  await user.click(await screen.findByRole("button", { name: "确认删除" }));
 
   await waitFor(() => {
     expect(deleteBackup).toHaveBeenCalledWith({ backupId: "backup-1" });

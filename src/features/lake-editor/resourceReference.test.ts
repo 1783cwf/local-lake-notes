@@ -61,6 +61,25 @@ test("附件卡片资源在 hydrate 与 dehydrate 之间保留原文件名", asy
   expect(decodeURIComponent(dehydrated)).toContain("yuque-resource://");
 });
 
+test("图片卡片保存时会把预览地址还原为私有资源引用", async () => {
+  const ref = createResourceReference({
+    bucket: "yuque",
+    key: "images/a.png",
+    kind: "image",
+    name: "截图.png",
+    mimeType: "image/png",
+  });
+  const value = `data:${encodeURIComponent(JSON.stringify({ src: ref, name: "截图.png", type: "image/png" }))}`;
+  const content = `<card name="image" value="${value}"></card>`;
+
+  const hydrated = await hydrateLakeResources(content, async () => "blob:local-preview");
+  expect(decodeURIComponent(hydrated)).toContain("blob:local-preview");
+
+  const dehydrated = dehydrateLakeResources(hydrated, [{ resourceRef: ref, previewUrl: "blob:local-preview" }]);
+  expect(decodeURIComponent(dehydrated)).toContain("yuque-resource://");
+  expect(decodeURIComponent(dehydrated)).not.toContain("blob:local-preview");
+});
+
 test("导出时可以把公共 URL 还原为私有资源引用", () => {
   const ref = resourceReferenceFromPublicUrl(
     "https://oss.weistuday.com:16666/yuque/files/2026/04/test-file.pdf",

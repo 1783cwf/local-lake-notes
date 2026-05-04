@@ -1006,14 +1006,22 @@ button {
 
 .backup-record {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   padding: 10px 0;
   border-top: 1px solid var(--line);
 }
 
-.backup-record > div:first-child {
+.backup-record__main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.backup-record__main > div:first-child {
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -1044,6 +1052,62 @@ button {
 .backup-record small {
   color: var(--muted);
   font-size: 12px;
+}
+
+.backup-delete-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #f0c5bd;
+  border-radius: 8px;
+  background: #fff7f5;
+}
+
+.backup-delete-confirm p,
+.backup-delete-confirm span,
+.backup-delete-confirm li {
+  margin: 0;
+  color: #6f3026;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.backup-delete-confirm ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding-left: 16px;
+}
+
+.backup-delete-confirm__muted {
+  color: var(--muted) !important;
+}
+
+.backup-delete-confirm__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.danger-confirm-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 92px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 8px;
+  color: #ffffff;
+  background: #b93828;
+  cursor: pointer;
+}
+
+.danger-confirm-button:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .settings-actions {

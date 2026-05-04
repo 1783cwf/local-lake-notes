@@ -145,7 +145,9 @@ export function rewriteLakeResourceUrls(content: string, rewrite: (value: string
     }
   });
 
-  template.content.querySelectorAll("card[name='file'], card[name='localdoc']").forEach((card) => {
+  // Lake 的图片块、附件块都会把真实资源地址放在 value.src；
+  // 保存时必须把一次性的 blob/asset 预览地址还原为私有资源引用，否则重开应用后预览地址会失效。
+  template.content.querySelectorAll("card[name='image'], card[name='file'], card[name='localdoc']").forEach((card) => {
     const value = decodeLakeCardValue(card.getAttribute("value"));
     if (!value) {
       return;

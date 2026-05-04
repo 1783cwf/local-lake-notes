@@ -28,6 +28,7 @@ export function BackupSettingsPanel({
   const [secret, setSecret] = useState("");
   const [panelError, setPanelError] = useState<string | null>(null);
   const [panelMessage, setPanelMessage] = useState<string | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const submitKey = async (event: FormEvent, reset: boolean) => {
     event.preventDefault();
@@ -68,13 +69,11 @@ export function BackupSettingsPanel({
   };
 
   const deleteRecord = async (record: BackupRecord) => {
-    if (!window.confirm(`删除备份「${formatDate(record.createdAt)}」？依赖它的增量备份也会一起删除。`)) {
-      return;
-    }
     setPanelError(null);
     setPanelMessage(null);
     try {
       await onDeleteBackup(record.id);
+      setPendingDeleteId(null);
       setPanelMessage("备份已删除");
     } catch (error) {
       setPanelError(error instanceof Error ? error.message : String(error));
@@ -142,10 +141,22 @@ export function BackupSettingsPanel({
         ) : (
           backups.map((record) => (
             <div className="backup-record" key={record.id}>
-              <div>
-                <strong>{record.backupType === "full" ? "全量" : "增量"}</strong>
-                <span>{formatDate(record.createdAt)}</span>
-                <small>{formatSize(record.encryptedSize)} · {record.keyFingerprint}</small>
+              <div className="backup-record__main">
+                <div>
+                  <strong>{record.backupType === "full" ? "全量" : "增量"}</strong>
+                  <span>{formatDate(record.createdAt)}</span>
+                  <small>{formatSize(record.encryptedSize)} · {record.keyFingerprint}</small>
+                </div>
+                {pendingDeleteId === record.id ? (
+                  <DeleteConfirmation
+                    record={record}
+                    dependentBackups={collectDependentBackups(backups, record.id)}
+                    busy={busy}
+                    activeOperation={activeOperation}
+                    onCancel={() => setPendingDeleteId(null)}
+                    onConfirm={() => deleteRecord(record)}
+                  />
+                ) : null}
               </div>
               <div className="backup-record__actions">
                 <button type="button" className="secondary-button" disabled={busy} onClick={() => restore(record)}>
@@ -156,7 +167,11 @@ export function BackupSettingsPanel({
                   type="button"
                   className="icon-button danger-button"
                   disabled={busy}
-                  onClick={() => deleteRecord(record)}
+                  onClick={() => {
+                    setPanelError(null);
+                    setPanelMessage(null);
+                    setPendingDeleteId(record.id);
+                  }}
                   aria-label={`删除备份 ${formatDate(record.createdAt)}`}
                 >
                   {activeOperation === `delete:${record.id}` ? <Loader2 size={15} className="spin-icon" /> : <Trash2 size={15} />}
@@ -171,6 +186,67 @@ export function BackupSettingsPanel({
       {panelMessage ? <p className="settings-success">{panelMessage}</p> : null}
     </section>
   );
+}
+
+function DeleteConfirmation({
+  record,
+  dependentBackups,
+  busy,
+  activeOperation,
+  onCancel,
+  onConfirm,
+}: {
+  record: BackupRecord;
+  dependentBackups: BackupRecord[];
+  busy: boolean;
+  activeOperation: string | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="backup-delete-confirm">
+      <p>
+        确认删除「{formatDate(record.createdAt)}」？此操作无法撤销。
+      </p>
+      {dependentBackups.length > 0 ? (
+        <div className="backup-delete-confirm__dependents">
+          <span>删除当前备份会同时删除以下依赖增量备份：</span>
+          <ul>
+            {dependentBackups.map((backup) => (
+              <li key={backup.id}>{backup.backupType === "full" ? "全量" : "增量"} · {formatDate(backup.createdAt)}</li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <span className="backup-delete-confirm__muted">不会连带删除其他备份。</span>
+      )}
+      <div className="backup-delete-confirm__actions">
+        <button type="button" className="secondary-button" disabled={busy} onClick={onCancel}>
+          取消
+        </button>
+        <button type="button" className="danger-confirm-button" disabled={busy} onClick={onConfirm}>
+          {activeOperation === `delete:${record.id}` ? <Loader2 size={15} className="spin-icon" /> : <Trash2 size={15} />}
+          确认删除
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function collectDependentBackups(backups: BackupRecord[], backupId: string): BackupRecord[] {
+  const pending = [backupId];
+  const dependentIds: string[] = [];
+  while (pending.length > 0) {
+    const currentId = pending.pop()!;
+    for (const backup of backups.filter((item) => item.baseBackupId === currentId)) {
+      if (dependentIds.includes(backup.id)) {
+        continue;
+      }
+      dependentIds.push(backup.id);
+      pending.push(backup.id);
+    }
+  }
+  return backups.filter((backup) => dependentIds.includes(backup.id));
 }
 
 function operationText(operation: string | null): string {
