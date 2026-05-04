@@ -9,12 +9,42 @@ import type {
 import { AppController } from "./AppController";
 
 const createLakeDocument = vi.fn<(title: string, parentPath?: string) => Promise<CreateDocumentPayload>>();
+const createBackup = vi.fn<(input: { forceFull: boolean }) => Promise<{
+  record: {
+    id: string;
+    backupType: "full" | "incremental";
+    createdAt: string;
+    keyFingerprint: string;
+    encryptedSize: number;
+    archiveHash: string;
+    objectKey: string;
+    canRestore: boolean;
+  };
+  warnings: string[];
+}>>();
 const deleteLakeDocument = vi.fn<(path: string) => Promise<WorkspacePayload>>();
 const createTemporaryResourceUrl = vi.fn<(resourceRef: string, ttlSeconds: number, filename?: string) => Promise<string>>();
 const downloadResourceFile = vi.fn<(input: { url: string; filename: string; resourceRef?: string }) => Promise<string | null>>();
+const getBackupKeyStatus = vi.fn(async () => ({ configured: false, needsKey: false }));
 const getRecentWorkspace = vi.fn<() => Promise<WorkspacePayload | null>>(async () => null);
+const listBackups = vi.fn(async () => [] as Array<{
+  id: string;
+  backupType: "full" | "incremental";
+  createdAt: string;
+  keyFingerprint: string;
+  encryptedSize: number;
+  archiveHash: string;
+  objectKey: string;
+  canRestore: boolean;
+}>);
 const moveWorkspaceItem = vi.fn<(input: MoveWorkspaceItemInput) => Promise<WorkspacePayload>>();
 const readLakeDocument = vi.fn<(path: string) => Promise<string>>(async () => "<p>hello</p>");
+const restoreBackup = vi.fn<(input: { backupId: string; allowKeyMismatch?: boolean }) => Promise<{
+  restoredBackupId: string;
+  restoredAt: string;
+  requiresRestart: boolean;
+  warnings: string[];
+}>>();
 const saveBinaryExport = vi.fn<(defaultPath: string, bytes: Uint8Array, filters: Array<{ name: string; extensions: string[] }>) => Promise<string | null>>();
 const savePdfExport = vi.fn<(defaultPath: string, html: string, filters: Array<{ name: string; extensions: string[] }>) => Promise<string | null>>();
 const saveTextExport = vi.fn<(defaultPath: string, content: string, filters: Array<{ name: string; extensions: string[] }>) => Promise<string | null>>();
@@ -77,19 +107,7 @@ vi.mock("../components/DocumentSidebar", () => ({
 vi.mock("../lib/tauri", () => ({
   chooseWorkspaceDirectory: vi.fn(async () => "/tmp/kb"),
   createLakeDirectory: vi.fn(),
-  createBackup: vi.fn(async () => ({
-    record: {
-      id: "backup",
-      backupType: "full",
-      createdAt: new Date().toISOString(),
-      keyFingerprint: "fingerprint",
-      encryptedSize: 1,
-      archiveHash: "hash",
-      objectKey: "backup.ylbackup",
-      canRestore: true,
-    },
-    warnings: [],
-  })),
+  createBackup: (input: { forceFull: boolean }) => createBackup(input),
   createLakeDocument: (title: string, parentPath?: string) => createLakeDocument(title, parentPath),
   createTemporaryResourceUrl: (resourceRef: string, ttlSeconds: number, filename?: string) => (
     createTemporaryResourceUrl(resourceRef, ttlSeconds, filename)
@@ -98,9 +116,9 @@ vi.mock("../lib/tauri", () => ({
   deleteLakeDocument: (path: string) => deleteLakeDocument(path),
   downloadResourceFile: (input: { url: string; filename: string; resourceRef?: string }) => downloadResourceFile(input),
   getOssSettings: vi.fn(async () => null),
-  getBackupKeyStatus: vi.fn(async () => ({ configured: false, needsKey: false })),
+  getBackupKeyStatus: () => getBackupKeyStatus(),
   getRecentWorkspace: () => getRecentWorkspace(),
-  listBackups: vi.fn(async () => []),
+  listBackups: () => listBackups(),
   moveWorkspaceItem: (input: MoveWorkspaceItemInput) => moveWorkspaceItem(input),
   openExternalUrl: vi.fn(),
   prepareResourcePreview: vi.fn(async (resourceRef: string) => resourceRef),
@@ -113,12 +131,7 @@ vi.mock("../lib/tauri", () => ({
   savePdfExport: (defaultPath: string, html: string, filters: Array<{ name: string; extensions: string[] }>) => savePdfExport(defaultPath, html, filters),
   saveTextExport: (defaultPath: string, content: string, filters: Array<{ name: string; extensions: string[] }>) => saveTextExport(defaultPath, content, filters),
   resetBackupKey: vi.fn(async () => ({ configured: true, needsKey: false, fingerprint: "fingerprint" })),
-  restoreBackup: vi.fn(async () => ({
-    restoredBackupId: "backup",
-    restoredAt: new Date().toISOString(),
-    requiresRestart: false,
-    warnings: [],
-  })),
+  restoreBackup: (input: { backupId: string; allowKeyMismatch?: boolean }) => restoreBackup(input),
   readResourceBytes: vi.fn(async () => new Uint8Array([1, 2, 3])),
   saveWorkspaceOrder: vi.fn(),
   setBackupKey: vi.fn(async () => ({ configured: true, needsKey: false, fingerprint: "fingerprint" })),
@@ -129,15 +142,40 @@ vi.mock("../lib/tauri", () => ({
 }));
 
 beforeEach(() => {
+  createBackup.mockReset();
+  createBackup.mockResolvedValue({
+    record: {
+      id: "backup",
+      backupType: "full",
+      createdAt: new Date().toISOString(),
+      keyFingerprint: "fingerprint",
+      encryptedSize: 1,
+      archiveHash: "hash",
+      objectKey: "backup.ylbackup",
+      canRestore: true,
+    },
+    warnings: [],
+  });
   createLakeDocument.mockReset();
   createTemporaryResourceUrl.mockReset();
   createTemporaryResourceUrl.mockImplementation(async (resourceRef, ttlSeconds) => `${resourceRef}&ttl=${ttlSeconds}`);
   deleteLakeDocument.mockReset();
   downloadResourceFile.mockReset();
   downloadResourceFile.mockResolvedValue("/tmp/attachment.pdf");
+  getBackupKeyStatus.mockReset();
+  getBackupKeyStatus.mockResolvedValue({ configured: false, needsKey: false });
   getRecentWorkspace.mockResolvedValue(null);
+  listBackups.mockReset();
+  listBackups.mockResolvedValue([]);
   moveWorkspaceItem.mockReset();
   readLakeDocument.mockResolvedValue("<p>hello</p>");
+  restoreBackup.mockReset();
+  restoreBackup.mockResolvedValue({
+    restoredBackupId: "backup",
+    restoredAt: new Date().toISOString(),
+    requiresRestart: false,
+    warnings: [],
+  });
   saveBinaryExport.mockReset();
   saveBinaryExport.mockResolvedValue("/tmp/export.zip");
   savePdfExport.mockReset();
@@ -324,5 +362,88 @@ test("可以导出整个知识库 Markdown ZIP", async () => {
     expect(editor.setDocument).toHaveBeenCalledWith("text/lake", "<h1>hello</h1><p>world</p>");
     expect(editor.getDocument).toHaveBeenCalledWith("text/markdown");
     expect(editor.destroy).toHaveBeenCalled();
+  });
+});
+
+test("创建备份前先保存当前打开文档的最新内容", async () => {
+  const user = userEvent.setup();
+  const editor = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => "<p>已有文档新增内容</p>"),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1 }],
+    order: ["document:a.lake"],
+  });
+  readLakeDocument.mockResolvedValue("<p>备份前旧内容</p>");
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "a" }));
+  await waitFor(() => expect(editor.setDocument).toHaveBeenCalledWith("text/lake", "<p>备份前旧内容</p>"));
+  await user.click(screen.getByRole("button", { name: "设置" }));
+  await user.click(screen.getByRole("button", { name: "备份恢复" }));
+  await user.click(screen.getByRole("button", { name: "立即备份" }));
+
+  await waitFor(() => {
+    expect(writeLakeDocument).toHaveBeenCalledWith("a.lake", "<p>已有文档新增内容</p>");
+    expect(createBackup).toHaveBeenCalledWith({ forceFull: false });
+  });
+  expect(writeLakeDocument.mock.invocationCallOrder[0]).toBeLessThan(createBackup.mock.invocationCallOrder[0]);
+});
+
+test("恢复备份后刷新当前打开文档内容", async () => {
+  const user = userEvent.setup();
+  const editor = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => "<p>恢复前显示内容</p>"),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+  const workspace: WorkspacePayload = {
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1 }],
+    order: ["document:a.lake"],
+  };
+  getRecentWorkspace.mockResolvedValue(workspace);
+  listBackups.mockResolvedValue([
+    {
+      id: "incremental-backup",
+      backupType: "incremental",
+      createdAt: "2026-05-04T01:07:23Z",
+      keyFingerprint: "fingerprint",
+      encryptedSize: 1024,
+      archiveHash: "hash",
+      objectKey: "backup.ylbackup",
+      canRestore: true,
+    },
+  ]);
+  readLakeDocument
+    .mockResolvedValueOnce("<p>恢复前旧内容</p>")
+    .mockResolvedValueOnce("<p>恢复后新增内容</p>");
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "a" }));
+  await waitFor(() => expect(editor.setDocument).toHaveBeenCalledWith("text/lake", "<p>恢复前旧内容</p>"));
+  await user.click(screen.getByRole("button", { name: "设置" }));
+  await user.click(screen.getByRole("button", { name: "备份恢复" }));
+  await user.click(await screen.findByRole("button", { name: "恢复" }));
+
+  await waitFor(() => {
+    expect(restoreBackup).toHaveBeenCalledWith({ backupId: "incremental-backup", allowKeyMismatch: false });
+    expect(editor.setDocument).toHaveBeenCalledWith("text/lake", "<p>恢复后新增内容</p>");
   });
 });

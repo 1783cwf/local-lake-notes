@@ -57,7 +57,7 @@ export function useLakeAutosave({
     }
   }, []);
 
-  const saveNow = useCallback(async () => {
+  const runSave = useCallback(async (throwOnError: boolean) => {
     const context = saveContextRef.current;
     if (!context.enabled) {
       return;
@@ -81,8 +81,14 @@ export function useLakeAutosave({
           message: error instanceof Error ? error.message : String(error),
         });
       }
+      if (throwOnError) {
+        throw error;
+      }
     }
   }, [clearTimer]);
+
+  const saveNow = useCallback(() => runSave(false), [runSave]);
+  const saveNowOrThrow = useCallback(() => runSave(true), [runSave]);
 
   const scheduleSave = useCallback(() => {
     const version = saveContextRef.current.version;
@@ -117,5 +123,6 @@ export function useLakeAutosave({
     setStatus,
     scheduleSave,
     saveNow,
+    saveNowOrThrow,
   };
 }

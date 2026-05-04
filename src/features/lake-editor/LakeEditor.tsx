@@ -28,6 +28,7 @@ interface LakeEditorProps {
   onDownloadFile: (input: FileDownloadInput) => Promise<void>;
   onPrepareResourcePreview: (resourceRef: string) => Promise<string>;
   onSaveStatusChange: (status: SaveStatus) => void;
+  onRegisterSaveNow?: (saveNow: (() => Promise<void>) | null) => void;
 }
 
 export function LakeEditor({
@@ -42,6 +43,7 @@ export function LakeEditor({
   onDownloadFile,
   onPrepareResourcePreview,
   onSaveStatusChange,
+  onRegisterSaveNow,
 }: LakeEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<LakeEditorInstance | null>(null);
@@ -103,7 +105,7 @@ export function LakeEditor({
     [document, onSave],
   );
 
-  const { status, setStatus, scheduleSave, saveNow } = useLakeAutosave({
+  const { status, setStatus, scheduleSave, saveNow, saveNowOrThrow } = useLakeAutosave({
     enabled: Boolean(document),
     readContent,
     saveContent,
@@ -112,6 +114,11 @@ export function LakeEditor({
   useEffect(() => {
     onSaveStatusChange(status);
   }, [onSaveStatusChange, status]);
+
+  useEffect(() => {
+    onRegisterSaveNow?.(document ? saveNowOrThrow : null);
+    return () => onRegisterSaveNow?.(null);
+  }, [document, onRegisterSaveNow, saveNowOrThrow]);
 
   useLayoutEffect(() => {
     if (!document || !containerRef.current) {

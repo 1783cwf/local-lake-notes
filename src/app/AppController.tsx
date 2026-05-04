@@ -1,5 +1,5 @@
 import type { FormEvent, PointerEvent } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { AppRail } from "../components/AppRail";
@@ -100,6 +100,7 @@ export function AppController() {
   const [sidebarWidth, setSidebarWidth] = useState(296);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [textDialog, setTextDialog] = useState<TextDialogState | null>(null);
+  const saveCurrentEditorNowRef = useRef<(() => Promise<void>) | null>(null);
 
   useEffect(() => {
     void boot();
@@ -140,6 +141,26 @@ export function AppController() {
       setBackupRecords([]);
     }
   };
+
+  const refreshCurrentDocumentFromDisk = useCallback(async () => {
+    if (!currentDocument) {
+      setSaveStatus(emptySaveStatus);
+      return;
+    }
+
+    try {
+      const content = await readLakeDocument(currentDocument.entry.path);
+      setCurrentDocument({ entry: currentDocument.entry, content });
+      setSaveStatus(emptySaveStatus);
+    } catch {
+      setCurrentDocument(null);
+      setSaveStatus(emptySaveStatus);
+    }
+  }, [currentDocument]);
+
+  const registerEditorSaveNow = useCallback((saveNow: (() => Promise<void>) | null) => {
+    saveCurrentEditorNowRef.current = saveNow;
+  }, []);
 
   const chooseWorkspace = useCallback(async () => {
     const selected = await chooseWorkspaceDirectory();
@@ -471,6 +492,8 @@ export function AppController() {
   const runBackup = useCallback(async (forceFull: boolean) => {
     setBackupBusy(true);
     try {
+      // 备份读取的是磁盘上的 .lake 文件，先同步保存当前编辑器，避免增量包漏掉未落盘修改。
+      await saveCurrentEditorNowRef.current?.();
       await createBackup({ forceFull });
       setBackupRecords(await listBackups());
       setBackupKeyStatus(await getBackupKeyStatus());
@@ -487,11 +510,12 @@ export function AppController() {
     try {
       const output = await restoreBackup({ backupId, allowKeyMismatch });
       await boot();
+      await refreshCurrentDocumentFromDisk();
       return output;
     } finally {
       setBackupBusy(false);
     }
-  }, []);
+  }, [refreshCurrentDocumentFromDisk]);
 
   const uploadEditorImage = useCallback(async (input: UploadImageInput): Promise<UploadImageOutput> => {
     if (!ossSettings) {
@@ -657,6 +681,7 @@ export function AppController() {
           onDownloadFile={downloadEditorFile}
           onPrepareResourcePreview={prepareEditorResourcePreview}
           onSaveStatusChange={setSaveStatus}
+          onRegisterSaveNow={registerEditorSaveNow}
         />
       </main>
       <OssSettingsPanel
