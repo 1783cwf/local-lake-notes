@@ -1,6 +1,6 @@
-# Yuque Lake Notes
+# Local Lake Notes
 
-Yuque Lake Notes 是一个基于 Tauri 的本地笔记应用原型，目标是在桌面端直接使用语雀 Lake 编辑器编辑 `.lake` 文档。当前版本以 Lake 原生格式为主，文档文件保存在用户选择的知识库目录中，应用配置、排序和 OSS 设置等非文档数据保存在 SQLite 中。
+Local Lake Notes 是一个基于 Tauri 的本地离线笔记应用原型，目标是在桌面端直接使用语雀 Lake 编辑器编辑 `.lake` 文档。当前版本以 Lake 原生格式为主，文档文件保存在用户选择的知识库目录中，应用配置、排序和 OSS 设置等非文档数据保存在 SQLite 中。
 
 ## 当前能力
 
@@ -75,6 +75,8 @@ src-tauri/dev-data/yuque-lake-notes.sqlite3
 ```
 
 说明：SQLite 不写入 `.app` 包体内部。macOS 应用包在安装、签名和升级时不适合承载可变数据，实际可写数据应放在应用数据目录中。
+
+说明：当前应用标识仍保留为 `com.weistuday.yuque.lake-notes`，用于兼容已有本地配置和 SQLite 数据目录。
 
 旧版本产生的 `workspace.json`、`oss-settings.json`、`.yuque-lake-notes/order.json` 会在读取时迁移到 SQLite。
 

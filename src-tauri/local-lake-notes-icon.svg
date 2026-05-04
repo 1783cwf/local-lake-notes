@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="168" x2="856" y1="104" y2="920" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2dd4bf"/>
+      <stop offset="0.55" stop-color="#18a875"/>
+      <stop offset="1" stop-color="#0f766e"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="326" x2="730" y1="272" y2="738" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#eafff8"/>
+    </linearGradient>
+    <filter id="shadow" x="120" y="128" width="784" height="760" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="28" stdDeviation="30" flood-color="#064e3b" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
+  <path fill="#ffffff" opacity="0.12" d="M148 734c148-88 236-77 348-18 108 57 220 89 380-32v206H148V734Z"/>
+  <g filter="url(#shadow)">
+    <path fill="#0b5f56" opacity="0.18" d="M262 244h394c82 0 148 66 148 148v302c0 34-28 62-62 62H354c-78 0-142-64-142-142V294c0-28 22-50 50-50Z"/>
+    <path fill="#ffffff" d="M258 218h394c82 0 148 66 148 148v302c0 34-28 62-62 62H350c-78 0-142-64-142-142V268c0-28 22-50 50-50Z"/>
+    <path fill="url(#paper)" d="M344 292h292c54 0 98 44 98 98v260H356c-42 0-76-34-76-76V356c0-35 29-64 64-64Z"/>
+    <path fill="#0f766e" d="M280 356c0-35 29-64 64-64h24v438h-18c-78 0-142-64-142-142V268c0-28 22-50 50-50h50c-18 21-28 48-28 76v62Z"/>
+    <path fill="#14b87a" d="M376 390h230c17 0 30 13 30 30s-13 30-30 30H376c-17 0-30-13-30-30s13-30 30-30Zm0 116h274c17 0 30 13 30 30s-13 30-30 30H376c-17 0-30-13-30-30s13-30 30-30Z"/>
+    <path fill="#0f766e" d="M606 626c-98 0-166 31-232 88h360v-52c-36-23-78-36-128-36Z"/>
+  </g>
+  <path fill="#ffffff" opacity="0.92" d="M720 214c31 0 56 25 56 56v48h-36v-48c0-11-9-20-20-20s-20 9-20 20v48h-36v-48c0-31 25-56 56-56Z"/>
+  <rect width="136" height="100" x="652" y="310" fill="#0b5f56" rx="26"/>
+  <path fill="#b7fff1" d="M720 340c18 0 32 14 32 32 0 12-7 23-17 28v28h-30v-28c-10-5-17-16-17-28 0-18 14-32 32-32Z"/>
+</svg>

@@ -27,6 +27,7 @@ const deleteLakeDocument = vi.fn<(path: string) => Promise<WorkspacePayload>>();
 const createTemporaryResourceUrl = vi.fn<(resourceRef: string, ttlSeconds: number, filename?: string) => Promise<string>>();
 const downloadResourceFile = vi.fn<(input: { url: string; filename: string; resourceRef?: string }) => Promise<string | null>>();
 const getBackupKeyStatus = vi.fn(async () => ({ configured: false, needsKey: false }));
+const verifyBackupKeyStatus = vi.fn(async () => ({ configured: false, needsKey: false }));
 const getRecentWorkspace = vi.fn<() => Promise<WorkspacePayload | null>>(async () => null);
 const listBackups = vi.fn(async () => [] as Array<{
   id: string;
@@ -119,6 +120,7 @@ vi.mock("../lib/tauri", () => ({
   downloadResourceFile: (input: { url: string; filename: string; resourceRef?: string }) => downloadResourceFile(input),
   getOssSettings: vi.fn(async () => null),
   getBackupKeyStatus: () => getBackupKeyStatus(),
+  verifyBackupKeyStatus: () => verifyBackupKeyStatus(),
   getRecentWorkspace: () => getRecentWorkspace(),
   listBackups: () => listBackups(),
   moveWorkspaceItem: (input: MoveWorkspaceItemInput) => moveWorkspaceItem(input),
@@ -168,6 +170,8 @@ beforeEach(() => {
   downloadResourceFile.mockResolvedValue("/tmp/attachment.pdf");
   getBackupKeyStatus.mockReset();
   getBackupKeyStatus.mockResolvedValue({ configured: false, needsKey: false });
+  verifyBackupKeyStatus.mockReset();
+  verifyBackupKeyStatus.mockResolvedValue({ configured: false, needsKey: false });
   getRecentWorkspace.mockResolvedValue(null);
   listBackups.mockReset();
   listBackups.mockResolvedValue([]);
@@ -220,6 +224,15 @@ test("选择目录后展示 workspace 文档", async () => {
     expect(screen.getByText("kb")).toBeInTheDocument();
     expect(screen.getByRole("treeitem", { name: /a/ })).toBeInTheDocument();
   });
+});
+
+test("启动时只读取备份密钥元数据，不触发钥匙串验证", async () => {
+  getBackupKeyStatus.mockResolvedValue({ configured: true, needsKey: false });
+
+  render(<AppController />);
+
+  await waitFor(() => expect(getBackupKeyStatus).toHaveBeenCalled());
+  expect(verifyBackupKeyStatus).not.toHaveBeenCalled();
 });
 
 test("移动当前打开文档后绑定到后端返回的新路径", async () => {

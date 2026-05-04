@@ -57,6 +57,10 @@ impl BackupKeyStore for SystemBackupKeyStore {
 }
 
 pub fn backup_key_status(app: &AppHandle) -> AppResult<BackupKeyStatus> {
+    backup_key_metadata_status(app)
+}
+
+pub fn verified_backup_key_status(app: &AppHandle) -> AppResult<BackupKeyStatus> {
     backup_key_status_with_store(app, &SystemBackupKeyStore::new(app))
 }
 
@@ -75,6 +79,17 @@ pub fn current_key_fingerprint(app: &AppHandle) -> AppResult<String> {
     let metadata = load_metadata(app)?
         .ok_or_else(|| AppError::Backup("请先设置备份加密密钥".to_string()))?;
     Ok(metadata.fingerprint)
+}
+
+pub fn backup_key_metadata_status(app: &AppHandle) -> AppResult<BackupKeyStatus> {
+    let metadata = load_metadata(app)?;
+    // 启动阶段只读 SQLite 元数据，避免 macOS 因访问钥匙串在每次打开应用时弹出授权窗口。
+    Ok(BackupKeyStatus {
+        configured: metadata.is_some(),
+        needs_key: false,
+        fingerprint: metadata.as_ref().map(|value| value.fingerprint.clone()),
+        created_at: metadata.map(|value| value.created_at),
+    })
 }
 
 pub fn backup_key_status_with_store(

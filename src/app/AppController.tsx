@@ -63,6 +63,7 @@ import {
   setWorkspaceRoot,
   uploadFile,
   uploadImage,
+  verifyBackupKeyStatus,
   writeLakeDocument,
 } from "../lib/tauri";
 import type {
@@ -501,7 +502,7 @@ export function AppController() {
       await saveCurrentEditorNowRef.current?.();
       await createBackup({ forceFull });
       setBackupRecords(await listBackups());
-      setBackupKeyStatus(await getBackupKeyStatus());
+      setBackupKeyStatus(await verifyBackupKeyStatus());
     } finally {
       setBackupBusy(false);
       setActiveBackupOperation(null);

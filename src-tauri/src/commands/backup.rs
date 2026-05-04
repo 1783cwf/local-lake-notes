@@ -20,6 +20,7 @@ use crate::storage::app_database::{
 use crate::storage::backup_archive::{build_encrypted_archive, extract_encrypted_archive};
 use crate::storage::backup_key::{
     backup_key_status, current_backup_secret, current_key_fingerprint, set_backup_secret,
+    verified_backup_key_status,
 };
 use crate::storage::backup_manifest::{
     build_full_manifest, build_incremental_manifest, file_hash, parse_manifest, BackupManifest,
@@ -32,6 +33,11 @@ use crate::storage::backup_store::{
 #[tauri::command]
 pub fn get_backup_key_status(app: AppHandle) -> AppResult<BackupKeyStatus> {
     backup_key_status(&app)
+}
+
+#[tauri::command]
+pub fn verify_backup_key_status(app: AppHandle) -> AppResult<BackupKeyStatus> {
+    verified_backup_key_status(&app)
 }
 
 #[tauri::command]

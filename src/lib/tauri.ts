@@ -436,6 +436,14 @@ export async function getBackupKeyStatus(): Promise<BackupKeyStatus> {
   return invoke<BackupKeyStatus>("get_backup_key_status");
 }
 
+export async function verifyBackupKeyStatus(): Promise<BackupKeyStatus> {
+  if (!isTauriRuntime()) {
+    return readBrowserBackupKeyStatus();
+  }
+
+  return invoke<BackupKeyStatus>("verify_backup_key_status");
+}
+
 export async function setBackupKey(secret: string): Promise<BackupKeyStatus> {
   if (!isTauriRuntime()) {
     const status: BackupKeyStatus = {

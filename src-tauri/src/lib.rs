@@ -6,7 +6,7 @@ pub mod storage;
 
 use commands::backup::{
     create_backup, delete_backup, get_backup_key_status, list_backups, reset_backup_key,
-    restore_backup, set_backup_key,
+    restore_backup, set_backup_key, verify_backup_key_status,
 };
 use commands::documents::{
     create_lake_document, delete_lake_document, export_pdf_from_html, read_lake_document,
@@ -66,6 +66,7 @@ pub fn run() {
             upload_file,
             upload_image,
             get_backup_key_status,
+            verify_backup_key_status,
             set_backup_key,
             reset_backup_key,
             list_backups,
@@ -74,5 +75,5 @@ pub fn run() {
             delete_backup,
         ])
         .run(tauri::generate_context!())
-        .expect("failed to run Yuque Lake Notes");
+        .expect("failed to run Local Lake Notes");
 }

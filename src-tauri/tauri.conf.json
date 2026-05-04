@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Yuque Lake Notes",
+  "productName": "Local Lake Notes",
   "version": "0.1.0",
   "identifier": "com.weistuday.yuque.lake-notes",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Yuque Lake Notes",
+        "title": "Local Lake Notes",
         "width": 1440,
         "height": 920,
         "minWidth": 920,
@@ -31,6 +31,14 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all"
+    "targets": "all",
+    "icon": [
+      "icons-local-lake-notes/32x32.png",
+      "icons-local-lake-notes/128x128.png",
+      "icons-local-lake-notes/128x128@2x.png",
+      "icons-local-lake-notes/icon.icns",
+      "icons-local-lake-notes/icon.ico",
+      "icons-local-lake-notes/icon.png"
+    ]
   }
 }

@@ -1,7 +1,7 @@
 [package]
-name = "yuque-lake-notes"
+name = "local-lake-notes"
 version = "0.1.0"
-description = "Lake-first local notes app powered by Yuque editor"
+description = "Lake-first local notes app powered by Lake editor"
 authors = ["weifeng"]
 edition = "2021"
 
