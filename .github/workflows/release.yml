@@ -2,6 +2,11 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "要上传产物的 Release 标签名"
+        required: true
+        default: "v1.0.0"
   push:
     tags:
       - "v*"
@@ -87,6 +92,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          tagName: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
+          releaseName: Local Lake Notes ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
+          releaseDraft: false
+          prerelease: false
           args: ${{ matrix.tauri-args }}
+          retryAttempts: 3
           uploadWorkflowArtifacts: true
           workflowArtifactNamePattern: ${{ matrix.name }}-[bundle]
