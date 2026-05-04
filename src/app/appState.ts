@@ -94,6 +94,14 @@ export interface RestoreBackupOutput {
   warnings: string[];
 }
 
+export interface DeleteBackupInput {
+  backupId: string;
+}
+
+export interface DeleteBackupOutput {
+  deletedBackupIds: string[];
+}
+
 export type ExportResourceStrategy = "bundle" | "signed-url";
 
 export const emptySaveStatus: SaveStatus = {

@@ -13,9 +13,11 @@ function renderPanel(overrides: Partial<Parameters<typeof OssSettingsPanel>[0]> 
       backupKeyStatus={{ configured: false, needsKey: false }}
       backupRecords={[]}
       backupBusy={false}
+      activeBackupOperation={null}
       onSetBackupKey={vi.fn()}
       onCreateBackup={vi.fn()}
       onRestoreBackup={vi.fn()}
+      onDeleteBackup={vi.fn()}
       {...overrides}
     />,
   );
@@ -63,4 +65,41 @@ test("可以切换到备份恢复并设置密钥", async () => {
 
   expect(onSetBackupKey).toHaveBeenCalledWith("test-secret-key", false);
   expect(onSave).not.toHaveBeenCalled();
+});
+
+test("备份列表支持删除备份", async () => {
+  const user = userEvent.setup();
+  const onDeleteBackup = vi.fn().mockResolvedValue(undefined);
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+
+  renderPanel({
+    onDeleteBackup,
+    backupRecords: [{
+      id: "backup-1",
+      backupType: "full",
+      createdAt: "2026-05-04T01:07:23Z",
+      keyFingerprint: "fingerprint",
+      encryptedSize: 1024,
+      archiveHash: "hash",
+      objectKey: "backup.ylbackup",
+      canRestore: true,
+    }],
+  });
+
+  await user.click(screen.getByRole("button", { name: "备份恢复" }));
+  await user.click(screen.getByRole("button", { name: /删除备份/ }));
+
+  expect(onDeleteBackup).toHaveBeenCalledWith("backup-1");
+});
+
+test("备份任务执行中展示 loading 状态", async () => {
+  renderPanel({
+    backupBusy: true,
+    activeBackupOperation: "create-incremental",
+  });
+
+  await userEvent.click(screen.getByRole("button", { name: "备份恢复" }));
+
+  expect(screen.getByText("正在创建增量备份...")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "备份中" })).toBeDisabled();
 });

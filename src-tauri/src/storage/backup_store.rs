@@ -1,8 +1,8 @@
-use chrono::Utc;
-use serde::{Deserialize, Serialize};
 use crate::error::{AppError, AppResult};
 use crate::models::{BackupRecord, OssSettings};
-use crate::storage::s3::{get_object_bytes, list_object_keys, put_object};
+use crate::storage::s3::{delete_object, get_object_bytes, list_object_keys, put_object};
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
 
 const BACKUP_CONTENT_TYPE: &str = "application/octet-stream";
 const INDEX_CONTENT_TYPE: &str = "application/json";
@@ -104,6 +104,18 @@ pub async fn download_backup_archive(
     Ok(bytes)
 }
 
+pub async fn delete_backup_indexes(
+    settings: &OssSettings,
+    device_id: &str,
+    indexes: &[BackupIndex],
+) -> AppResult<()> {
+    for index in indexes {
+        delete_object(settings, &backup_index_key(settings, device_id, &index.id)?).await?;
+        delete_object(settings, &index.object_key).await?;
+    }
+    Ok(())
+}
+
 pub fn backup_prefix(settings: &OssSettings) -> AppResult<String> {
     sanitize_prefix(&settings.backup_prefix)
         .ok_or_else(|| AppError::InvalidOssSettings("备份目录".to_string()))
@@ -131,8 +143,7 @@ fn sanitize_prefix(value: &str) -> Option<String> {
                 .trim()
                 .chars()
                 .filter(|character| {
-                    character.is_ascii_alphanumeric()
-                        || matches!(character, '-' | '_' | '.' | '~')
+                    character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.' | '~')
                 })
                 .collect::<String>();
             if segment.is_empty() {

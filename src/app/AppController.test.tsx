@@ -22,6 +22,7 @@ const createBackup = vi.fn<(input: { forceFull: boolean }) => Promise<{
   };
   warnings: string[];
 }>>();
+const deleteBackup = vi.fn<(input: { backupId: string }) => Promise<{ deletedBackupIds: string[] }>>();
 const deleteLakeDocument = vi.fn<(path: string) => Promise<WorkspacePayload>>();
 const createTemporaryResourceUrl = vi.fn<(resourceRef: string, ttlSeconds: number, filename?: string) => Promise<string>>();
 const downloadResourceFile = vi.fn<(input: { url: string; filename: string; resourceRef?: string }) => Promise<string | null>>();
@@ -113,6 +114,7 @@ vi.mock("../lib/tauri", () => ({
     createTemporaryResourceUrl(resourceRef, ttlSeconds, filename)
   ),
   deleteLakeDirectory: vi.fn(),
+  deleteBackup: (input: { backupId: string }) => deleteBackup(input),
   deleteLakeDocument: (path: string) => deleteLakeDocument(path),
   downloadResourceFile: (input: { url: string; filename: string; resourceRef?: string }) => downloadResourceFile(input),
   getOssSettings: vi.fn(async () => null),
@@ -156,6 +158,8 @@ beforeEach(() => {
     },
     warnings: [],
   });
+  deleteBackup.mockReset();
+  deleteBackup.mockResolvedValue({ deletedBackupIds: ["backup"] });
   createLakeDocument.mockReset();
   createTemporaryResourceUrl.mockReset();
   createTemporaryResourceUrl.mockImplementation(async (resourceRef, ttlSeconds) => `${resourceRef}&ttl=${ttlSeconds}`);
@@ -445,5 +449,39 @@ test("恢复备份后刷新当前打开文档内容", async () => {
   await waitFor(() => {
     expect(restoreBackup).toHaveBeenCalledWith({ backupId: "incremental-backup", allowKeyMismatch: false });
     expect(editor.setDocument).toHaveBeenCalledWith("text/lake", "<p>恢复后新增内容</p>");
+  });
+});
+
+test("可以删除备份并刷新备份列表", async () => {
+  const user = userEvent.setup();
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [],
+    order: [],
+  });
+  listBackups
+    .mockResolvedValueOnce([{
+      id: "backup-1",
+      backupType: "full",
+      createdAt: "2026-05-04T01:07:23Z",
+      keyFingerprint: "fingerprint",
+      encryptedSize: 1024,
+      archiveHash: "hash",
+      objectKey: "backup.ylbackup",
+      canRestore: true,
+    }])
+    .mockResolvedValueOnce([]);
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+
+  render(<AppController />);
+
+  await user.click(screen.getByRole("button", { name: "设置" }));
+  await user.click(screen.getByRole("button", { name: "备份恢复" }));
+  await user.click(await screen.findByRole("button", { name: /删除备份/ }));
+
+  await waitFor(() => {
+    expect(deleteBackup).toHaveBeenCalledWith({ backupId: "backup-1" });
+    expect(screen.getByText("暂无备份")).toBeInTheDocument();
   });
 });

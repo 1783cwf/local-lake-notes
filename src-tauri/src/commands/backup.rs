@@ -9,23 +9,24 @@ use uuid::Uuid;
 use crate::commands::settings::{load_oss_settings, validate_oss_settings};
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    BackupKeyStatus, BackupOperationOutput, BackupRecord, CreateBackupInput, ResetBackupKeyInput,
-    RestoreBackupInput, RestoreBackupOutput, SetBackupKeyInput,
+    BackupKeyStatus, BackupOperationOutput, BackupRecord, CreateBackupInput, DeleteBackupInput,
+    DeleteBackupOutput, ResetBackupKeyInput, RestoreBackupInput, RestoreBackupOutput,
+    SetBackupKeyInput,
 };
 use crate::storage::app_database::{
-    database_path, list_known_workspaces, load_backup_device_id, load_backup_last_manifest,
-    save_backup_device_id, save_backup_last_manifest, snapshot_database,
+    clear_backup_last_manifest, database_path, list_known_workspaces, load_backup_device_id,
+    load_backup_last_manifest, save_backup_device_id, save_backup_last_manifest, snapshot_database,
 };
 use crate::storage::backup_archive::{build_encrypted_archive, extract_encrypted_archive};
 use crate::storage::backup_key::{
     backup_key_status, current_backup_secret, current_key_fingerprint, set_backup_secret,
 };
 use crate::storage::backup_manifest::{
-    BackupManifest, DATABASE_LOGICAL_PATH, build_full_manifest, build_incremental_manifest,
-    file_hash, parse_manifest,
+    build_full_manifest, build_incremental_manifest, file_hash, parse_manifest, BackupManifest,
+    DATABASE_LOGICAL_PATH,
 };
 use crate::storage::backup_store::{
-    BackupIndex, download_backup_archive, list_backup_indexes, upload_backup,
+    delete_backup_indexes, download_backup_archive, list_backup_indexes, upload_backup, BackupIndex,
 };
 
 #[tauri::command]
@@ -143,7 +144,10 @@ pub async fn restore_backup(
         let bytes = download_backup_archive(&settings, index).await?;
         let extracted = extract_encrypted_archive(&bytes, &secret)?;
         if extracted.manifest.backup_id != index.id {
-            return Err(AppError::Backup(format!("备份索引与包内容不一致：{}", index.id)));
+            return Err(AppError::Backup(format!(
+                "备份索引与包内容不一致：{}",
+                index.id
+            )));
         }
         extracted_chain.push(extracted);
     }
@@ -162,11 +166,65 @@ pub async fn restore_backup(
     })
 }
 
+#[tauri::command]
+pub async fn delete_backup(
+    app: AppHandle,
+    input: DeleteBackupInput,
+) -> AppResult<DeleteBackupOutput> {
+    let settings = load_valid_oss_settings(&app)?;
+    let device_id = backup_device_id(&app)?;
+    let indexes = list_backup_indexes(&settings, &device_id).await?;
+    let indexes_to_delete = backups_to_delete(&indexes, &input.backup_id)?;
+    let deleted_backup_ids = indexes_to_delete
+        .iter()
+        .map(|index| index.id.clone())
+        .collect::<Vec<_>>();
+    delete_backup_indexes(&settings, &device_id, &indexes_to_delete).await?;
+
+    if load_backup_last_manifest(&app)?
+        .and_then(|content| parse_manifest(&content).ok())
+        .map(|manifest| deleted_backup_ids.contains(&manifest.backup_id))
+        .unwrap_or(false)
+    {
+        // 最新基线被删除后无法安全增量，清空本地基线，让下一次备份自动回退为全量。
+        clear_backup_last_manifest(&app)?;
+    }
+
+    Ok(DeleteBackupOutput { deleted_backup_ids })
+}
+
 fn load_valid_oss_settings(app: &AppHandle) -> AppResult<crate::models::OssSettings> {
     let settings = load_oss_settings(app)?
         .ok_or_else(|| AppError::InvalidOssSettings("请先配置 OSS 上传信息".to_string()))?;
     validate_oss_settings(&settings)?;
     Ok(settings)
+}
+
+fn backups_to_delete(indexes: &[BackupIndex], backup_id: &str) -> AppResult<Vec<BackupIndex>> {
+    if !indexes.iter().any(|index| index.id == backup_id) {
+        return Err(AppError::Backup(format!("找不到备份：{backup_id}")));
+    }
+
+    let mut pending = vec![backup_id.to_string()];
+    let mut deleted_ids = Vec::new();
+    while let Some(current_id) = pending.pop() {
+        if deleted_ids.contains(&current_id) {
+            continue;
+        }
+        deleted_ids.push(current_id.clone());
+        for child in indexes
+            .iter()
+            .filter(|index| index.base_backup_id.as_deref() == Some(current_id.as_str()))
+        {
+            pending.push(child.id.clone());
+        }
+    }
+
+    Ok(indexes
+        .iter()
+        .filter(|index| deleted_ids.contains(&index.id))
+        .cloned()
+        .collect())
 }
 
 fn backup_device_id(app: &AppHandle) -> AppResult<String> {
@@ -201,11 +259,7 @@ fn backup_chain(indexes: &[BackupIndex], backup_id: &str) -> AppResult<Vec<Backu
             .ok_or_else(|| AppError::Backup(format!("备份链缺失基础备份：{base_id}")))?;
     }
     reversed.reverse();
-    if reversed
-        .first()
-        .map(|index| index.backup_type.as_str())
-        != Some("full")
-    {
+    if reversed.first().map(|index| index.backup_type.as_str()) != Some("full") {
         return Err(AppError::Backup("备份链缺少全量备份".to_string()));
     }
     Ok(reversed)
@@ -286,8 +340,10 @@ fn apply_staged_restore(app: &AppHandle, stage: &Path) -> AppResult<()> {
     }
     fs::copy(&database_source, &target_database)?;
 
-    let manifest = serde_json::from_str::<BackupManifest>(&fs::read_to_string(stage.join("manifest.json")).unwrap_or_default())
-        .ok();
+    let manifest = serde_json::from_str::<BackupManifest>(
+        &fs::read_to_string(stage.join("manifest.json")).unwrap_or_default(),
+    )
+    .ok();
     let workspace_roots = manifest
         .map(|manifest| {
             manifest
@@ -349,4 +405,44 @@ fn validate_sqlite_snapshot(path: &Path) -> AppResult<()> {
         ",
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deleting_backup_includes_dependent_incrementals_only() {
+        let indexes = vec![
+            backup_index("latest-full", None),
+            backup_index("old-inc-2", Some("old-inc-1")),
+            backup_index("old-inc-1", Some("old-full")),
+            backup_index("old-full", None),
+        ];
+
+        let ids = backups_to_delete(&indexes, "old-inc-1")
+            .unwrap()
+            .into_iter()
+            .map(|index| index.id)
+            .collect::<Vec<_>>();
+
+        assert_eq!(ids, vec!["old-inc-2", "old-inc-1"]);
+    }
+
+    fn backup_index(id: &str, base_backup_id: Option<&str>) -> BackupIndex {
+        BackupIndex {
+            id: id.to_string(),
+            backup_type: if base_backup_id.is_some() {
+                "incremental".to_string()
+            } else {
+                "full".to_string()
+            },
+            created_at: "2026-05-04T00:00:00Z".to_string(),
+            base_backup_id: base_backup_id.map(ToString::to_string),
+            key_fingerprint: "fingerprint".to_string(),
+            encrypted_size: 1,
+            archive_hash: "hash".to_string(),
+            object_key: format!("{id}.ylbackup"),
+        }
+    }
 }

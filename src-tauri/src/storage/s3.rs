@@ -123,6 +123,18 @@ pub async fn get_object_bytes(settings: &OssSettings, key: &str) -> AppResult<Ve
         .map_err(|error| AppError::S3(error.to_string()))
 }
 
+pub async fn delete_object(settings: &OssSettings, key: &str) -> AppResult<()> {
+    let client = s3_client(settings).await;
+    client
+        .delete_object()
+        .bucket(&settings.bucket)
+        .key(key)
+        .send()
+        .await
+        .map_err(|error| AppError::S3(error.to_string()))?;
+    Ok(())
+}
+
 pub async fn list_object_keys(settings: &OssSettings, prefix: &str) -> AppResult<Vec<String>> {
     let client = s3_client(settings).await;
     let mut token = None;

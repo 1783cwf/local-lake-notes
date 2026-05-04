@@ -943,6 +943,15 @@ button {
   font-size: 13px;
 }
 
+.backup-operation-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .settings-card {
   display: flex;
   flex-direction: column;
@@ -1004,11 +1013,18 @@ button {
   border-top: 1px solid var(--line);
 }
 
-.backup-record div {
+.backup-record > div:first-child {
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: 3px;
+}
+
+.backup-record__actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
 }
 
 .backup-record strong,
@@ -1058,6 +1074,25 @@ button {
 .secondary-button {
   color: #31363b;
   background: #eef1f1;
+}
+
+.danger-button {
+  color: #9f2b1d;
+}
+
+.danger-button:hover {
+  color: #9f2b1d;
+  background: #fff0ed;
+}
+
+.spin-icon {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 1180px) {

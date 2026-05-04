@@ -212,6 +212,18 @@ pub struct RestoreBackupOutput {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteBackupInput {
+    pub backup_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteBackupOutput {
+    pub deleted_backup_ids: Vec<String>,
+}
+
 fn default_file_prefix() -> String {
     "files".to_string()
 }

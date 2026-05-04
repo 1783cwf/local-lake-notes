@@ -6,6 +6,8 @@ import type {
   BackupOperationOutput,
   BackupRecord,
   CreateBackupInput,
+  DeleteBackupInput,
+  DeleteBackupOutput,
   FileDownloadInput,
   OssSettings,
   RestoreBackupInput,
@@ -504,6 +506,20 @@ export async function restoreBackup(input: RestoreBackupInput): Promise<RestoreB
   return invoke<RestoreBackupOutput>("restore_backup", { input });
 }
 
+export async function deleteBackup(input: DeleteBackupInput): Promise<DeleteBackupOutput> {
+  if (!isTauriRuntime()) {
+    const existing = readBrowserBackups();
+    const idsToDelete = collectBackupIdsToDelete(existing, input.backupId);
+    window.localStorage.setItem(
+      browserBackupsKey,
+      JSON.stringify(existing.filter((record) => !idsToDelete.includes(record.id))),
+    );
+    return { deletedBackupIds: idsToDelete };
+  }
+
+  return invoke<DeleteBackupOutput>("delete_backup", { input });
+}
+
 export async function uploadImage(input: UploadImageInput): Promise<UploadImageOutput> {
   if (!isTauriRuntime()) {
     const resourceRef = `yuque-resource://browser/images/${encodeURIComponent(input.filename)}?kind=image&name=${encodeURIComponent(input.filename)}&size=${input.bytes.length}`;
@@ -650,6 +666,22 @@ function readBrowserBackupKeyStatus(): BackupKeyStatus {
 function readBrowserBackups(): BackupRecord[] {
   const stored = window.localStorage.getItem(browserBackupsKey);
   return stored ? JSON.parse(stored) as BackupRecord[] : [];
+}
+
+function collectBackupIdsToDelete(backups: BackupRecord[], backupId: string): string[] {
+  const pending = [backupId];
+  const ids: string[] = [];
+  while (pending.length > 0) {
+    const currentId = pending.pop()!;
+    if (ids.includes(currentId)) {
+      continue;
+    }
+    ids.push(currentId);
+    pending.push(...backups
+      .filter((record) => record.baseBackupId === currentId)
+      .map((record) => record.id));
+  }
+  return ids;
 }
 
 function browserFingerprint(secret: string): string {

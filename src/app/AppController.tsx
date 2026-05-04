@@ -39,6 +39,7 @@ import {
   createBackup,
   deleteLakeDirectory,
   deleteLakeDocument,
+  deleteBackup,
   createTemporaryResourceUrl,
   downloadResourceFile,
   prepareResourcePreview,
@@ -96,6 +97,7 @@ export function AppController() {
   const [backupKeyStatus, setBackupKeyStatus] = useState<BackupKeyStatus>({ configured: false, needsKey: false });
   const [backupRecords, setBackupRecords] = useState<BackupRecord[]>([]);
   const [backupBusy, setBackupBusy] = useState(false);
+  const [activeBackupOperation, setActiveBackupOperation] = useState<string | null>(null);
   const [appError, setAppError] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(296);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -481,16 +483,19 @@ export function AppController() {
 
   const updateBackupKey = useCallback(async (secret: string, reset: boolean) => {
     setBackupBusy(true);
+    setActiveBackupOperation("key");
     try {
       setBackupKeyStatus(reset ? await resetBackupKey(secret) : await setBackupKey(secret));
       await refreshBackupRecords();
     } finally {
       setBackupBusy(false);
+      setActiveBackupOperation(null);
     }
   }, []);
 
   const runBackup = useCallback(async (forceFull: boolean) => {
     setBackupBusy(true);
+    setActiveBackupOperation(forceFull ? "create-full" : "create-incremental");
     try {
       // 备份读取的是磁盘上的 .lake 文件，先同步保存当前编辑器，避免增量包漏掉未落盘修改。
       await saveCurrentEditorNowRef.current?.();
@@ -499,6 +504,7 @@ export function AppController() {
       setBackupKeyStatus(await getBackupKeyStatus());
     } finally {
       setBackupBusy(false);
+      setActiveBackupOperation(null);
     }
   }, []);
 
@@ -507,6 +513,7 @@ export function AppController() {
     allowKeyMismatch: boolean,
   ): Promise<RestoreBackupOutput> => {
     setBackupBusy(true);
+    setActiveBackupOperation(`restore:${backupId}`);
     try {
       const output = await restoreBackup({ backupId, allowKeyMismatch });
       await boot();
@@ -514,8 +521,22 @@ export function AppController() {
       return output;
     } finally {
       setBackupBusy(false);
+      setActiveBackupOperation(null);
     }
   }, [refreshCurrentDocumentFromDisk]);
+
+  const runDeleteBackup = useCallback(async (backupId: string) => {
+    setBackupBusy(true);
+    setActiveBackupOperation(`delete:${backupId}`);
+    try {
+      await deleteBackup({ backupId });
+      setBackupRecords(await listBackups());
+      setBackupKeyStatus(await getBackupKeyStatus());
+    } finally {
+      setBackupBusy(false);
+      setActiveBackupOperation(null);
+    }
+  }, []);
 
   const uploadEditorImage = useCallback(async (input: UploadImageInput): Promise<UploadImageOutput> => {
     if (!ossSettings) {
@@ -692,9 +713,11 @@ export function AppController() {
         backupKeyStatus={backupKeyStatus}
         backupRecords={backupRecords}
         backupBusy={backupBusy}
+        activeBackupOperation={activeBackupOperation}
         onSetBackupKey={updateBackupKey}
         onCreateBackup={runBackup}
         onRestoreBackup={runRestore}
+        onDeleteBackup={runDeleteBackup}
       />
       {textDialog ? (
         <TextInputDialog dialog={textDialog} onClose={() => setTextDialog(null)} />

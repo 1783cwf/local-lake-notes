@@ -14,9 +14,11 @@ interface OssSettingsPanelProps {
   backupKeyStatus: BackupKeyStatus;
   backupRecords: BackupRecord[];
   backupBusy: boolean;
+  activeBackupOperation: string | null;
   onSetBackupKey: (secret: string, reset: boolean) => Promise<void>;
   onCreateBackup: (forceFull: boolean) => Promise<void>;
   onRestoreBackup: (backupId: string, allowKeyMismatch: boolean) => Promise<RestoreBackupOutput>;
+  onDeleteBackup: (backupId: string) => Promise<void>;
 }
 
 export function OssSettingsPanel({
@@ -27,9 +29,11 @@ export function OssSettingsPanel({
   backupKeyStatus,
   backupRecords,
   backupBusy,
+  activeBackupOperation,
   onSetBackupKey,
   onCreateBackup,
   onRestoreBackup,
+  onDeleteBackup,
 }: OssSettingsPanelProps) {
   const [draft, setDraft] = useState(() => mergeOssSettings(settings));
   const [error, setError] = useState<string | null>(null);
@@ -214,9 +218,11 @@ export function OssSettingsPanel({
               keyStatus={backupKeyStatus}
               backups={backupRecords}
               busy={backupBusy}
+              activeOperation={activeBackupOperation}
               onSetKey={onSetBackupKey}
               onCreateBackup={onCreateBackup}
               onRestoreBackup={onRestoreBackup}
+              onDeleteBackup={onDeleteBackup}
             />
           )}
         </div>

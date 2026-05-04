@@ -1,6 +1,6 @@
 import type { FormEvent } from "react";
 import { useState } from "react";
-import { DatabaseBackup, KeyRound, RotateCcw } from "lucide-react";
+import { DatabaseBackup, KeyRound, Loader2, RotateCcw, Trash2 } from "lucide-react";
 
 import type { BackupKeyStatus, BackupRecord, RestoreBackupOutput } from "../../app/appState";
 
@@ -8,18 +8,22 @@ interface BackupSettingsPanelProps {
   keyStatus: BackupKeyStatus;
   backups: BackupRecord[];
   busy: boolean;
+  activeOperation: string | null;
   onSetKey: (secret: string, reset: boolean) => Promise<void>;
   onCreateBackup: (forceFull: boolean) => Promise<void>;
   onRestoreBackup: (backupId: string, allowKeyMismatch: boolean) => Promise<RestoreBackupOutput>;
+  onDeleteBackup: (backupId: string) => Promise<void>;
 }
 
 export function BackupSettingsPanel({
   keyStatus,
   backups,
   busy,
+  activeOperation,
   onSetKey,
   onCreateBackup,
   onRestoreBackup,
+  onDeleteBackup,
 }: BackupSettingsPanelProps) {
   const [secret, setSecret] = useState("");
   const [panelError, setPanelError] = useState<string | null>(null);
@@ -63,9 +67,24 @@ export function BackupSettingsPanel({
     }
   };
 
+  const deleteRecord = async (record: BackupRecord) => {
+    if (!window.confirm(`删除备份「${formatDate(record.createdAt)}」？依赖它的增量备份也会一起删除。`)) {
+      return;
+    }
+    setPanelError(null);
+    setPanelMessage(null);
+    try {
+      await onDeleteBackup(record.id);
+      setPanelMessage("备份已删除");
+    } catch (error) {
+      setPanelError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   return (
     <section className="settings-content backup-settings" aria-labelledby="backup-settings-title">
       <h3 id="backup-settings-title">备份恢复</h3>
+      {busy ? <p className="backup-operation-status"><Loader2 size={14} className="spin-icon" />{operationText(activeOperation)}</p> : null}
 
       <div className="settings-card">
         <div className="settings-card__title">
@@ -92,7 +111,7 @@ export function BackupSettingsPanel({
           </label>
           <div className="backup-inline-actions">
             <button type="submit" className="secondary-button" disabled={busy || !secret}>
-              {keyStatus.configured ? <RotateCcw size={15} /> : <KeyRound size={15} />}
+              {busy && activeOperation === "key" ? <Loader2 size={15} className="spin-icon" /> : keyStatus.configured ? <RotateCcw size={15} /> : <KeyRound size={15} />}
               {keyStatus.configured ? "重置密钥" : "设置密钥"}
             </button>
           </div>
@@ -106,10 +125,12 @@ export function BackupSettingsPanel({
         </div>
         <div className="backup-inline-actions">
           <button type="button" className="primary-button" disabled={busy} onClick={() => createBackup(false)}>
-            立即备份
+            {activeOperation === "create-incremental" ? <Loader2 size={15} className="spin-icon" /> : null}
+            {activeOperation === "create-incremental" ? "备份中" : "立即备份"}
           </button>
           <button type="button" className="secondary-button" disabled={busy} onClick={() => createBackup(true)}>
-            强制全量
+            {activeOperation === "create-full" ? <Loader2 size={15} className="spin-icon" /> : null}
+            {activeOperation === "create-full" ? "全量备份中" : "强制全量"}
           </button>
         </div>
       </div>
@@ -126,9 +147,21 @@ export function BackupSettingsPanel({
                 <span>{formatDate(record.createdAt)}</span>
                 <small>{formatSize(record.encryptedSize)} · {record.keyFingerprint}</small>
               </div>
-              <button type="button" className="secondary-button" disabled={busy} onClick={() => restore(record)}>
-                {record.canRestore ? "恢复" : "尝试恢复"}
-              </button>
+              <div className="backup-record__actions">
+                <button type="button" className="secondary-button" disabled={busy} onClick={() => restore(record)}>
+                  {activeOperation === `restore:${record.id}` ? <Loader2 size={15} className="spin-icon" /> : null}
+                  {activeOperation === `restore:${record.id}` ? "恢复中" : record.canRestore ? "恢复" : "尝试恢复"}
+                </button>
+                <button
+                  type="button"
+                  className="icon-button danger-button"
+                  disabled={busy}
+                  onClick={() => deleteRecord(record)}
+                  aria-label={`删除备份 ${formatDate(record.createdAt)}`}
+                >
+                  {activeOperation === `delete:${record.id}` ? <Loader2 size={15} className="spin-icon" /> : <Trash2 size={15} />}
+                </button>
+              </div>
             </div>
           ))
         )}
@@ -138,6 +171,22 @@ export function BackupSettingsPanel({
       {panelMessage ? <p className="settings-success">{panelMessage}</p> : null}
     </section>
   );
+}
+
+function operationText(operation: string | null): string {
+  if (operation === "create-full") {
+    return "正在创建全量备份...";
+  }
+  if (operation === "create-incremental") {
+    return "正在创建增量备份...";
+  }
+  if (operation?.startsWith("restore:")) {
+    return "正在恢复备份...";
+  }
+  if (operation?.startsWith("delete:")) {
+    return "正在删除备份...";
+  }
+  return "正在处理备份任务...";
 }
 
 function formatDate(value: string): string {

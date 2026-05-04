@@ -180,6 +180,10 @@ pub fn save_backup_last_manifest(app: &AppHandle, manifest: &str) -> AppResult<(
     set_setting_at(&database_path(app)?, BACKUP_LAST_MANIFEST_KEY, manifest)
 }
 
+pub fn clear_backup_last_manifest(app: &AppHandle) -> AppResult<()> {
+    delete_setting_at(&database_path(app)?, BACKUP_LAST_MANIFEST_KEY)
+}
+
 pub fn load_oss_settings_at(database_path: &Path) -> AppResult<Option<OssSettings>> {
     get_setting_at(database_path, OSS_SETTINGS_KEY)?
         .map(|content| serde_json::from_str(&content))
@@ -403,6 +407,11 @@ fn set_setting_at(database_path: &Path, key: &str, value: &str) -> AppResult<()>
         ",
         params![key, value],
     )?;
+    Ok(())
+}
+
+fn delete_setting_at(database_path: &Path, key: &str) -> AppResult<()> {
+    connect_at(database_path)?.execute("DELETE FROM app_settings WHERE key = ?1", params![key])?;
     Ok(())
 }
 
