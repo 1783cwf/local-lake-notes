@@ -18,6 +18,7 @@ aws-config = "1"
 aws-credential-types = "1"
 aws-sdk-s3 = "1"
 age = "0.11.3"
+base64 = "0.22"
 blake3 = "1"
 chrono = { version = "0.4", features = ["serde"] }
 keyring = "4.0.0"

@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::Path;
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use tauri::{AppHandle, Manager};
 
 use crate::commands::settings::{load_oss_settings, validate_oss_settings};
@@ -26,12 +27,13 @@ pub async fn prepare_resource_preview(
     if let Some(parent) = local_path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(&local_path, bytes)?;
+    fs::write(&local_path, &bytes)?;
     let preview_url = local_path.to_string_lossy().to_string();
     Ok(ResourcePreviewOutput {
         resource_ref: input.resource_ref,
         preview_url,
         local_path: local_path.to_string_lossy().to_string(),
+        data_url: build_image_data_url(&key, &bytes),
     })
 }
 
@@ -131,4 +133,40 @@ fn safe_segment(value: &str) -> String {
         .collect::<String>()
         .trim_matches('-')
         .to_string()
+}
+
+fn build_image_data_url(key: &str, bytes: &[u8]) -> Option<String> {
+    let content_type = mime_guess::from_path(key)
+        .first_or_octet_stream()
+        .essence_str()
+        .to_string();
+    if !content_type.starts_with("image/") {
+        return None;
+    }
+
+    // Lake 编辑器在 Tauri 中对 asset:// 本地图片的渲染不稳定；
+    // 这里仅把编辑器内存预览改成 data URL，文档保存仍由前端还原为 yuque-resource:// 私有引用。
+    Some(format!(
+        "data:{};base64,{}",
+        content_type,
+        STANDARD.encode(bytes)
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_image_data_url;
+
+    #[test]
+    fn creates_data_url_for_image_preview() {
+        assert_eq!(
+            build_image_data_url("images/2026/05/a.png", &[1, 2, 3]),
+            Some("data:image/png;base64,AQID".to_string())
+        );
+    }
+
+    #[test]
+    fn skips_non_image_preview_data_url() {
+        assert_eq!(build_image_data_url("files/2026/05/a.pdf", &[1, 2, 3]), None);
+    }
 }

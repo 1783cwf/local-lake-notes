@@ -557,9 +557,12 @@ export async function prepareResourcePreview(resourceRef: string): Promise<strin
     return resourceRef;
   }
 
-  const output = await invoke<{ previewUrl: string; localPath: string }>("prepare_resource_preview", {
+  const output = await invoke<{ previewUrl: string; localPath: string; dataUrl?: string }>("prepare_resource_preview", {
     input: { resourceRef },
   });
+  if (output.dataUrl) {
+    return output.dataUrl;
+  }
   return convertFileSrc(output.localPath);
 }
 
