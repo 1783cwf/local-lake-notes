@@ -1,6 +1,6 @@
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
 use keyring_core::{Entry, Error as KeyringError};
+use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
 use crate::error::{AppError, AppResult};
@@ -76,8 +76,8 @@ pub fn current_backup_secret(app: &AppHandle) -> AppResult<String> {
 }
 
 pub fn current_key_fingerprint(app: &AppHandle) -> AppResult<String> {
-    let metadata = load_metadata(app)?
-        .ok_or_else(|| AppError::Backup("请先设置备份加密密钥".to_string()))?;
+    let metadata =
+        load_metadata(app)?.ok_or_else(|| AppError::Backup("请先设置备份加密密钥".to_string()))?;
     Ok(metadata.fingerprint)
 }
 

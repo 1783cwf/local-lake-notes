@@ -9,11 +9,19 @@ export interface LakeResourceReference {
   name?: string;
   size?: number;
   mimeType?: string;
+  encryption?: {
+    algorithm: "age-v1";
+    keyFingerprint: string;
+  };
 }
 
 export interface ResourcePreview {
   resourceRef: string;
   previewUrl: string;
+}
+
+interface RewriteLakeResourceOptions {
+  includeFileCards?: boolean;
 }
 
 export interface PublicResourceReferenceOptions {
@@ -44,6 +52,10 @@ export function createResourceReference(input: LakeResourceReference): string {
   if (input.mimeType) {
     url.searchParams.set("type", input.mimeType);
   }
+  if (input.encryption) {
+    url.searchParams.set("enc", input.encryption.algorithm);
+    url.searchParams.set("keyFingerprint", input.encryption.keyFingerprint);
+  }
   return url.toString();
 }
 
@@ -59,6 +71,10 @@ export function parseResourceReference(value: string): LakeResourceReference | n
     const kind = url.searchParams.get("kind") === "file" ? "file" : "image";
     const sizeText = url.searchParams.get("size");
     const sizeValue = sizeText === null ? Number.NaN : Number(sizeText);
+    const encryption = parseEncryptionMetadata(url);
+    if (encryption === false) {
+      return null;
+    }
     if (!bucket || !key) {
       return null;
     }
@@ -69,6 +85,7 @@ export function parseResourceReference(value: string): LakeResourceReference | n
       name: url.searchParams.get("name") ?? undefined,
       size: Number.isFinite(sizeValue) ? sizeValue : undefined,
       mimeType: url.searchParams.get("type") ?? undefined,
+      encryption: encryption ?? undefined,
     };
   } catch {
     return null;
@@ -109,7 +126,7 @@ export function dehydrateLakeResources(content: string, previews: ResourcePrevie
   return rewriteLakeResourceUrls(content, (value) => {
     const preview = previews.find((item) => item.previewUrl === value);
     return preview?.resourceRef ?? value;
-  });
+  }, { includeFileCards: true });
 }
 
 export function dehydrateResourceText(content: string, previews: ResourcePreview[]): string {
@@ -134,7 +151,11 @@ export async function hydrateLakeResources(
   return rewriteLakeResourceUrls(content, (value) => previews.get(value) ?? value);
 }
 
-export function rewriteLakeResourceUrls(content: string, rewrite: (value: string) => string): string {
+export function rewriteLakeResourceUrls(
+  content: string,
+  rewrite: (value: string) => string,
+  options: RewriteLakeResourceOptions = {},
+): string {
   const template = document.createElement("template");
   template.innerHTML = content;
 
@@ -145,9 +166,14 @@ export function rewriteLakeResourceUrls(content: string, rewrite: (value: string
     }
   });
 
+  // 打开文档时只需要预加载图片；附件下载/导出时再读取资源内容，避免大附件拖慢文档打开。
+  const cardSelector = options.includeFileCards
+    ? "card[name='image'], card[name='file'], card[name='localdoc']"
+    : "card[name='image']";
+
   // Lake 的图片块、附件块都会把真实资源地址放在 value.src；
   // 保存时必须把一次性的 blob/asset 预览地址还原为私有资源引用，否则重开应用后预览地址会失效。
-  template.content.querySelectorAll("card[name='image'], card[name='file'], card[name='localdoc']").forEach((card) => {
+  template.content.querySelectorAll(cardSelector).forEach((card) => {
     const value = decodeLakeCardValue(card.getAttribute("value"));
     if (!value) {
       return;
@@ -193,6 +219,18 @@ export function encodeLakeCardValue(value: Record<string, unknown>): string {
 
 function parseMaybeResourceUrl(value: string): string | null {
   return parseResourceReference(value) ? value : null;
+}
+
+function parseEncryptionMetadata(url: URL): LakeResourceReference["encryption"] | false | null {
+  const algorithm = url.searchParams.get("enc");
+  if (!algorithm) {
+    return null;
+  }
+  const keyFingerprint = url.searchParams.get("keyFingerprint");
+  if (algorithm !== "age-v1" || !keyFingerprint?.trim()) {
+    return false;
+  }
+  return { algorithm, keyFingerprint };
 }
 
 function resourceKeyFromPublicUrl(value: string, publicBaseUrl?: string): string | null {

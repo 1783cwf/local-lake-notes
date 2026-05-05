@@ -8,13 +8,24 @@ function renderPanel(overrides: Partial<Parameters<typeof OssSettingsPanel>[0]> 
     <OssSettingsPanel
       open
       settings={null}
+      databaseLocation={{
+        directory: "/tmp/local-lake-db",
+        databasePath: "/tmp/local-lake-db/yuque-lake-notes.sqlite3",
+        custom: false,
+      }}
       onClose={vi.fn()}
       onSave={vi.fn()}
+      onChooseDatabaseDirectory={vi.fn(async () => "/tmp/new-db")}
+      onSaveDatabaseLocation={vi.fn()}
       backupKeyStatus={{ configured: false, needsKey: false }}
+      resourceKeyStatus={{ configured: false, needsKey: false, knownFingerprints: [] }}
       backupRecords={[]}
       backupBusy={false}
+      resourceKeyBusy={false}
       activeBackupOperation={null}
       onSetBackupKey={vi.fn()}
+      onSetResourceKey={vi.fn()}
+      onVerifyResourceKey={vi.fn()}
       onCreateBackup={vi.fn()}
       onRestoreBackup={vi.fn()}
       onDeleteBackup={vi.fn()}
@@ -65,6 +76,64 @@ test("可以切换到备份恢复并设置密钥", async () => {
 
   expect(onSetBackupKey).toHaveBeenCalledWith("test-secret-key", false);
   expect(onSave).not.toHaveBeenCalled();
+});
+
+test("可以切换到资源加密并设置资源密钥", async () => {
+  const user = userEvent.setup();
+  const onSetResourceKey = vi.fn().mockResolvedValue(undefined);
+
+  renderPanel({ onSetResourceKey });
+
+  await user.click(screen.getByRole("button", { name: "资源加密" }));
+  await user.type(screen.getByLabelText("资源加密密钥"), "resource-secret-key");
+  await user.click(screen.getByRole("button", { name: "设置资源密钥" }));
+
+  expect(onSetResourceKey).toHaveBeenCalledWith("resource-secret-key", false);
+  expect(screen.getAllByText("tmp/exports/").length).toBeGreaterThan(0);
+});
+
+test("可以手动重新读取本地资源密钥", async () => {
+  const user = userEvent.setup();
+  const onVerifyResourceKey = vi.fn().mockResolvedValue({
+    configured: true,
+    needsKey: false,
+    fingerprint: "resource-fingerprint",
+    knownFingerprints: ["resource-fingerprint"],
+  });
+
+  renderPanel({
+    onVerifyResourceKey,
+    resourceKeyStatus: {
+      configured: true,
+      needsKey: false,
+      fingerprint: "resource-fingerprint",
+      knownFingerprints: ["resource-fingerprint"],
+    },
+  });
+
+  await user.click(screen.getByRole("button", { name: "资源加密" }));
+  await user.click(screen.getByRole("button", { name: "重新读取密钥" }));
+
+  expect(onVerifyResourceKey).toHaveBeenCalledTimes(1);
+  expect(await screen.findByText("本地资源密钥读取成功")).toBeInTheDocument();
+});
+
+test("可以选择并保存数据库目录", async () => {
+  const user = userEvent.setup();
+  const onChooseDatabaseDirectory = vi.fn(async () => "/tmp/new-db");
+  const onSaveDatabaseLocation = vi.fn().mockResolvedValue(undefined);
+
+  renderPanel({ onChooseDatabaseDirectory, onSaveDatabaseLocation });
+
+  await user.click(screen.getByRole("button", { name: "数据存储" }));
+  expect(screen.getByDisplayValue("/tmp/local-lake-db")).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "选择" }));
+  await user.click(screen.getByRole("button", { name: "保存目录" }));
+
+  expect(onChooseDatabaseDirectory).toHaveBeenCalledTimes(1);
+  expect(onSaveDatabaseLocation).toHaveBeenCalledWith("/tmp/new-db");
+  expect(await screen.findByText("数据库目录已保存并切换")).toBeInTheDocument();
 });
 
 test("删除备份前需要二次确认并提示依赖增量备份", async () => {

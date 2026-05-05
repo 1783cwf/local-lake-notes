@@ -1,6 +1,6 @@
 import type { FormEvent, PointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 
 import { AppRail } from "../components/AppRail";
 import { DocumentSidebar } from "../components/DocumentSidebar";
@@ -34,6 +34,7 @@ import {
 } from "../features/workspace/workspaceStore";
 import {
   chooseWorkspaceDirectory,
+  chooseDatabaseDirectory,
   createLakeDirectory,
   createLakeDocument,
   createBackup,
@@ -47,6 +48,8 @@ import {
   getOssSettings,
   getRecentWorkspace,
   getBackupKeyStatus,
+  getDatabaseLocation,
+  getResourceKeyStatus,
   listBackups,
   moveWorkspaceItem,
   readLakeDocument,
@@ -55,23 +58,29 @@ import {
   renameWorkspace,
   saveOssSettings,
   saveBinaryExport,
+  saveDatabaseLocation,
   savePdfExport,
   saveTextExport,
   resetBackupKey,
+  resetResourceKey,
   restoreBackup,
   setBackupKey,
+  setResourceKey,
   setWorkspaceRoot,
   uploadFile,
   uploadImage,
   verifyBackupKeyStatus,
+  verifyResourceKeyStatus,
   writeLakeDocument,
 } from "../lib/tauri";
 import type {
   CurrentDocumentState,
   BackupKeyStatus,
   BackupRecord,
+  DatabaseLocationSettings,
   FileDownloadInput,
   OssSettings,
+  ResourceKeyStatus,
   RestoreBackupOutput,
   SaveStatus,
   UploadImageInput,
@@ -87,6 +96,12 @@ interface TextDialogState {
   onSubmit: (value: string) => Promise<void>;
 }
 
+interface AppOperationState {
+  kind: "document-export" | "workspace-export" | "image-upload" | "file-upload";
+  label: string;
+  count?: number;
+}
+
 export function AppController() {
   const [workspace, setWorkspace] = useState<WorkspacePayload | null>(null);
   const [currentDocument, setCurrentDocument] = useState<CurrentDocumentState | null>(null);
@@ -95,10 +110,19 @@ export function AppController() {
   const [exportRequest, setExportRequest] = useState<LakeDocumentExportRequest | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [ossSettings, setOssSettings] = useState<OssSettings | null>(null);
+  const [databaseLocation, setDatabaseLocation] = useState<DatabaseLocationSettings | null>(null);
   const [backupKeyStatus, setBackupKeyStatus] = useState<BackupKeyStatus>({ configured: false, needsKey: false });
+  const [resourceKeyStatus, setResourceKeyStatus] = useState<ResourceKeyStatus>({
+    configured: false,
+    needsKey: false,
+    knownFingerprints: [],
+  });
   const [backupRecords, setBackupRecords] = useState<BackupRecord[]>([]);
   const [backupBusy, setBackupBusy] = useState(false);
+  const [resourceKeyBusy, setResourceKeyBusy] = useState(false);
   const [activeBackupOperation, setActiveBackupOperation] = useState<string | null>(null);
+  const [activeAppOperation, setActiveAppOperation] = useState<AppOperationState | null>(null);
+  const uploadOperationCountRef = useRef(0);
   const [appError, setAppError] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(296);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -123,14 +147,18 @@ export function AppController() {
 
   const boot = async () => {
     try {
-      const [recentWorkspace, settings, keyStatus] = await Promise.all([
+      const [recentWorkspace, settings, keyStatus, resourceStatus, database] = await Promise.all([
         getRecentWorkspace(),
         getOssSettings(),
         getBackupKeyStatus(),
+        getResourceKeyStatus(),
+        getDatabaseLocation(),
       ]);
       setWorkspace(recentWorkspace);
       setOssSettings(settings);
       setBackupKeyStatus(keyStatus);
+      setResourceKeyStatus(resourceStatus);
+      setDatabaseLocation(database);
       await refreshBackupRecords();
     } catch (error) {
       setAppError(toMessage(error));
@@ -163,6 +191,31 @@ export function AppController() {
 
   const registerEditorSaveNow = useCallback((saveNow: (() => Promise<void>) | null) => {
     saveCurrentEditorNowRef.current = saveNow;
+  }, []);
+
+  const beginUploadOperation = useCallback((kind: "image-upload" | "file-upload", label: string) => {
+    uploadOperationCountRef.current += 1;
+    setActiveAppOperation({
+      kind,
+      label,
+      count: uploadOperationCountRef.current,
+    });
+  }, []);
+
+  const endUploadOperation = useCallback(() => {
+    uploadOperationCountRef.current = Math.max(0, uploadOperationCountRef.current - 1);
+    setActiveAppOperation((operation) => {
+      if (!operation || (operation.kind !== "image-upload" && operation.kind !== "file-upload")) {
+        return operation;
+      }
+      if (uploadOperationCountRef.current === 0) {
+        return null;
+      }
+      return {
+        ...operation,
+        count: uploadOperationCountRef.current,
+      };
+    });
   }, []);
 
   const chooseWorkspace = useCallback(async () => {
@@ -405,6 +458,7 @@ export function AppController() {
   ) => {
     const title = documentTitleFromPath(request.document.path);
     const exportOptions = createResourceExportOptions(request.resourceStrategy, request.signedUrlTtlSeconds);
+    setActiveAppOperation({ kind: "document-export", label: `正在导出 ${formatExportLabel(request.format)}` });
     try {
       if (request.format === "markdown") {
         if (request.resourceStrategy === "bundle") {
@@ -445,6 +499,8 @@ export function AppController() {
       setAppError(null);
     } catch (error) {
       setAppError(toMessage(error));
+    } finally {
+      setActiveAppOperation(null);
     }
   }, [createResourceExportOptions]);
 
@@ -453,6 +509,7 @@ export function AppController() {
       return;
     }
 
+    setActiveAppOperation({ kind: "workspace-export", label: "正在导出知识库 Markdown ZIP" });
     try {
       const converter = createOfficialLakeMarkdownConverter();
       let zip: Uint8Array;
@@ -474,12 +531,20 @@ export function AppController() {
       setAppError(null);
     } catch (error) {
       setAppError(toMessage(error));
+    } finally {
+      setActiveAppOperation(null);
     }
   }, [createResourceExportOptions, workspace]);
 
   const saveSettings = useCallback(async (settings: OssSettings) => {
     const saved = await saveOssSettings(settings);
     setOssSettings(saved);
+  }, []);
+
+  const saveDatabaseDirectory = useCallback(async (directory: string) => {
+    const saved = await saveDatabaseLocation(directory);
+    setDatabaseLocation(saved);
+    await boot();
   }, []);
 
   const updateBackupKey = useCallback(async (secret: string, reset: boolean) => {
@@ -491,6 +556,27 @@ export function AppController() {
     } finally {
       setBackupBusy(false);
       setActiveBackupOperation(null);
+    }
+  }, []);
+
+  const updateResourceKey = useCallback(async (secret: string, reset: boolean) => {
+    setResourceKeyBusy(true);
+    try {
+      setResourceKeyStatus(reset ? await resetResourceKey(secret) : await setResourceKey(secret));
+    } finally {
+      setResourceKeyBusy(false);
+    }
+  }, []);
+
+  const verifyResourceKey = useCallback(async (): Promise<ResourceKeyStatus> => {
+    setResourceKeyBusy(true);
+    try {
+      // 用户主动点击时才访问系统钥匙串，避免应用启动或普通浏览文档时反复弹授权窗口。
+      const status = await verifyResourceKeyStatus();
+      setResourceKeyStatus(status);
+      return status;
+    } finally {
+      setResourceKeyBusy(false);
     }
   }, []);
 
@@ -544,16 +630,34 @@ export function AppController() {
       setSettingsOpen(true);
       throw new Error("请先配置 OSS 上传信息");
     }
-    return uploadImage(input);
-  }, [ossSettings]);
+    if (!resourceKeyStatus.configured) {
+      setSettingsOpen(true);
+      throw new Error(resourceKeyStatus.needsKey ? "本机缺少资源加密密钥" : "请先设置资源加密密钥");
+    }
+    beginUploadOperation("image-upload", "正在上传并加密图片");
+    try {
+      return await uploadImage(input);
+    } finally {
+      endUploadOperation();
+    }
+  }, [beginUploadOperation, endUploadOperation, ossSettings, resourceKeyStatus.configured, resourceKeyStatus.needsKey]);
 
   const uploadEditorFile = useCallback(async (input: UploadImageInput): Promise<UploadImageOutput> => {
     if (!ossSettings) {
       setSettingsOpen(true);
       throw new Error("请先配置 OSS 上传信息");
     }
-    return uploadFile(input);
-  }, [ossSettings]);
+    if (!resourceKeyStatus.configured) {
+      setSettingsOpen(true);
+      throw new Error(resourceKeyStatus.needsKey ? "本机缺少资源加密密钥" : "请先设置资源加密密钥");
+    }
+    beginUploadOperation("file-upload", "正在上传并加密附件");
+    try {
+      return await uploadFile(input);
+    } finally {
+      endUploadOperation();
+    }
+  }, [beginUploadOperation, endUploadOperation, ossSettings, resourceKeyStatus.configured, resourceKeyStatus.needsKey]);
 
   const downloadEditorFile = useCallback(async (input: FileDownloadInput) => {
     try {
@@ -682,6 +786,7 @@ export function AppController() {
           saveStatus={saveStatus}
           onManualSave={() => setManualSaveRequest((current) => current + 1)}
           onExportDocument={exportDocument}
+          exportBusy={activeAppOperation?.kind === "document-export"}
           defaultExportResourceStrategy={ossSettings?.defaultExportResourceStrategy}
           defaultSignedUrlTtlSeconds={ossSettings?.defaultSignedUrlTtlSeconds}
           onRenameDocument={(title) => {
@@ -690,6 +795,12 @@ export function AppController() {
             }
           }}
         />
+        {activeAppOperation ? (
+          <div className="app-operation-banner" role="status" aria-live="polite">
+            <Loader2 size={15} className="spin-icon" />
+            <span>{activeAppOperation.label}</span>
+          </div>
+        ) : null}
         {appError ? <div className="app-error">{appError}</div> : null}
         <LakeEditor
           document={currentDocument?.entry ?? null}
@@ -709,13 +820,20 @@ export function AppController() {
       <OssSettingsPanel
         open={settingsOpen}
         settings={ossSettings}
+        databaseLocation={databaseLocation}
         onClose={() => setSettingsOpen(false)}
         onSave={saveSettings}
+        onChooseDatabaseDirectory={chooseDatabaseDirectory}
+        onSaveDatabaseLocation={saveDatabaseDirectory}
         backupKeyStatus={backupKeyStatus}
+        resourceKeyStatus={resourceKeyStatus}
         backupRecords={backupRecords}
         backupBusy={backupBusy}
+        resourceKeyBusy={resourceKeyBusy}
         activeBackupOperation={activeBackupOperation}
         onSetBackupKey={updateBackupKey}
+        onSetResourceKey={updateResourceKey}
+        onVerifyResourceKey={verifyResourceKey}
         onCreateBackup={runBackup}
         onRestoreBackup={runRestore}
         onDeleteBackup={runDeleteBackup}
@@ -729,6 +847,19 @@ export function AppController() {
 
 function toMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function formatExportLabel(format: DocumentExportFormat): string {
+  switch (format) {
+    case "markdown":
+      return "Markdown";
+    case "html":
+      return "HTML";
+    case "pdf":
+      return "PDF";
+    default:
+      return "文档";
+  }
 }
 
 function rebindCurrentDocument(

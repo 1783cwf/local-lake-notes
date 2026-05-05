@@ -1,10 +1,10 @@
 use tempfile::tempdir;
 use yuque_lake_notes_lib::models::OssSettings;
 use yuque_lake_notes_lib::storage::app_database::{
-    list_known_workspaces_at, load_oss_settings_at, load_recent_workspace_root_at,
-    prune_workspace_order_path_at, read_workspace_order_at, rewrite_workspace_order_items,
-    rewrite_workspace_order_path_at, save_oss_settings_at, set_recent_workspace_root_at,
-    set_workspace_order_at,
+    clone_database_to_directory_at, list_known_workspaces_at, load_oss_settings_at,
+    load_recent_workspace_root_at, prune_workspace_order_path_at, read_workspace_order_at,
+    rewrite_workspace_order_items, rewrite_workspace_order_path_at, save_oss_settings_at,
+    set_recent_workspace_root_at, set_workspace_order_at,
 };
 
 fn valid_settings() -> OssSettings {
@@ -81,6 +81,23 @@ fn stores_and_rewrites_workspace_order_in_sqlite() {
     assert!(read_workspace_order_at(&database, &workspace)
         .unwrap()
         .is_empty());
+}
+
+#[test]
+fn copies_existing_database_when_switching_to_empty_directory() {
+    let dir = tempdir().unwrap();
+    let database = dir.path().join("app.sqlite3");
+    let target_dir = dir.path().join("custom-db");
+    let workspace = dir.path().join("workspace");
+
+    set_recent_workspace_root_at(&database, &workspace).unwrap();
+
+    let copied = clone_database_to_directory_at(&database, &target_dir).unwrap();
+
+    assert_eq!(
+        load_recent_workspace_root_at(&copied).unwrap(),
+        Some(workspace.to_string_lossy().to_string())
+    );
 }
 
 #[test]

@@ -2,12 +2,14 @@ use std::fs;
 
 use chrono::Utc;
 use tempfile::tempdir;
+use yuque_lake_notes_lib::commands::backup::stage_restore_chain;
 use yuque_lake_notes_lib::models::KnownWorkspace;
 use yuque_lake_notes_lib::storage::backup_archive::{
     build_encrypted_archive, extract_encrypted_archive,
 };
-use yuque_lake_notes_lib::commands::backup::stage_restore_chain;
-use yuque_lake_notes_lib::storage::backup_manifest::{build_full_manifest, build_incremental_manifest};
+use yuque_lake_notes_lib::storage::backup_manifest::{
+    build_full_manifest, build_incremental_manifest,
+};
 
 #[test]
 fn encrypted_archive_hides_plaintext_paths_and_round_trips() {
@@ -90,13 +92,16 @@ fn staged_restore_replays_incremental_manifest_without_missing_unchanged_files()
     assert!(!changed_files
         .iter()
         .any(|file| file.entry.logical_path.ends_with("a.lake")));
-    let incremental_archive = build_encrypted_archive(&incremental, &changed_files, "very-secret-key").unwrap();
+    let incremental_archive =
+        build_encrypted_archive(&incremental, &changed_files, "very-secret-key").unwrap();
 
     let full_extracted = extract_encrypted_archive(&full_archive, "very-secret-key").unwrap();
-    let incremental_extracted = extract_encrypted_archive(&incremental_archive, "very-secret-key").unwrap();
+    let incremental_extracted =
+        extract_encrypted_archive(&incremental_archive, "very-secret-key").unwrap();
     let stage = tempdir().unwrap();
 
-    let latest = stage_restore_chain(&[full_extracted, incremental_extracted], stage.path()).unwrap();
+    let latest =
+        stage_restore_chain(&[full_extracted, incremental_extracted], stage.path()).unwrap();
 
     assert_eq!(latest.backup_id, "inc-id");
     assert_eq!(

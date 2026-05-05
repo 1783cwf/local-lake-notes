@@ -6,7 +6,7 @@ use age::secrecy::SecretString;
 use tempfile::TempDir;
 
 use crate::error::{AppError, AppResult};
-use crate::storage::backup_manifest::{BackupManifest, FileSnapshot, file_hash};
+use crate::storage::backup_manifest::{file_hash, BackupManifest, FileSnapshot};
 
 const MANIFEST_PATH: &str = "manifest.json";
 

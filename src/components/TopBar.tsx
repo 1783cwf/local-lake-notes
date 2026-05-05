@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, Cloud, Download, Save, Share2 } from "lucide-react";
+import { ChevronDown, Cloud, Download, Loader2, Save, Share2 } from "lucide-react";
 
 import type { SaveStatus } from "../app/appState";
 import type { DocumentExportFormat, ExportResourceStrategy } from "../features/lake-editor/lakeExport";
@@ -15,6 +15,7 @@ interface TopBarProps {
   onExportDocument?: (format: DocumentExportFormat, resourceStrategy: ExportResourceStrategy, signedUrlTtlSeconds: number) => void;
   defaultExportResourceStrategy?: ExportResourceStrategy;
   defaultSignedUrlTtlSeconds?: number;
+  exportBusy?: boolean;
 }
 
 export function TopBar({
@@ -25,6 +26,7 @@ export function TopBar({
   onExportDocument,
   defaultExportResourceStrategy = "bundle",
   defaultSignedUrlTtlSeconds = 24 * 60 * 60,
+  exportBusy = false,
 }: TopBarProps) {
   const title = document ? documentTitleFromPath(document.path) : "Lake 本地笔记";
   const [editingTitle, setEditingTitle] = useState(false);
@@ -109,8 +111,8 @@ export function TopBar({
             aria-label="导出文档"
             aria-haspopup="menu"
             aria-expanded={exportMenuOpen}
-            title="导出文档"
-            disabled={!document}
+            title={exportBusy ? "正在导出" : "导出文档"}
+            disabled={!document || exportBusy}
             onClick={() => setExportMenuOpen((open) => !open)}
             onBlur={(event) => {
               if (!event.currentTarget.parentElement?.contains(event.relatedTarget as Node | null)) {
@@ -118,7 +120,7 @@ export function TopBar({
               }
             }}
           >
-            <Download size={18} />
+            {exportBusy ? <Loader2 size={18} className="spin-icon" /> : <Download size={18} />}
             <ChevronDown size={12} />
           </button>
           {exportMenuOpen ? (
@@ -143,15 +145,20 @@ export function TopBar({
                   短时签名链接
                 </label>
                 {resourceStrategy === "signed-url" ? (
-                  <select
-                    aria-label="签名链接有效期"
-                    value={ttlSeconds}
-                    onChange={(event) => setTtlSeconds(Number(event.target.value))}
-                  >
-                    {ttlOptions.map((seconds) => (
-                      <option key={seconds} value={seconds}>{formatTtlLabel(seconds)}</option>
-                    ))}
-                  </select>
+                  <>
+                    <select
+                      aria-label="签名链接有效期"
+                      value={ttlSeconds}
+                      onChange={(event) => setTtlSeconds(Number(event.target.value))}
+                    >
+                      {ttlOptions.map((seconds) => (
+                        <option key={seconds} value={seconds}>{formatTtlLabel(seconds)}</option>
+                      ))}
+                    </select>
+                    <p className="export-menu__hint">
+                      加密资源会上传临时明文副本后再生成限时链接。
+                    </p>
+                  </>
                 ) : null}
               </div>
               <button type="button" role="menuitem" onClick={() => exportDocument("markdown")}>

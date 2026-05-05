@@ -26,6 +26,38 @@ test("创建并解析私有资源引用", () => {
   });
 });
 
+test("创建并解析加密资源引用", () => {
+  const ref = createResourceReference({
+    bucket: "yuque",
+    key: "images/2026/05/a.png",
+    kind: "image",
+    name: "截图.png",
+    size: 1234,
+    mimeType: "image/png",
+    encryption: {
+      algorithm: "age-v1",
+      keyFingerprint: "abc123",
+    },
+  });
+
+  expect(parseResourceReference(ref)).toEqual({
+    bucket: "yuque",
+    key: "images/2026/05/a.png",
+    kind: "image",
+    name: "截图.png",
+    size: 1234,
+    mimeType: "image/png",
+    encryption: {
+      algorithm: "age-v1",
+      keyFingerprint: "abc123",
+    },
+  });
+});
+
+test("加密资源引用缺少 fingerprint 时解析失败", () => {
+  expect(parseResourceReference("yuque-resource://yuque/images/a.png?kind=image&enc=age-v1")).toBeNull();
+});
+
 test("图片资源在 hydrate 与 dehydrate 之间保持可逆", async () => {
   const ref = createResourceReference({
     bucket: "yuque",
@@ -41,7 +73,7 @@ test("图片资源在 hydrate 与 dehydrate 之间保持可逆", async () => {
   expect(dehydrated).toContain(ref.replace(/&/g, "&amp;"));
 });
 
-test("附件卡片资源在 hydrate 与 dehydrate 之间保留原文件名", async () => {
+test("打开文档时不会预加载附件卡片资源", async () => {
   const ref = createResourceReference({
     bucket: "yuque",
     key: "files/a.pdf",
@@ -51,14 +83,30 @@ test("附件卡片资源在 hydrate 与 dehydrate 之间保留原文件名", asy
   });
   const value = `data:${encodeURIComponent(JSON.stringify({ src: ref, name: "测试资料.pdf", size: 43325 }))}`;
   const content = `<card name="file" value="${value}"></card>`;
+  const preparePreview = vi.fn(async () => "asset://preview/a.pdf");
 
-  const hydrated = await hydrateLakeResources(content, async () => "asset://preview/a.pdf");
+  const hydrated = await hydrateLakeResources(content, preparePreview);
+
+  expect(preparePreview).not.toHaveBeenCalled();
   expect(decodeURIComponent(hydrated)).toContain("测试资料.pdf");
-  expect(decodeURIComponent(hydrated)).toContain("asset://preview/a.pdf");
+  expect(decodeURIComponent(hydrated)).toContain("yuque-resource://");
+});
 
-  const dehydrated = dehydrateLakeResources(hydrated, [{ resourceRef: ref, previewUrl: "asset://preview/a.pdf" }]);
+test("附件卡片保存时仍会把预览地址还原为私有资源引用", () => {
+  const ref = createResourceReference({
+    bucket: "yuque",
+    key: "files/a.pdf",
+    kind: "file",
+    name: "测试资料.pdf",
+    size: 43325,
+  });
+  const value = `data:${encodeURIComponent(JSON.stringify({ src: "asset://preview/a.pdf", name: "测试资料.pdf", size: 43325 }))}`;
+  const content = `<card name="file" value="${value}"></card>`;
+  const dehydrated = dehydrateLakeResources(content, [{ resourceRef: ref, previewUrl: "asset://preview/a.pdf" }]);
+
   expect(decodeURIComponent(dehydrated)).toContain("测试资料.pdf");
   expect(decodeURIComponent(dehydrated)).toContain("yuque-resource://");
+  expect(decodeURIComponent(dehydrated)).not.toContain("asset://preview/a.pdf");
 });
 
 test("图片卡片保存时会把预览地址还原为私有资源引用", async () => {

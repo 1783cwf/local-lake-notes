@@ -6,8 +6,10 @@ use tauri::{AppHandle, Manager};
 use crate::commands::settings::{load_oss_settings, validate_oss_settings};
 use crate::error::{AppError, AppResult};
 use crate::models::{UploadImageInput, UploadImageOutput};
+use crate::storage::resource_crypto::{encrypt_resource_bytes, RESOURCE_CIPHERTEXT_CONTENT_TYPE};
+use crate::storage::resource_key::{active_resource_fingerprint, current_resource_secret};
 use crate::storage::s3::{
-    build_file_object_key, build_image_object_key, build_resource_ref, put_object,
+    build_file_object_key, build_image_object_key, build_resource_ref_with_encryption, put_object,
 };
 
 #[tauri::command]
@@ -41,20 +43,30 @@ async fn upload_object(
             .first_or_octet_stream()
             .to_string()
     });
+    let key_fingerprint = active_resource_fingerprint(&app)?;
+    let secret = current_resource_secret(&app, Some(&key_fingerprint))?;
+    let encrypted_bytes = encrypt_resource_bytes(&input.bytes, &secret)?;
 
-    put_object(&settings, &key, input.bytes.clone(), &content_type).await?;
+    put_object(
+        &settings,
+        &key,
+        encrypted_bytes,
+        RESOURCE_CIPHERTEXT_CONTENT_TYPE,
+    )
+    .await?;
     let kind = if key.starts_with(settings.file_prefix.trim_matches('/')) {
         "file"
     } else {
         "image"
     };
-    let resource_ref = build_resource_ref(
+    let resource_ref = build_resource_ref_with_encryption(
         &settings,
         &key,
         kind,
         &input.filename,
         input.bytes.len(),
         &content_type,
+        Some(&key_fingerprint),
     );
     // 上传后的编辑器回显不能依赖公共访问 URL。桶保持私有时，预览走本地缓存；
     // 文档保存仍写入 resource_ref，后续打开时可从 S3 重新生成缓存。

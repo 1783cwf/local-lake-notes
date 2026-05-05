@@ -656,6 +656,13 @@ button {
   border-color: var(--green);
 }
 
+.export-menu__hint {
+  margin: -2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .export-menu__content button {
   height: 32px;
   padding: 0 10px;
@@ -680,6 +687,21 @@ button {
   border-radius: 8px;
   color: #9f2b1d;
   background: #fff5f3;
+}
+
+.app-operation-banner {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 7px;
+  margin: 12px 32px 0;
+  padding: 8px 12px;
+  border: 1px solid #cce8d7;
+  border-radius: 999px;
+  color: var(--green-dark);
+  background: #f1fbf5;
+  font-size: 13px;
+  box-shadow: 0 6px 18px rgb(31 185 107 / 8%);
 }
 
 .lake-editor-root {
@@ -921,6 +943,21 @@ button {
   border-color: var(--green);
 }
 
+.settings-path-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.settings-path-row input {
+  min-width: 0;
+}
+
+.settings-path-row .secondary-button {
+  height: 38px;
+}
+
 .checkbox-label {
   flex-direction: row !important;
   align-items: center;
@@ -981,6 +1018,15 @@ button {
 
 .settings-card__muted {
   color: var(--muted);
+}
+
+.settings-card code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: #edf1f3;
+  color: #25292d;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
 }
 
 .backup-settings {

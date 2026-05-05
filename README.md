@@ -11,7 +11,7 @@ Local Lake Notes 是一个基于 Tauri 的本地离线笔记应用原型，目�
 - 使用 Lake 编辑器内置大纲能力。
 - 支持目录栏拖拽调整宽度，编辑区占满剩余空间。
 - 支持图片上传到兼容 S3 协议的 OSS。
-- 应用数据使用 SQLite 存储，为后续 WebDAV 备份设置预留扩展空间。
+- 应用数据使用 SQLite 存储，并支持在设置页自定义数据库目录。
 
 ## 技术栈
 
@@ -59,6 +59,7 @@ Local Lake Notes 是一个基于 Tauri 的本地离线笔记应用原型，目�
 - 最近打开的知识库路径
 - 目录和文档排序
 - OSS 设置
+- 备份和资源密钥的非敏感元数据
 
 开发环境固定使用仓库内的 SQLite 文件，方便反复调试时复用同一份应用数据：
 
@@ -77,6 +78,22 @@ src-tauri/dev-data/yuque-lake-notes.sqlite3
 说明：SQLite 不写入 `.app` 包体内部。macOS 应用包在安装、签名和升级时不适合承载可变数据，实际可写数据应放在应用数据目录中。
 
 说明：当前应用标识仍保留为 `com.weistuday.yuque.lake-notes`，用于兼容已有本地配置和 SQLite 数据目录。
+
+可以在 **设置 -> 数据存储** 中自定义 SQLite 数据库目录。应用会在所选目录下使用固定文件名：
+
+```text
+yuque-lake-notes.sqlite3
+```
+
+切换到一个没有数据库文件的空目录时，应用会把当前数据库复制过去再切换；如果目标目录已经存在 `yuque-lake-notes.sqlite3`，则直接切换使用该数据库。
+
+数据库目录配置不会写入 SQLite 自身，而是保存到应用配置目录中的独立文件：
+
+```text
+database-location.json
+```
+
+这样应用启动时可以先定位数据库，再读取 SQLite 中的应用数据。
 
 旧版本产生的 `workspace.json`、`oss-settings.json`、`.yuque-lake-notes/order.json` 会在读取时迁移到 SQLite。
 
@@ -125,11 +142,13 @@ http://127.0.0.1:1420
 
 说明：直接在浏览器打开 Vite 页面时会使用浏览器 fallback 存储；完整的文件系统、SQLite、OSS 上传能力需要在 Tauri 桌面窗口中验证。
 
-开发模式下反复运行 `npm run tauri dev` 会复用同一个数据库：
+开发模式下反复运行 `npm run tauri dev` 默认会复用同一个数据库：
 
 ```text
 src-tauri/dev-data/yuque-lake-notes.sqlite3
 ```
+
+如果在设置页修改了数据库目录，后续开发模式也会优先使用自定义目录。
 
 ## 本地验证流程
 
@@ -150,7 +169,8 @@ npm run tauri dev
 6. 删除测试目录或测试文档。
 7. 拖拽目录或文档到同级前后、目录内部和根目录末尾，确认侧边栏顺序、磁盘路径和重启后的排序保持一致。
 8. 拖动目录栏边界，确认目录宽度可调且编辑区占满剩余空间。
-9. 配置 OSS 后上传图片，确认图片 URL 被插入到文档中。
+9. 在设置页的数据存储中选择一个临时数据库目录，保存后重启应用，确认最近知识库和排序仍正常。
+10. 配置 OSS 后上传图片，确认图片 URL 被插入到文档中。
 
 ## 测试
 
@@ -235,7 +255,7 @@ npm run tauri -- build --bundles deb,rpm,appimage --ci --no-sign
 本地当前平台快捷构建：
 
 ```bash
-npm run build:all
+npm run build:current
 ```
 
 macOS 产物通常位于：
@@ -274,10 +294,12 @@ images/2026/04/<uuid>.png
 
 推荐把 bucket 保持为私有读写，不要配置公开只读 bucket policy。应用会把文档中的图片和附件保存为 `yuque-resource://...` 内部资源引用，编辑预览、附件下载、短时签名和导出资源读取都由 Tauri 后端通过 S3 凭据完成，前端不会持有 S3 secret。
 
+上传图片和附件前，需要先在设置页配置本机资源加密密钥。新上传的资源会在 Tauri 后端使用本地密钥加密后再写入 OSS，存储桶中的原始对象是密文，不能直接通过对象 URL 预览。密钥只保存在本机系统钥匙串中，SQLite 和 `.lake` 文档只保存 key fingerprint；如果换设备使用，需要后续导入对应资源密钥，否则旧加密资源无法解密。
+
 导出资源有两种策略：
 
 - 本地资源包：单篇 HTML/Markdown 会导出为 zip，包含正文文件和 `assets/`、`attachments/` 资源目录；知识库整体导出也会把资源放入 zip。适合长期留存和离线交付。
-- 短时签名链接：导出文件中的资源链接会改写为带有效期的 S3 presigned URL，适合临时在线交付。有效期结束后需要重新导出。
+- 短时签名链接：导出文件中的资源链接会改写为带有效期的 S3 presigned URL，适合临时在线交付。加密资源不会直接签原始密文对象；应用会先解密并上传一份临时明文对象到 `tmp/exports/` 前缀，再对临时明文对象生成短时链接。有效期结束后需要重新导出，建议在对象存储侧给该前缀配置 lifecycle 清理规则。
 
 ## 后续方向
 

@@ -1,21 +1,36 @@
 import type { FormEvent, MouseEvent } from "react";
 import { useEffect, useState } from "react";
-import { Check, CloudUpload, DatabaseBackup, X } from "lucide-react";
+import { Check, CloudUpload, Database, DatabaseBackup, FolderOpen, ShieldCheck, X } from "lucide-react";
 
-import type { BackupKeyStatus, BackupRecord, OssSettings, RestoreBackupOutput } from "../../app/appState";
+import type {
+  BackupKeyStatus,
+  BackupRecord,
+  DatabaseLocationSettings,
+  OssSettings,
+  RestoreBackupOutput,
+  ResourceKeyStatus,
+} from "../../app/appState";
 import { BackupSettingsPanel } from "./BackupSettingsPanel";
 import { mergeOssSettings, validateOssSettings } from "./ossSettingsStore";
+import { ResourceSecurityPanel } from "./ResourceSecurityPanel";
 
 interface OssSettingsPanelProps {
   open: boolean;
   settings: OssSettings | null;
+  databaseLocation: DatabaseLocationSettings | null;
   onClose: () => void;
   onSave: (settings: OssSettings) => Promise<void>;
+  onChooseDatabaseDirectory: () => Promise<string | null>;
+  onSaveDatabaseLocation: (directory: string) => Promise<void>;
   backupKeyStatus: BackupKeyStatus;
+  resourceKeyStatus: ResourceKeyStatus;
   backupRecords: BackupRecord[];
   backupBusy: boolean;
+  resourceKeyBusy: boolean;
   activeBackupOperation: string | null;
   onSetBackupKey: (secret: string, reset: boolean) => Promise<void>;
+  onSetResourceKey: (secret: string, reset: boolean) => Promise<void>;
+  onVerifyResourceKey: () => Promise<ResourceKeyStatus>;
   onCreateBackup: (forceFull: boolean) => Promise<void>;
   onRestoreBackup: (backupId: string, allowKeyMismatch: boolean) => Promise<RestoreBackupOutput>;
   onDeleteBackup: (backupId: string) => Promise<void>;
@@ -24,13 +39,20 @@ interface OssSettingsPanelProps {
 export function OssSettingsPanel({
   open,
   settings,
+  databaseLocation,
   onClose,
   onSave,
+  onChooseDatabaseDirectory,
+  onSaveDatabaseLocation,
   backupKeyStatus,
+  resourceKeyStatus,
   backupRecords,
   backupBusy,
+  resourceKeyBusy,
   activeBackupOperation,
   onSetBackupKey,
+  onSetResourceKey,
+  onVerifyResourceKey,
   onCreateBackup,
   onRestoreBackup,
   onDeleteBackup,
@@ -38,15 +60,22 @@ export function OssSettingsPanel({
   const [draft, setDraft] = useState(() => mergeOssSettings(settings));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<"upload" | "backup">("upload");
+  const [databaseDirectory, setDatabaseDirectory] = useState(databaseLocation?.directory ?? "");
+  const [databaseSaving, setDatabaseSaving] = useState(false);
+  const [databaseError, setDatabaseError] = useState<string | null>(null);
+  const [databaseMessage, setDatabaseMessage] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"upload" | "storage" | "security" | "backup">("upload");
 
   useEffect(() => {
     if (open) {
       setDraft(mergeOssSettings(settings));
+      setDatabaseDirectory(databaseLocation?.directory ?? "");
       setError(null);
+      setDatabaseError(null);
+      setDatabaseMessage(null);
       setActiveTab("upload");
     }
-  }, [open, settings]);
+  }, [databaseLocation, open, settings]);
 
   if (!open) {
     return null;
@@ -83,6 +112,34 @@ export function OssSettingsPanel({
       onClose();
     }
   };
+  const chooseDatabaseDirectory = async () => {
+    const selected = await onChooseDatabaseDirectory();
+    if (selected) {
+      setDatabaseDirectory(selected);
+      setDatabaseError(null);
+      setDatabaseMessage(null);
+    }
+  };
+  const submitDatabaseLocation = async (event: FormEvent) => {
+    event.preventDefault();
+    const directory = databaseDirectory.trim();
+    if (!directory) {
+      setDatabaseError("请选择数据库目录");
+      return;
+    }
+
+    setDatabaseSaving(true);
+    setDatabaseError(null);
+    setDatabaseMessage(null);
+    try {
+      await onSaveDatabaseLocation(directory);
+      setDatabaseMessage("数据库目录已保存并切换");
+    } catch (saveError) {
+      setDatabaseError(saveError instanceof Error ? saveError.message : String(saveError));
+    } finally {
+      setDatabaseSaving(false);
+    }
+  };
 
   return (
     <div className="settings-backdrop" role="presentation" onMouseDown={closeWhenBackdropClicked}>
@@ -106,11 +163,27 @@ export function OssSettingsPanel({
             </button>
             <button
               type="button"
+              className={`settings-menu__item${activeTab === "storage" ? " is-active" : ""}`}
+              onClick={() => setActiveTab("storage")}
+            >
+              <Database size={16} />
+              数据存储
+            </button>
+            <button
+              type="button"
               className={`settings-menu__item${activeTab === "backup" ? " is-active" : ""}`}
               onClick={() => setActiveTab("backup")}
             >
               <DatabaseBackup size={16} />
               备份恢复
+            </button>
+            <button
+              type="button"
+              className={`settings-menu__item${activeTab === "security" ? " is-active" : ""}`}
+              onClick={() => setActiveTab("security")}
+            >
+              <ShieldCheck size={16} />
+              资源加密
             </button>
           </nav>
 
@@ -213,7 +286,7 @@ export function OssSettingsPanel({
                 保存
               </button>
             </div>
-          </form> : (
+          </form> : activeTab === "backup" ? (
             <BackupSettingsPanel
               keyStatus={backupKeyStatus}
               backups={backupRecords}
@@ -223,6 +296,59 @@ export function OssSettingsPanel({
               onCreateBackup={onCreateBackup}
               onRestoreBackup={onRestoreBackup}
               onDeleteBackup={onDeleteBackup}
+            />
+          ) : activeTab === "storage" ? (
+            <form className="settings-content" onSubmit={submitDatabaseLocation} aria-labelledby="storage-settings-title">
+              <h3 id="storage-settings-title">数据存储</h3>
+              <div className="settings-card">
+                <div className="settings-card__title">
+                  <Database size={16} />
+                  SQLite 数据库目录
+                </div>
+                <p className="settings-card__text">
+                  应用会在该目录下保存 <code>yuque-lake-notes.sqlite3</code>。切换到空目录时会复制当前数据库。
+                </p>
+                {databaseLocation?.databasePath ? (
+                  <p className="settings-card__muted">当前数据库：{databaseLocation.databasePath}</p>
+                ) : null}
+                <label>
+                  数据库目录
+                  <div className="settings-path-row">
+                    <input
+                      value={databaseDirectory}
+                      readOnly
+                      placeholder="选择 SQLite 数据库所在目录"
+                    />
+                    <button type="button" className="secondary-button" onClick={chooseDatabaseDirectory}>
+                      <FolderOpen size={15} />
+                      选择
+                    </button>
+                  </div>
+                </label>
+                <p className="settings-card__muted">
+                  目录配置保存在独立配置文件中，不依赖 SQLite；已有目标数据库时会直接切换使用。
+                </p>
+              </div>
+
+              {databaseError ? <p className="settings-error">{databaseError}</p> : null}
+              {databaseMessage ? <p className="settings-success">{databaseMessage}</p> : null}
+
+              <div className="settings-actions">
+                <button type="button" className="secondary-button" onClick={onClose}>
+                  取消
+                </button>
+                <button type="submit" className="primary-button" disabled={databaseSaving || !databaseDirectory.trim()}>
+                  <Check size={16} />
+                  保存目录
+                </button>
+              </div>
+            </form>
+          ) : (
+            <ResourceSecurityPanel
+              keyStatus={resourceKeyStatus}
+              busy={resourceKeyBusy}
+              onSetKey={onSetResourceKey}
+              onVerifyKey={onVerifyResourceKey}
             />
           )}
         </div>

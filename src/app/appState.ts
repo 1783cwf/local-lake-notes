@@ -52,11 +52,25 @@ export interface OssSettings {
   allowSignedUrlExport: boolean;
 }
 
+export interface DatabaseLocationSettings {
+  directory: string;
+  databasePath: string;
+  custom: boolean;
+}
+
 export interface BackupKeyStatus {
   configured: boolean;
   needsKey: boolean;
   fingerprint?: string;
   createdAt?: string;
+}
+
+export interface ResourceKeyStatus {
+  configured: boolean;
+  needsKey: boolean;
+  fingerprint?: string;
+  createdAt?: string;
+  knownFingerprints: string[];
 }
 
 export type BackupRecordType = "full" | "incremental";

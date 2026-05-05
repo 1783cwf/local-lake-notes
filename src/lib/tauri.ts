@@ -6,12 +6,14 @@ import type {
   BackupOperationOutput,
   BackupRecord,
   CreateBackupInput,
+  DatabaseLocationSettings,
   DeleteBackupInput,
   DeleteBackupOutput,
   FileDownloadInput,
   OssSettings,
   RestoreBackupInput,
   RestoreBackupOutput,
+  ResourceKeyStatus,
   UploadImageInput,
   UploadImageOutput,
 } from "../app/appState";
@@ -24,7 +26,9 @@ import type {
 
 const browserWorkspaceKey = "yuque-lake-notes.browser-workspace";
 const browserSettingsKey = "yuque-lake-notes.browser-oss-settings";
+const browserDatabaseLocationKey = "yuque-lake-notes.browser-database-location";
 const browserBackupKeyStatusKey = "yuque-lake-notes.browser-backup-key-status";
+const browserResourceKeyStatusKey = "yuque-lake-notes.browser-resource-key-status";
 const browserBackupsKey = "yuque-lake-notes.browser-backups";
 
 function isTauriRuntime(): boolean {
@@ -43,6 +47,20 @@ export async function chooseWorkspaceDirectory(): Promise<string | null> {
     directory: true,
     multiple: false,
     title: "选择知识库目录",
+  });
+
+  return typeof selected === "string" ? selected : null;
+}
+
+export async function chooseDatabaseDirectory(): Promise<string | null> {
+  if (!isTauriRuntime()) {
+    return "/browser-preview/database";
+  }
+
+  const selected = await open({
+    directory: true,
+    multiple: false,
+    title: "选择数据库目录",
   });
 
   return typeof selected === "string" ? selected : null;
@@ -428,6 +446,35 @@ export async function saveOssSettings(settings: OssSettings): Promise<OssSetting
   return invoke<OssSettings>("save_oss_settings", { settings });
 }
 
+export async function getDatabaseLocation(): Promise<DatabaseLocationSettings> {
+  if (!isTauriRuntime()) {
+    const stored = window.localStorage.getItem(browserDatabaseLocationKey);
+    return stored
+      ? (JSON.parse(stored) as DatabaseLocationSettings)
+      : {
+          directory: "/browser-preview/database",
+          databasePath: "/browser-preview/database/yuque-lake-notes.sqlite3",
+          custom: false,
+        };
+  }
+
+  return invoke<DatabaseLocationSettings>("get_database_location");
+}
+
+export async function saveDatabaseLocation(directory: string): Promise<DatabaseLocationSettings> {
+  if (!isTauriRuntime()) {
+    const settings: DatabaseLocationSettings = {
+      directory,
+      databasePath: `${directory.replace(/\/$/, "")}/yuque-lake-notes.sqlite3`,
+      custom: true,
+    };
+    window.localStorage.setItem(browserDatabaseLocationKey, JSON.stringify(settings));
+    return settings;
+  }
+
+  return invoke<DatabaseLocationSettings>("save_database_location_settings", { input: { directory } });
+}
+
 export async function getBackupKeyStatus(): Promise<BackupKeyStatus> {
   if (!isTauriRuntime()) {
     return readBrowserBackupKeyStatus();
@@ -465,6 +512,47 @@ export async function resetBackupKey(secret: string): Promise<BackupKeyStatus> {
   }
 
   return invoke<BackupKeyStatus>("reset_backup_key", { input: { secret, confirmReset: true } });
+}
+
+export async function getResourceKeyStatus(): Promise<ResourceKeyStatus> {
+  if (!isTauriRuntime()) {
+    return readBrowserResourceKeyStatus();
+  }
+
+  return invoke<ResourceKeyStatus>("get_resource_key_status");
+}
+
+export async function verifyResourceKeyStatus(): Promise<ResourceKeyStatus> {
+  if (!isTauriRuntime()) {
+    return readBrowserResourceKeyStatus();
+  }
+
+  return invoke<ResourceKeyStatus>("verify_resource_key_status");
+}
+
+export async function setResourceKey(secret: string): Promise<ResourceKeyStatus> {
+  if (!isTauriRuntime()) {
+    const fingerprint = browserFingerprint(secret);
+    const status: ResourceKeyStatus = {
+      configured: true,
+      needsKey: false,
+      fingerprint,
+      createdAt: new Date().toISOString(),
+      knownFingerprints: [fingerprint],
+    };
+    window.localStorage.setItem(browserResourceKeyStatusKey, JSON.stringify(status));
+    return status;
+  }
+
+  return invoke<ResourceKeyStatus>("set_resource_key", { input: { secret } });
+}
+
+export async function resetResourceKey(secret: string): Promise<ResourceKeyStatus> {
+  if (!isTauriRuntime()) {
+    return setResourceKey(secret);
+  }
+
+  return invoke<ResourceKeyStatus>("reset_resource_key", { input: { secret, confirmReset: true } });
 }
 
 export async function listBackups(): Promise<BackupRecord[]> {
@@ -672,6 +760,13 @@ function readBrowserBackupKeyStatus(): BackupKeyStatus {
   return stored
     ? JSON.parse(stored) as BackupKeyStatus
     : { configured: false, needsKey: false };
+}
+
+function readBrowserResourceKeyStatus(): ResourceKeyStatus {
+  const stored = window.localStorage.getItem(browserResourceKeyStatusKey);
+  return stored
+    ? JSON.parse(stored) as ResourceKeyStatus
+    : { configured: false, needsKey: false, knownFingerprints: [] };
 }
 
 function readBrowserBackups(): BackupRecord[] {

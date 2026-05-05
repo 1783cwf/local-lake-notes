@@ -10,6 +10,24 @@ use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
 use crate::models::OssSettings;
+use crate::storage::resource_crypto::RESOURCE_ENCRYPTION_ALGORITHM;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResourceRef {
+    pub bucket: String,
+    pub key: String,
+    pub kind: String,
+    pub name: Option<String>,
+    pub size: Option<usize>,
+    pub content_type: Option<String>,
+    pub encryption: Option<ResourceEncryptionMetadata>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResourceEncryptionMetadata {
+    pub algorithm: String,
+    pub key_fingerprint: String,
+}
 
 pub fn build_image_object_key(prefix: &str, filename: &str) -> String {
     build_object_key(prefix, filename)
@@ -53,14 +71,37 @@ pub fn build_resource_ref(
     size: usize,
     content_type: &str,
 ) -> String {
+    build_resource_ref_with_encryption(settings, key, kind, filename, size, content_type, None)
+}
+
+pub fn build_resource_ref_with_encryption(
+    settings: &OssSettings,
+    key: &str,
+    kind: &str,
+    filename: &str,
+    size: usize,
+    content_type: &str,
+    key_fingerprint: Option<&str>,
+) -> String {
+    let encryption_query = key_fingerprint
+        .filter(|fingerprint| !fingerprint.trim().is_empty())
+        .map(|fingerprint| {
+            format!(
+                "&enc={}&keyFingerprint={}",
+                url_encode(RESOURCE_ENCRYPTION_ALGORITHM),
+                url_encode(fingerprint)
+            )
+        })
+        .unwrap_or_default();
     format!(
-        "yuque-resource://{}/{}?kind={}&name={}&size={}&type={}",
+        "yuque-resource://{}/{}?kind={}&name={}&size={}&type={}{}",
         url_encode(&settings.bucket),
         key.split('/').map(url_encode).collect::<Vec<_>>().join("/"),
         url_encode(kind),
         url_encode(filename),
         size,
-        url_encode(content_type)
+        url_encode(content_type),
+        encryption_query
     )
 }
 
@@ -82,6 +123,56 @@ pub fn parse_resource_ref(resource_ref: &str) -> AppResult<(String, String)> {
         return Err(AppError::InvalidExternalUrl);
     }
     Ok((bucket, key))
+}
+
+pub fn parse_resource_ref_detail(resource_ref: &str) -> AppResult<ResourceRef> {
+    let Some(rest) = resource_ref.strip_prefix("yuque-resource://") else {
+        return Err(AppError::InvalidExternalUrl);
+    };
+    let (target, query) = rest.split_once('?').unwrap_or((rest, ""));
+    let Some((bucket, key)) = target.split_once('/') else {
+        return Err(AppError::InvalidExternalUrl);
+    };
+    let bucket = percent_decode(bucket);
+    let key = key
+        .split('/')
+        .map(percent_decode)
+        .collect::<Vec<_>>()
+        .join("/");
+    if bucket.is_empty() || key.is_empty() {
+        return Err(AppError::InvalidExternalUrl);
+    }
+
+    let params = parse_query_params(query);
+    let encryption = match params.get("enc") {
+        Some(algorithm) if algorithm == RESOURCE_ENCRYPTION_ALGORITHM => {
+            let fingerprint = params
+                .get("keyFingerprint")
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| AppError::InvalidExternalUrl)?;
+            Some(ResourceEncryptionMetadata {
+                algorithm: algorithm.clone(),
+                key_fingerprint: fingerprint.clone(),
+            })
+        }
+        Some(_) => return Err(AppError::InvalidExternalUrl),
+        None => None,
+    };
+
+    Ok(ResourceRef {
+        bucket,
+        key,
+        kind: params
+            .get("kind")
+            .cloned()
+            .unwrap_or_else(|| "image".to_string()),
+        name: params.get("name").cloned(),
+        size: params
+            .get("size")
+            .and_then(|value| value.parse::<usize>().ok()),
+        content_type: params.get("type").cloned(),
+        encryption,
+    })
 }
 
 pub async fn put_object(
@@ -190,6 +281,7 @@ pub fn validate_resource_key(settings: &OssSettings, bucket: &str, key: &str) ->
     let allowed_prefixes = [
         settings.image_prefix.trim_matches('/'),
         settings.file_prefix.trim_matches('/'),
+        "tmp/exports",
     ];
     if allowed_prefixes
         .iter()
@@ -200,6 +292,30 @@ pub fn validate_resource_key(settings: &OssSettings, bucket: &str, key: &str) ->
     } else {
         Err(AppError::InvalidExternalUrl)
     }
+}
+
+pub fn build_temporary_export_object_key(export_id: &str, kind: &str, filename: &str) -> String {
+    let safe_export_id = sanitize_filename(export_id);
+    let safe_kind = sanitize_filename(kind);
+    let safe_name = sanitize_filename(filename);
+    format!(
+        "tmp/exports/{}/{}/{}",
+        if safe_export_id.is_empty() {
+            Uuid::new_v4().to_string()
+        } else {
+            safe_export_id
+        },
+        if safe_kind.is_empty() {
+            "resources".to_string()
+        } else {
+            safe_kind
+        },
+        if safe_name.is_empty() {
+            "resource".to_string()
+        } else {
+            safe_name
+        }
+    )
 }
 
 async fn s3_client(settings: &OssSettings) -> Client {
@@ -294,6 +410,22 @@ fn percent_decode(value: &str) -> String {
         index += 1;
     }
     String::from_utf8_lossy(&output).to_string()
+}
+
+fn parse_query_params(query: &str) -> std::collections::HashMap<String, String> {
+    query
+        .split('&')
+        .filter(|part| !part.is_empty())
+        .filter_map(|part| {
+            let (key, value) = part.split_once('=').unwrap_or((part, ""));
+            let key = percent_decode(key);
+            if key.is_empty() {
+                None
+            } else {
+                Some((key, percent_decode(value)))
+            }
+        })
+        .collect()
 }
 
 fn content_disposition(filename: &str) -> String {
