@@ -19,7 +19,9 @@ use commands::resource_key::{
 use commands::resources::{
     create_temporary_resource_url, download_resource, prepare_resource_preview, read_resource_bytes,
 };
-use commands::settings::{get_oss_settings, save_oss_settings};
+use commands::settings::{
+    get_database_location, get_oss_settings, save_database_location_settings, save_oss_settings,
+};
 use commands::upload::{upload_file, upload_image};
 use commands::workspace::{
     create_lake_directory, delete_lake_directory, get_recent_workspace, list_lake_documents,
@@ -65,6 +67,8 @@ pub fn run() {
             create_temporary_resource_url,
             get_oss_settings,
             save_oss_settings,
+            get_database_location,
+            save_database_location_settings,
             open_external_url,
             upload_file,
             upload_image,

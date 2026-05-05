@@ -52,6 +52,12 @@ export interface OssSettings {
   allowSignedUrlExport: boolean;
 }
 
+export interface DatabaseLocationSettings {
+  directory: string;
+  databasePath: string;
+  custom: boolean;
+}
+
 export interface BackupKeyStatus {
   configured: boolean;
   needsKey: boolean;

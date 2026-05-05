@@ -80,6 +80,20 @@ pub struct OssSettings {
     pub allow_signed_url_export: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseLocationSettings {
+    pub directory: String,
+    pub database_path: String,
+    pub custom: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveDatabaseLocationInput {
+    pub directory: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UploadImageInput {

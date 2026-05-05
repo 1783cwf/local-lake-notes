@@ -26,6 +26,11 @@ const deleteBackup = vi.fn<(input: { backupId: string }) => Promise<{ deletedBac
 const deleteLakeDocument = vi.fn<(path: string) => Promise<WorkspacePayload>>();
 const createTemporaryResourceUrl = vi.fn<(resourceRef: string, ttlSeconds: number, filename?: string) => Promise<string>>();
 const downloadResourceFile = vi.fn<(input: { url: string; filename: string; resourceRef?: string }) => Promise<string | null>>();
+const getDatabaseLocation = vi.fn(async () => ({
+  directory: "/tmp/local-lake-db",
+  databasePath: "/tmp/local-lake-db/yuque-lake-notes.sqlite3",
+  custom: false,
+}));
 const getBackupKeyStatus = vi.fn(async () => ({ configured: false, needsKey: false }));
 const getResourceKeyStatus = vi.fn(async () => ({ configured: false, needsKey: false, knownFingerprints: [] }));
 const verifyBackupKeyStatus = vi.fn(async () => ({ configured: false, needsKey: false }));
@@ -109,6 +114,7 @@ vi.mock("../components/DocumentSidebar", () => ({
 }));
 
 vi.mock("../lib/tauri", () => ({
+  chooseDatabaseDirectory: vi.fn(async () => "/tmp/selected-db"),
   chooseWorkspaceDirectory: vi.fn(async () => "/tmp/kb"),
   createLakeDirectory: vi.fn(),
   createBackup: (input: { forceFull: boolean }) => createBackup(input),
@@ -120,6 +126,7 @@ vi.mock("../lib/tauri", () => ({
   deleteBackup: (input: { backupId: string }) => deleteBackup(input),
   deleteLakeDocument: (path: string) => deleteLakeDocument(path),
   downloadResourceFile: (input: { url: string; filename: string; resourceRef?: string }) => downloadResourceFile(input),
+  getDatabaseLocation: () => getDatabaseLocation(),
   getOssSettings: vi.fn(async () => null),
   getBackupKeyStatus: () => getBackupKeyStatus(),
   getResourceKeyStatus: () => getResourceKeyStatus(),
@@ -138,6 +145,11 @@ vi.mock("../lib/tauri", () => ({
   saveBinaryExport: (defaultPath: string, bytes: Uint8Array, filters: Array<{ name: string; extensions: string[] }>) => saveBinaryExport(defaultPath, bytes, filters),
   savePdfExport: (defaultPath: string, html: string, filters: Array<{ name: string; extensions: string[] }>) => savePdfExport(defaultPath, html, filters),
   saveTextExport: (defaultPath: string, content: string, filters: Array<{ name: string; extensions: string[] }>) => saveTextExport(defaultPath, content, filters),
+  saveDatabaseLocation: vi.fn(async (directory: string) => ({
+    directory,
+    databasePath: `${directory}/yuque-lake-notes.sqlite3`,
+    custom: true,
+  })),
   resetBackupKey: vi.fn(async () => ({ configured: true, needsKey: false, fingerprint: "fingerprint" })),
   resetResourceKey: vi.fn(async () => ({ configured: true, needsKey: false, fingerprint: "resource-fingerprint", knownFingerprints: ["resource-fingerprint"] })),
   restoreBackup: (input: { backupId: string; allowKeyMismatch?: boolean }) => restoreBackup(input),
@@ -174,6 +186,12 @@ beforeEach(() => {
   deleteLakeDocument.mockReset();
   downloadResourceFile.mockReset();
   downloadResourceFile.mockResolvedValue("/tmp/attachment.pdf");
+  getDatabaseLocation.mockReset();
+  getDatabaseLocation.mockResolvedValue({
+    directory: "/tmp/local-lake-db",
+    databasePath: "/tmp/local-lake-db/yuque-lake-notes.sqlite3",
+    custom: false,
+  });
   getBackupKeyStatus.mockReset();
   getBackupKeyStatus.mockResolvedValue({ configured: false, needsKey: false });
   getResourceKeyStatus.mockReset();

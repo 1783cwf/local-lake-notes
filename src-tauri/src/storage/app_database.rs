@@ -7,10 +7,11 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
-use crate::error::AppResult;
-use crate::models::{KnownWorkspace, OssSettings, WorkspaceOrder};
+use crate::error::{AppError, AppResult};
+use crate::models::{DatabaseLocationSettings, KnownWorkspace, OssSettings, WorkspaceOrder};
 
-const DATABASE_FILE: &str = "yuque-lake-notes.sqlite3";
+pub const DATABASE_FILE: &str = "yuque-lake-notes.sqlite3";
+const DATABASE_LOCATION_FILE: &str = "database-location.json";
 const RECENT_WORKSPACE_KEY: &str = "recent_workspace";
 const OSS_SETTINGS_KEY: &str = "oss_settings";
 const BACKUP_KEY_METADATA_KEY: &str = "backup_key_metadata";
@@ -26,10 +27,64 @@ struct LegacyWorkspaceConfig {
     recent_workspace: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DatabaseLocationConfig {
+    directory: String,
+}
+
 pub fn database_path(app: &AppHandle) -> AppResult<PathBuf> {
     let dir = database_dir(app)?;
     fs::create_dir_all(&dir)?;
     Ok(dir.join(DATABASE_FILE))
+}
+
+pub fn database_location_settings(app: &AppHandle) -> AppResult<DatabaseLocationSettings> {
+    let directory = database_dir(app)?;
+    let custom = load_database_location_config(app)?.is_some();
+    Ok(DatabaseLocationSettings {
+        database_path: directory.join(DATABASE_FILE).to_string_lossy().to_string(),
+        directory: directory.to_string_lossy().to_string(),
+        custom,
+    })
+}
+
+pub fn save_database_location(
+    app: &AppHandle,
+    directory: &Path,
+) -> AppResult<DatabaseLocationSettings> {
+    let current_path = database_path(app)?;
+    let next_directory = normalize_database_directory(directory)?;
+    let next_path = next_directory.join(DATABASE_FILE);
+    fs::create_dir_all(&next_directory)?;
+
+    if current_path != next_path {
+        clone_database_to_directory_at(&current_path, &next_directory)?;
+    }
+
+    let config_path = database_location_config_path(app)?;
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let config = DatabaseLocationConfig {
+        directory: next_directory.to_string_lossy().to_string(),
+    };
+    // 数据库位置不能写入 SQLite 自身，否则应用启动时无法先定位数据库。
+    fs::write(config_path, serde_json::to_vec_pretty(&config)?)?;
+    database_location_settings(app)
+}
+
+pub fn clone_database_to_directory_at(
+    current_path: &Path,
+    next_directory: &Path,
+) -> AppResult<PathBuf> {
+    let next_path = next_directory.join(DATABASE_FILE);
+    fs::create_dir_all(next_directory)?;
+    if !next_path.exists() && current_path.exists() {
+        fs::copy(current_path, &next_path)?;
+    }
+    connect_at(&next_path)?;
+    Ok(next_path)
 }
 
 pub fn snapshot_database(app: &AppHandle, destination: &Path) -> AppResult<()> {
@@ -48,13 +103,22 @@ pub fn snapshot_database(app: &AppHandle, destination: &Path) -> AppResult<()> {
 }
 
 #[cfg(debug_assertions)]
-fn database_dir(_app: &AppHandle) -> AppResult<PathBuf> {
+fn default_database_dir(_app: &AppHandle) -> AppResult<PathBuf> {
     Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("dev-data"))
 }
 
 #[cfg(not(debug_assertions))]
-fn database_dir(app: &AppHandle) -> AppResult<PathBuf> {
+fn default_database_dir(app: &AppHandle) -> AppResult<PathBuf> {
     app.path().app_local_data_dir().map_err(Into::into)
+}
+
+fn database_dir(app: &AppHandle) -> AppResult<PathBuf> {
+    match load_database_location_config(app)? {
+        Some(config) if !config.directory.trim().is_empty() => {
+            normalize_database_directory(Path::new(&config.directory))
+        }
+        _ => default_database_dir(app),
+    }
 }
 
 pub fn initialize_app_database(app: &AppHandle) -> AppResult<()> {
@@ -457,6 +521,31 @@ fn migrate_recent_workspace_to_known(database_path: &Path) -> AppResult<()> {
     let recent_path = Path::new(&recent_workspace);
     // 只用 recent workspace 做已知知识库的兜底迁移，避免旧版本用户首次备份时漏掉当前知识库。
     upsert_known_workspace_at(database_path, recent_path)
+}
+
+fn load_database_location_config(app: &AppHandle) -> AppResult<Option<DatabaseLocationConfig>> {
+    let path = database_location_config_path(app)?;
+    match fs::read_to_string(path) {
+        Ok(content) => serde_json::from_str(&content).map(Some).map_err(Into::into),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn database_location_config_path(app: &AppHandle) -> AppResult<PathBuf> {
+    Ok(app.path().app_config_dir()?.join(DATABASE_LOCATION_FILE))
+}
+
+fn normalize_database_directory(path: &Path) -> AppResult<PathBuf> {
+    if path.as_os_str().is_empty() {
+        return Err(AppError::Backup("数据库目录不能为空".to_string()));
+    }
+    if path.file_name().is_some_and(|name| name == DATABASE_FILE) {
+        return Err(AppError::Backup(
+            "请选择数据库文件所在目录，不要直接选择数据库文件".to_string(),
+        ));
+    }
+    Ok(path.to_path_buf())
 }
 
 fn read_legacy_workspace_order(root: &Path) -> AppResult<Option<Vec<String>>> {

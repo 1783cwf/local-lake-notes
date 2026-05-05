@@ -943,6 +943,21 @@ button {
   border-color: var(--green);
 }
 
+.settings-path-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.settings-path-row input {
+  min-width: 0;
+}
+
+.settings-path-row .secondary-button {
+  height: 38px;
+}
+
 .checkbox-label {
   flex-direction: row !important;
   align-items: center;

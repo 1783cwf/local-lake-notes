@@ -8,8 +8,15 @@ function renderPanel(overrides: Partial<Parameters<typeof OssSettingsPanel>[0]> 
     <OssSettingsPanel
       open
       settings={null}
+      databaseLocation={{
+        directory: "/tmp/local-lake-db",
+        databasePath: "/tmp/local-lake-db/yuque-lake-notes.sqlite3",
+        custom: false,
+      }}
       onClose={vi.fn()}
       onSave={vi.fn()}
+      onChooseDatabaseDirectory={vi.fn(async () => "/tmp/new-db")}
+      onSaveDatabaseLocation={vi.fn()}
       backupKeyStatus={{ configured: false, needsKey: false }}
       resourceKeyStatus={{ configured: false, needsKey: false, knownFingerprints: [] }}
       backupRecords={[]}
@@ -109,6 +116,24 @@ test("可以手动重新读取本地资源密钥", async () => {
 
   expect(onVerifyResourceKey).toHaveBeenCalledTimes(1);
   expect(await screen.findByText("本地资源密钥读取成功")).toBeInTheDocument();
+});
+
+test("可以选择并保存数据库目录", async () => {
+  const user = userEvent.setup();
+  const onChooseDatabaseDirectory = vi.fn(async () => "/tmp/new-db");
+  const onSaveDatabaseLocation = vi.fn().mockResolvedValue(undefined);
+
+  renderPanel({ onChooseDatabaseDirectory, onSaveDatabaseLocation });
+
+  await user.click(screen.getByRole("button", { name: "数据存储" }));
+  expect(screen.getByDisplayValue("/tmp/local-lake-db")).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "选择" }));
+  await user.click(screen.getByRole("button", { name: "保存目录" }));
+
+  expect(onChooseDatabaseDirectory).toHaveBeenCalledTimes(1);
+  expect(onSaveDatabaseLocation).toHaveBeenCalledWith("/tmp/new-db");
+  expect(await screen.findByText("数据库目录已保存并切换")).toBeInTheDocument();
 });
 
 test("删除备份前需要二次确认并提示依赖增量备份", async () => {

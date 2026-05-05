@@ -1,10 +1,10 @@
 use tauri::AppHandle;
 
 use crate::error::{AppError, AppResult};
-use crate::models::OssSettings;
+use crate::models::{DatabaseLocationSettings, OssSettings, SaveDatabaseLocationInput};
 use crate::storage::app_database::{
-    load_oss_settings as load_database_oss_settings,
-    save_oss_settings as save_database_oss_settings,
+    database_location_settings, load_oss_settings as load_database_oss_settings,
+    save_database_location, save_oss_settings as save_database_oss_settings,
 };
 
 #[tauri::command]
@@ -17,6 +17,19 @@ pub fn save_oss_settings(app: AppHandle, settings: OssSettings) -> AppResult<Oss
     validate_oss_settings(&settings)?;
     save_database_oss_settings(&app, &settings)?;
     Ok(settings)
+}
+
+#[tauri::command]
+pub fn get_database_location(app: AppHandle) -> AppResult<DatabaseLocationSettings> {
+    database_location_settings(&app)
+}
+
+#[tauri::command]
+pub fn save_database_location_settings(
+    app: AppHandle,
+    input: SaveDatabaseLocationInput,
+) -> AppResult<DatabaseLocationSettings> {
+    save_database_location(&app, std::path::Path::new(input.directory.trim()))
 }
 
 pub fn load_oss_settings(app: &AppHandle) -> AppResult<Option<OssSettings>> {

@@ -34,6 +34,7 @@ import {
 } from "../features/workspace/workspaceStore";
 import {
   chooseWorkspaceDirectory,
+  chooseDatabaseDirectory,
   createLakeDirectory,
   createLakeDocument,
   createBackup,
@@ -47,6 +48,7 @@ import {
   getOssSettings,
   getRecentWorkspace,
   getBackupKeyStatus,
+  getDatabaseLocation,
   getResourceKeyStatus,
   listBackups,
   moveWorkspaceItem,
@@ -56,6 +58,7 @@ import {
   renameWorkspace,
   saveOssSettings,
   saveBinaryExport,
+  saveDatabaseLocation,
   savePdfExport,
   saveTextExport,
   resetBackupKey,
@@ -74,6 +77,7 @@ import type {
   CurrentDocumentState,
   BackupKeyStatus,
   BackupRecord,
+  DatabaseLocationSettings,
   FileDownloadInput,
   OssSettings,
   ResourceKeyStatus,
@@ -106,6 +110,7 @@ export function AppController() {
   const [exportRequest, setExportRequest] = useState<LakeDocumentExportRequest | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [ossSettings, setOssSettings] = useState<OssSettings | null>(null);
+  const [databaseLocation, setDatabaseLocation] = useState<DatabaseLocationSettings | null>(null);
   const [backupKeyStatus, setBackupKeyStatus] = useState<BackupKeyStatus>({ configured: false, needsKey: false });
   const [resourceKeyStatus, setResourceKeyStatus] = useState<ResourceKeyStatus>({
     configured: false,
@@ -142,16 +147,18 @@ export function AppController() {
 
   const boot = async () => {
     try {
-      const [recentWorkspace, settings, keyStatus, resourceStatus] = await Promise.all([
+      const [recentWorkspace, settings, keyStatus, resourceStatus, database] = await Promise.all([
         getRecentWorkspace(),
         getOssSettings(),
         getBackupKeyStatus(),
         getResourceKeyStatus(),
+        getDatabaseLocation(),
       ]);
       setWorkspace(recentWorkspace);
       setOssSettings(settings);
       setBackupKeyStatus(keyStatus);
       setResourceKeyStatus(resourceStatus);
+      setDatabaseLocation(database);
       await refreshBackupRecords();
     } catch (error) {
       setAppError(toMessage(error));
@@ -534,6 +541,12 @@ export function AppController() {
     setOssSettings(saved);
   }, []);
 
+  const saveDatabaseDirectory = useCallback(async (directory: string) => {
+    const saved = await saveDatabaseLocation(directory);
+    setDatabaseLocation(saved);
+    await boot();
+  }, []);
+
   const updateBackupKey = useCallback(async (secret: string, reset: boolean) => {
     setBackupBusy(true);
     setActiveBackupOperation("key");
@@ -807,8 +820,11 @@ export function AppController() {
       <OssSettingsPanel
         open={settingsOpen}
         settings={ossSettings}
+        databaseLocation={databaseLocation}
         onClose={() => setSettingsOpen(false)}
         onSave={saveSettings}
+        onChooseDatabaseDirectory={chooseDatabaseDirectory}
+        onSaveDatabaseLocation={saveDatabaseDirectory}
         backupKeyStatus={backupKeyStatus}
         resourceKeyStatus={resourceKeyStatus}
         backupRecords={backupRecords}
