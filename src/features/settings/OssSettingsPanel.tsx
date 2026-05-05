@@ -20,6 +20,7 @@ interface OssSettingsPanelProps {
   activeBackupOperation: string | null;
   onSetBackupKey: (secret: string, reset: boolean) => Promise<void>;
   onSetResourceKey: (secret: string, reset: boolean) => Promise<void>;
+  onVerifyResourceKey: () => Promise<ResourceKeyStatus>;
   onCreateBackup: (forceFull: boolean) => Promise<void>;
   onRestoreBackup: (backupId: string, allowKeyMismatch: boolean) => Promise<RestoreBackupOutput>;
   onDeleteBackup: (backupId: string) => Promise<void>;
@@ -38,6 +39,7 @@ export function OssSettingsPanel({
   activeBackupOperation,
   onSetBackupKey,
   onSetResourceKey,
+  onVerifyResourceKey,
   onCreateBackup,
   onRestoreBackup,
   onDeleteBackup,
@@ -244,6 +246,7 @@ export function OssSettingsPanel({
               keyStatus={resourceKeyStatus}
               busy={resourceKeyBusy}
               onSetKey={onSetResourceKey}
+              onVerifyKey={onVerifyResourceKey}
             />
           )}
         </div>

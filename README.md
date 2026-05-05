@@ -235,7 +235,7 @@ npm run tauri -- build --bundles deb,rpm,appimage --ci --no-sign
 本地当前平台快捷构建：
 
 ```bash
-npm run build:all
+npm run build:current
 ```
 
 macOS 产物通常位于：

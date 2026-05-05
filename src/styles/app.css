@@ -689,6 +689,21 @@ button {
   background: #fff5f3;
 }
 
+.app-operation-banner {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 7px;
+  margin: 12px 32px 0;
+  padding: 8px 12px;
+  border: 1px solid #cce8d7;
+  border-radius: 999px;
+  color: var(--green-dark);
+  background: #f1fbf5;
+  font-size: 13px;
+  box-shadow: 0 6px 18px rgb(31 185 107 / 8%);
+}
+
 .lake-editor-root {
   flex: 1;
   min-height: 0;

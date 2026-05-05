@@ -18,6 +18,7 @@ function renderPanel(overrides: Partial<Parameters<typeof OssSettingsPanel>[0]> 
       activeBackupOperation={null}
       onSetBackupKey={vi.fn()}
       onSetResourceKey={vi.fn()}
+      onVerifyResourceKey={vi.fn()}
       onCreateBackup={vi.fn()}
       onRestoreBackup={vi.fn()}
       onDeleteBackup={vi.fn()}
@@ -82,6 +83,32 @@ test("可以切换到资源加密并设置资源密钥", async () => {
 
   expect(onSetResourceKey).toHaveBeenCalledWith("resource-secret-key", false);
   expect(screen.getAllByText("tmp/exports/").length).toBeGreaterThan(0);
+});
+
+test("可以手动重新读取本地资源密钥", async () => {
+  const user = userEvent.setup();
+  const onVerifyResourceKey = vi.fn().mockResolvedValue({
+    configured: true,
+    needsKey: false,
+    fingerprint: "resource-fingerprint",
+    knownFingerprints: ["resource-fingerprint"],
+  });
+
+  renderPanel({
+    onVerifyResourceKey,
+    resourceKeyStatus: {
+      configured: true,
+      needsKey: false,
+      fingerprint: "resource-fingerprint",
+      knownFingerprints: ["resource-fingerprint"],
+    },
+  });
+
+  await user.click(screen.getByRole("button", { name: "资源加密" }));
+  await user.click(screen.getByRole("button", { name: "重新读取密钥" }));
+
+  expect(onVerifyResourceKey).toHaveBeenCalledTimes(1);
+  expect(await screen.findByText("本地资源密钥读取成功")).toBeInTheDocument();
 });
 
 test("删除备份前需要二次确认并提示依赖增量备份", async () => {

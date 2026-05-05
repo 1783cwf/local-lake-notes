@@ -20,6 +20,10 @@ export interface ResourcePreview {
   previewUrl: string;
 }
 
+interface RewriteLakeResourceOptions {
+  includeFileCards?: boolean;
+}
+
 export interface PublicResourceReferenceOptions {
   bucket?: string;
   publicBaseUrl?: string;
@@ -122,7 +126,7 @@ export function dehydrateLakeResources(content: string, previews: ResourcePrevie
   return rewriteLakeResourceUrls(content, (value) => {
     const preview = previews.find((item) => item.previewUrl === value);
     return preview?.resourceRef ?? value;
-  });
+  }, { includeFileCards: true });
 }
 
 export function dehydrateResourceText(content: string, previews: ResourcePreview[]): string {
@@ -147,7 +151,11 @@ export async function hydrateLakeResources(
   return rewriteLakeResourceUrls(content, (value) => previews.get(value) ?? value);
 }
 
-export function rewriteLakeResourceUrls(content: string, rewrite: (value: string) => string): string {
+export function rewriteLakeResourceUrls(
+  content: string,
+  rewrite: (value: string) => string,
+  options: RewriteLakeResourceOptions = {},
+): string {
   const template = document.createElement("template");
   template.innerHTML = content;
 
@@ -158,9 +166,14 @@ export function rewriteLakeResourceUrls(content: string, rewrite: (value: string
     }
   });
 
+  // 打开文档时只需要预加载图片；附件下载/导出时再读取资源内容，避免大附件拖慢文档打开。
+  const cardSelector = options.includeFileCards
+    ? "card[name='image'], card[name='file'], card[name='localdoc']"
+    : "card[name='image']";
+
   // Lake 的图片块、附件块都会把真实资源地址放在 value.src；
   // 保存时必须把一次性的 blob/asset 预览地址还原为私有资源引用，否则重开应用后预览地址会失效。
-  template.content.querySelectorAll("card[name='image'], card[name='file'], card[name='localdoc']").forEach((card) => {
+  template.content.querySelectorAll(cardSelector).forEach((card) => {
     const value = decodeLakeCardValue(card.getAttribute("value"));
     if (!value) {
       return;

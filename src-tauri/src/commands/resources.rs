@@ -174,11 +174,22 @@ fn safe_segment(value: &str) -> String {
         .to_string()
 }
 
-fn build_image_data_url(key: &str, bytes: &[u8]) -> Option<String> {
-    let content_type = mime_guess::from_path(key)
-        .first_or_octet_stream()
-        .essence_str()
-        .to_string();
+fn build_image_data_url(content_hint: &str, bytes: &[u8]) -> Option<String> {
+    // 旧文档和新资源引用都会把原始 MIME 保存在 type=image/png 里；
+    // 这里优先识别 MIME 字符串，避免把 "image/png" 当文件路径导致图片回显退回到不稳定的 asset 地址。
+    let normalized_hint = content_hint
+        .split(';')
+        .next()
+        .unwrap_or(content_hint)
+        .trim();
+    let content_type = if is_mime_type_hint(normalized_hint) {
+        normalized_hint.to_string()
+    } else {
+        mime_guess::from_path(content_hint)
+            .first_or_octet_stream()
+            .essence_str()
+            .to_string()
+    };
     if !content_type.starts_with("image/") {
         return None;
     }
@@ -192,6 +203,25 @@ fn build_image_data_url(key: &str, bytes: &[u8]) -> Option<String> {
     ))
 }
 
+fn is_mime_type_hint(value: &str) -> bool {
+    let Some((mime_type, subtype)) = value.split_once('/') else {
+        return false;
+    };
+    !subtype.is_empty()
+        && matches!(
+            mime_type,
+            "application"
+                | "audio"
+                | "font"
+                | "image"
+                | "message"
+                | "model"
+                | "multipart"
+                | "text"
+                | "video"
+        )
+}
+
 #[cfg(test)]
 mod tests {
     use super::build_image_data_url;
@@ -200,6 +230,14 @@ mod tests {
     fn creates_data_url_for_image_preview() {
         assert_eq!(
             build_image_data_url("images/2026/05/a.png", &[1, 2, 3]),
+            Some("data:image/png;base64,AQID".to_string())
+        );
+    }
+
+    #[test]
+    fn creates_data_url_from_image_content_type() {
+        assert_eq!(
+            build_image_data_url("image/png", &[1, 2, 3]),
             Some("data:image/png;base64,AQID".to_string())
         );
     }

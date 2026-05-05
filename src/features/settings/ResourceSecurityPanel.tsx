@@ -1,6 +1,6 @@
 import type { FormEvent } from "react";
 import { useState } from "react";
-import { KeyRound, RotateCcw, ShieldCheck } from "lucide-react";
+import { KeyRound, Loader2, RotateCcw, ShieldCheck } from "lucide-react";
 
 import type { ResourceKeyStatus } from "../../app/appState";
 
@@ -8,12 +8,14 @@ interface ResourceSecurityPanelProps {
   keyStatus: ResourceKeyStatus;
   busy: boolean;
   onSetKey: (secret: string, reset: boolean) => Promise<void>;
+  onVerifyKey: () => Promise<ResourceKeyStatus>;
 }
 
 export function ResourceSecurityPanel({
   keyStatus,
   busy,
   onSetKey,
+  onVerifyKey,
 }: ResourceSecurityPanelProps) {
   const [secret, setSecret] = useState("");
   const [panelError, setPanelError] = useState<string | null>(null);
@@ -27,6 +29,17 @@ export function ResourceSecurityPanel({
       await onSetKey(secret, reset);
       setSecret("");
       setPanelMessage(reset ? "资源密钥已重置，新上传资源将使用新密钥" : "资源密钥已设置");
+    } catch (error) {
+      setPanelError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const verifyKey = async () => {
+    setPanelError(null);
+    setPanelMessage(null);
+    try {
+      const status = await onVerifyKey();
+      setPanelMessage(status.configured ? "本地资源密钥读取成功" : "本机仍缺少资源密钥，请重新设置");
     } catch (error) {
       setPanelError(error instanceof Error ? error.message : String(error));
     }
@@ -51,6 +64,14 @@ export function ResourceSecurityPanel({
         {keyStatus.createdAt ? <p className="settings-card__muted">创建时间：{formatDate(keyStatus.createdAt)}</p> : null}
         {keyStatus.knownFingerprints.length > 0 ? (
           <p className="settings-card__muted">已知密钥版本：{keyStatus.knownFingerprints.join("、")}</p>
+        ) : null}
+        {(keyStatus.configured || keyStatus.needsKey) ? (
+          <div className="backup-inline-actions">
+            <button type="button" className="secondary-button" disabled={busy} onClick={verifyKey}>
+              {busy ? <Loader2 size={15} className="spin-icon" /> : <KeyRound size={15} />}
+              重新读取密钥
+            </button>
+          </div>
         ) : null}
         <form className="backup-key-form" onSubmit={(event) => submitKey(event, keyStatus.configured)}>
           <label>

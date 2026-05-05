@@ -29,6 +29,7 @@ const downloadResourceFile = vi.fn<(input: { url: string; filename: string; reso
 const getBackupKeyStatus = vi.fn(async () => ({ configured: false, needsKey: false }));
 const getResourceKeyStatus = vi.fn(async () => ({ configured: false, needsKey: false, knownFingerprints: [] }));
 const verifyBackupKeyStatus = vi.fn(async () => ({ configured: false, needsKey: false }));
+const verifyResourceKeyStatus = vi.fn(async () => ({ configured: false, needsKey: false, knownFingerprints: [] }));
 const getRecentWorkspace = vi.fn<() => Promise<WorkspacePayload | null>>(async () => null);
 const listBackups = vi.fn(async () => [] as Array<{
   id: string;
@@ -123,6 +124,7 @@ vi.mock("../lib/tauri", () => ({
   getBackupKeyStatus: () => getBackupKeyStatus(),
   getResourceKeyStatus: () => getResourceKeyStatus(),
   verifyBackupKeyStatus: () => verifyBackupKeyStatus(),
+  verifyResourceKeyStatus: () => verifyResourceKeyStatus(),
   getRecentWorkspace: () => getRecentWorkspace(),
   listBackups: () => listBackups(),
   moveWorkspaceItem: (input: MoveWorkspaceItemInput) => moveWorkspaceItem(input),
@@ -178,6 +180,8 @@ beforeEach(() => {
   getResourceKeyStatus.mockResolvedValue({ configured: false, needsKey: false, knownFingerprints: [] });
   verifyBackupKeyStatus.mockReset();
   verifyBackupKeyStatus.mockResolvedValue({ configured: false, needsKey: false });
+  verifyResourceKeyStatus.mockReset();
+  verifyResourceKeyStatus.mockResolvedValue({ configured: false, needsKey: false, knownFingerprints: [] });
   getRecentWorkspace.mockResolvedValue(null);
   listBackups.mockReset();
   listBackups.mockResolvedValue([]);

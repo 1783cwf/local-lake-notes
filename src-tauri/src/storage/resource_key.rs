@@ -49,7 +49,7 @@ impl ResourceKeyStore for SystemResourceKeyStore {
     fn get_secret(&self, fingerprint: &str) -> AppResult<Option<String>> {
         match self.entry(fingerprint)?.get_password() {
             Ok(secret) => Ok(Some(secret)),
-            Err(KeyringError::NoEntry) => Ok(None),
+            Err(error) if is_missing_keyring_entry(&error) => Ok(None),
             Err(error) => Err(AppError::Backup(format!("读取本地资源密钥失败：{error}"))),
         }
     }
@@ -174,6 +174,13 @@ fn load_metadata(app: &AppHandle) -> AppResult<Option<ResourceKeyMetadata>> {
         .map(|content| serde_json::from_str(&content))
         .transpose()
         .map_err(Into::into)
+}
+
+fn is_missing_keyring_entry(error: &KeyringError) -> bool {
+    // macOS 钥匙串后端在条目缺失或授权记录异常时，可能返回底层 UNIX no such file。
+    // 这里按“本机缺少该密钥”处理，让用户可以在设置页重新读取或重新设置密钥。
+    matches!(error, KeyringError::NoEntry)
+        || error.to_string().contains("No such file or directory")
 }
 
 #[cfg(test)]
