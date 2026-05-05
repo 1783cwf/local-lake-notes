@@ -13,6 +13,9 @@ use commands::documents::{
     rename_lake_document, write_export_bytes, write_export_file, write_lake_document,
 };
 use commands::external::{download_external_file, open_external_url};
+use commands::resource_key::{
+    get_resource_key_status, reset_resource_key, set_resource_key, verify_resource_key_status,
+};
 use commands::resources::{
     create_temporary_resource_url, download_resource, prepare_resource_preview, read_resource_bytes,
 };
@@ -65,6 +68,10 @@ pub fn run() {
             open_external_url,
             upload_file,
             upload_image,
+            get_resource_key_status,
+            verify_resource_key_status,
+            set_resource_key,
+            reset_resource_key,
             get_backup_key_status,
             verify_backup_key_status,
             set_backup_key,

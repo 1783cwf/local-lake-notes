@@ -26,6 +26,38 @@ test("创建并解析私有资源引用", () => {
   });
 });
 
+test("创建并解析加密资源引用", () => {
+  const ref = createResourceReference({
+    bucket: "yuque",
+    key: "images/2026/05/a.png",
+    kind: "image",
+    name: "截图.png",
+    size: 1234,
+    mimeType: "image/png",
+    encryption: {
+      algorithm: "age-v1",
+      keyFingerprint: "abc123",
+    },
+  });
+
+  expect(parseResourceReference(ref)).toEqual({
+    bucket: "yuque",
+    key: "images/2026/05/a.png",
+    kind: "image",
+    name: "截图.png",
+    size: 1234,
+    mimeType: "image/png",
+    encryption: {
+      algorithm: "age-v1",
+      keyFingerprint: "abc123",
+    },
+  });
+});
+
+test("加密资源引用缺少 fingerprint 时解析失败", () => {
+  expect(parseResourceReference("yuque-resource://yuque/images/a.png?kind=image&enc=age-v1")).toBeNull();
+});
+
 test("图片资源在 hydrate 与 dehydrate 之间保持可逆", async () => {
   const ref = createResourceReference({
     bucket: "yuque",

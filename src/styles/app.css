@@ -656,6 +656,13 @@ button {
   border-color: var(--green);
 }
 
+.export-menu__hint {
+  margin: -2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .export-menu__content button {
   height: 32px;
   padding: 0 10px;
@@ -981,6 +988,15 @@ button {
 
 .settings-card__muted {
   color: var(--muted);
+}
+
+.settings-card code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: #edf1f3;
+  color: #25292d;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
 }
 
 .backup-settings {

@@ -1,10 +1,11 @@
 import type { FormEvent, MouseEvent } from "react";
 import { useEffect, useState } from "react";
-import { Check, CloudUpload, DatabaseBackup, X } from "lucide-react";
+import { Check, CloudUpload, DatabaseBackup, ShieldCheck, X } from "lucide-react";
 
-import type { BackupKeyStatus, BackupRecord, OssSettings, RestoreBackupOutput } from "../../app/appState";
+import type { BackupKeyStatus, BackupRecord, OssSettings, RestoreBackupOutput, ResourceKeyStatus } from "../../app/appState";
 import { BackupSettingsPanel } from "./BackupSettingsPanel";
 import { mergeOssSettings, validateOssSettings } from "./ossSettingsStore";
+import { ResourceSecurityPanel } from "./ResourceSecurityPanel";
 
 interface OssSettingsPanelProps {
   open: boolean;
@@ -12,10 +13,13 @@ interface OssSettingsPanelProps {
   onClose: () => void;
   onSave: (settings: OssSettings) => Promise<void>;
   backupKeyStatus: BackupKeyStatus;
+  resourceKeyStatus: ResourceKeyStatus;
   backupRecords: BackupRecord[];
   backupBusy: boolean;
+  resourceKeyBusy: boolean;
   activeBackupOperation: string | null;
   onSetBackupKey: (secret: string, reset: boolean) => Promise<void>;
+  onSetResourceKey: (secret: string, reset: boolean) => Promise<void>;
   onCreateBackup: (forceFull: boolean) => Promise<void>;
   onRestoreBackup: (backupId: string, allowKeyMismatch: boolean) => Promise<RestoreBackupOutput>;
   onDeleteBackup: (backupId: string) => Promise<void>;
@@ -27,10 +31,13 @@ export function OssSettingsPanel({
   onClose,
   onSave,
   backupKeyStatus,
+  resourceKeyStatus,
   backupRecords,
   backupBusy,
+  resourceKeyBusy,
   activeBackupOperation,
   onSetBackupKey,
+  onSetResourceKey,
   onCreateBackup,
   onRestoreBackup,
   onDeleteBackup,
@@ -38,7 +45,7 @@ export function OssSettingsPanel({
   const [draft, setDraft] = useState(() => mergeOssSettings(settings));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<"upload" | "backup">("upload");
+  const [activeTab, setActiveTab] = useState<"upload" | "security" | "backup">("upload");
 
   useEffect(() => {
     if (open) {
@@ -111,6 +118,14 @@ export function OssSettingsPanel({
             >
               <DatabaseBackup size={16} />
               备份恢复
+            </button>
+            <button
+              type="button"
+              className={`settings-menu__item${activeTab === "security" ? " is-active" : ""}`}
+              onClick={() => setActiveTab("security")}
+            >
+              <ShieldCheck size={16} />
+              资源加密
             </button>
           </nav>
 
@@ -213,7 +228,7 @@ export function OssSettingsPanel({
                 保存
               </button>
             </div>
-          </form> : (
+          </form> : activeTab === "backup" ? (
             <BackupSettingsPanel
               keyStatus={backupKeyStatus}
               backups={backupRecords}
@@ -223,6 +238,12 @@ export function OssSettingsPanel({
               onCreateBackup={onCreateBackup}
               onRestoreBackup={onRestoreBackup}
               onDeleteBackup={onDeleteBackup}
+            />
+          ) : (
+            <ResourceSecurityPanel
+              keyStatus={resourceKeyStatus}
+              busy={resourceKeyBusy}
+              onSetKey={onSetResourceKey}
             />
           )}
         </div>

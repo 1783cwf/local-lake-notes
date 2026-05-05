@@ -47,6 +47,7 @@ import {
   getOssSettings,
   getRecentWorkspace,
   getBackupKeyStatus,
+  getResourceKeyStatus,
   listBackups,
   moveWorkspaceItem,
   readLakeDocument,
@@ -58,8 +59,10 @@ import {
   savePdfExport,
   saveTextExport,
   resetBackupKey,
+  resetResourceKey,
   restoreBackup,
   setBackupKey,
+  setResourceKey,
   setWorkspaceRoot,
   uploadFile,
   uploadImage,
@@ -72,6 +75,7 @@ import type {
   BackupRecord,
   FileDownloadInput,
   OssSettings,
+  ResourceKeyStatus,
   RestoreBackupOutput,
   SaveStatus,
   UploadImageInput,
@@ -96,8 +100,14 @@ export function AppController() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [ossSettings, setOssSettings] = useState<OssSettings | null>(null);
   const [backupKeyStatus, setBackupKeyStatus] = useState<BackupKeyStatus>({ configured: false, needsKey: false });
+  const [resourceKeyStatus, setResourceKeyStatus] = useState<ResourceKeyStatus>({
+    configured: false,
+    needsKey: false,
+    knownFingerprints: [],
+  });
   const [backupRecords, setBackupRecords] = useState<BackupRecord[]>([]);
   const [backupBusy, setBackupBusy] = useState(false);
+  const [resourceKeyBusy, setResourceKeyBusy] = useState(false);
   const [activeBackupOperation, setActiveBackupOperation] = useState<string | null>(null);
   const [appError, setAppError] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(296);
@@ -123,14 +133,16 @@ export function AppController() {
 
   const boot = async () => {
     try {
-      const [recentWorkspace, settings, keyStatus] = await Promise.all([
+      const [recentWorkspace, settings, keyStatus, resourceStatus] = await Promise.all([
         getRecentWorkspace(),
         getOssSettings(),
         getBackupKeyStatus(),
+        getResourceKeyStatus(),
       ]);
       setWorkspace(recentWorkspace);
       setOssSettings(settings);
       setBackupKeyStatus(keyStatus);
+      setResourceKeyStatus(resourceStatus);
       await refreshBackupRecords();
     } catch (error) {
       setAppError(toMessage(error));
@@ -494,6 +506,15 @@ export function AppController() {
     }
   }, []);
 
+  const updateResourceKey = useCallback(async (secret: string, reset: boolean) => {
+    setResourceKeyBusy(true);
+    try {
+      setResourceKeyStatus(reset ? await resetResourceKey(secret) : await setResourceKey(secret));
+    } finally {
+      setResourceKeyBusy(false);
+    }
+  }, []);
+
   const runBackup = useCallback(async (forceFull: boolean) => {
     setBackupBusy(true);
     setActiveBackupOperation(forceFull ? "create-full" : "create-incremental");
@@ -544,16 +565,24 @@ export function AppController() {
       setSettingsOpen(true);
       throw new Error("请先配置 OSS 上传信息");
     }
+    if (!resourceKeyStatus.configured) {
+      setSettingsOpen(true);
+      throw new Error(resourceKeyStatus.needsKey ? "本机缺少资源加密密钥" : "请先设置资源加密密钥");
+    }
     return uploadImage(input);
-  }, [ossSettings]);
+  }, [ossSettings, resourceKeyStatus.configured, resourceKeyStatus.needsKey]);
 
   const uploadEditorFile = useCallback(async (input: UploadImageInput): Promise<UploadImageOutput> => {
     if (!ossSettings) {
       setSettingsOpen(true);
       throw new Error("请先配置 OSS 上传信息");
     }
+    if (!resourceKeyStatus.configured) {
+      setSettingsOpen(true);
+      throw new Error(resourceKeyStatus.needsKey ? "本机缺少资源加密密钥" : "请先设置资源加密密钥");
+    }
     return uploadFile(input);
-  }, [ossSettings]);
+  }, [ossSettings, resourceKeyStatus.configured, resourceKeyStatus.needsKey]);
 
   const downloadEditorFile = useCallback(async (input: FileDownloadInput) => {
     try {
@@ -712,10 +741,13 @@ export function AppController() {
         onClose={() => setSettingsOpen(false)}
         onSave={saveSettings}
         backupKeyStatus={backupKeyStatus}
+        resourceKeyStatus={resourceKeyStatus}
         backupRecords={backupRecords}
         backupBusy={backupBusy}
+        resourceKeyBusy={resourceKeyBusy}
         activeBackupOperation={activeBackupOperation}
         onSetBackupKey={updateBackupKey}
+        onSetResourceKey={updateResourceKey}
         onCreateBackup={runBackup}
         onRestoreBackup={runRestore}
         onDeleteBackup={runDeleteBackup}

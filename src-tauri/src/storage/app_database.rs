@@ -14,6 +14,7 @@ const DATABASE_FILE: &str = "yuque-lake-notes.sqlite3";
 const RECENT_WORKSPACE_KEY: &str = "recent_workspace";
 const OSS_SETTINGS_KEY: &str = "oss_settings";
 const BACKUP_KEY_METADATA_KEY: &str = "backup_key_metadata";
+const RESOURCE_KEY_METADATA_KEY: &str = "resource_key_metadata";
 const BACKUP_DEVICE_ID_KEY: &str = "backup_device_id";
 const BACKUP_LAST_MANIFEST_KEY: &str = "backup_last_manifest";
 const LEGACY_WORKSPACE_META_DIR: &str = ".yuque-lake-notes";
@@ -162,6 +163,14 @@ pub fn load_backup_key_metadata(app: &AppHandle) -> AppResult<Option<String>> {
 
 pub fn save_backup_key_metadata(app: &AppHandle, metadata: &str) -> AppResult<()> {
     set_setting_at(&database_path(app)?, BACKUP_KEY_METADATA_KEY, metadata)
+}
+
+pub fn load_resource_key_metadata(app: &AppHandle) -> AppResult<Option<String>> {
+    get_setting_at(&database_path(app)?, RESOURCE_KEY_METADATA_KEY)
+}
+
+pub fn save_resource_key_metadata(app: &AppHandle, metadata: &str) -> AppResult<()> {
+    set_setting_at(&database_path(app)?, RESOURCE_KEY_METADATA_KEY, metadata)
 }
 
 pub fn load_backup_device_id(app: &AppHandle) -> AppResult<Option<String>> {

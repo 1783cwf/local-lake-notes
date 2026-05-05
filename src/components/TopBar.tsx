@@ -143,15 +143,20 @@ export function TopBar({
                   短时签名链接
                 </label>
                 {resourceStrategy === "signed-url" ? (
-                  <select
-                    aria-label="签名链接有效期"
-                    value={ttlSeconds}
-                    onChange={(event) => setTtlSeconds(Number(event.target.value))}
-                  >
-                    {ttlOptions.map((seconds) => (
-                      <option key={seconds} value={seconds}>{formatTtlLabel(seconds)}</option>
-                    ))}
-                  </select>
+                  <>
+                    <select
+                      aria-label="签名链接有效期"
+                      value={ttlSeconds}
+                      onChange={(event) => setTtlSeconds(Number(event.target.value))}
+                    >
+                      {ttlOptions.map((seconds) => (
+                        <option key={seconds} value={seconds}>{formatTtlLabel(seconds)}</option>
+                      ))}
+                    </select>
+                    <p className="export-menu__hint">
+                      加密资源会上传临时明文副本后再生成限时链接。
+                    </p>
+                  </>
                 ) : null}
               </div>
               <button type="button" role="menuitem" onClick={() => exportDocument("markdown")}>

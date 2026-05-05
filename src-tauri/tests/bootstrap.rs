@@ -18,6 +18,8 @@ fn tauri_asset_protocol_allows_resource_cache_only() {
         asset_protocol["scope"]
             .as_array()
             .expect("asset protocol scope should be an array"),
-        &[serde_json::Value::String("$APPCACHE/resource-cache/**".to_string())]
+        &[serde_json::Value::String(
+            "$APPCACHE/resource-cache/**".to_string()
+        )]
     );
 }

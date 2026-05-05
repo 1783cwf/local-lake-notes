@@ -59,6 +59,14 @@ export interface BackupKeyStatus {
   createdAt?: string;
 }
 
+export interface ResourceKeyStatus {
+  configured: boolean;
+  needsKey: boolean;
+  fingerprint?: string;
+  createdAt?: string;
+  knownFingerprints: string[];
+}
+
 export type BackupRecordType = "full" | "incremental";
 
 export interface BackupRecord {

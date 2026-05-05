@@ -159,6 +159,17 @@ pub struct BackupKeyStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct ResourceKeyStatus {
+    pub configured: bool,
+    pub needs_key: bool,
+    pub fingerprint: Option<String>,
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub known_fingerprints: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct SetBackupKeyInput {
     pub secret: String,
 }
@@ -166,6 +177,19 @@ pub struct SetBackupKeyInput {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ResetBackupKeyInput {
+    pub secret: String,
+    pub confirm_reset: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SetResourceKeyInput {
+    pub secret: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetResourceKeyInput {
     pub secret: String,
     pub confirm_reset: bool,
 }

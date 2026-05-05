@@ -27,6 +27,7 @@ const deleteLakeDocument = vi.fn<(path: string) => Promise<WorkspacePayload>>();
 const createTemporaryResourceUrl = vi.fn<(resourceRef: string, ttlSeconds: number, filename?: string) => Promise<string>>();
 const downloadResourceFile = vi.fn<(input: { url: string; filename: string; resourceRef?: string }) => Promise<string | null>>();
 const getBackupKeyStatus = vi.fn(async () => ({ configured: false, needsKey: false }));
+const getResourceKeyStatus = vi.fn(async () => ({ configured: false, needsKey: false, knownFingerprints: [] }));
 const verifyBackupKeyStatus = vi.fn(async () => ({ configured: false, needsKey: false }));
 const getRecentWorkspace = vi.fn<() => Promise<WorkspacePayload | null>>(async () => null);
 const listBackups = vi.fn(async () => [] as Array<{
@@ -120,6 +121,7 @@ vi.mock("../lib/tauri", () => ({
   downloadResourceFile: (input: { url: string; filename: string; resourceRef?: string }) => downloadResourceFile(input),
   getOssSettings: vi.fn(async () => null),
   getBackupKeyStatus: () => getBackupKeyStatus(),
+  getResourceKeyStatus: () => getResourceKeyStatus(),
   verifyBackupKeyStatus: () => verifyBackupKeyStatus(),
   getRecentWorkspace: () => getRecentWorkspace(),
   listBackups: () => listBackups(),
@@ -135,10 +137,12 @@ vi.mock("../lib/tauri", () => ({
   savePdfExport: (defaultPath: string, html: string, filters: Array<{ name: string; extensions: string[] }>) => savePdfExport(defaultPath, html, filters),
   saveTextExport: (defaultPath: string, content: string, filters: Array<{ name: string; extensions: string[] }>) => saveTextExport(defaultPath, content, filters),
   resetBackupKey: vi.fn(async () => ({ configured: true, needsKey: false, fingerprint: "fingerprint" })),
+  resetResourceKey: vi.fn(async () => ({ configured: true, needsKey: false, fingerprint: "resource-fingerprint", knownFingerprints: ["resource-fingerprint"] })),
   restoreBackup: (input: { backupId: string; allowKeyMismatch?: boolean }) => restoreBackup(input),
   readResourceBytes: vi.fn(async () => new Uint8Array([1, 2, 3])),
   saveWorkspaceOrder: vi.fn(),
   setBackupKey: vi.fn(async () => ({ configured: true, needsKey: false, fingerprint: "fingerprint" })),
+  setResourceKey: vi.fn(async () => ({ configured: true, needsKey: false, fingerprint: "resource-fingerprint", knownFingerprints: ["resource-fingerprint"] })),
   setWorkspaceRoot: (path: string) => setWorkspaceRoot(path),
   uploadFile: vi.fn(),
   uploadImage: vi.fn(),
@@ -170,6 +174,8 @@ beforeEach(() => {
   downloadResourceFile.mockResolvedValue("/tmp/attachment.pdf");
   getBackupKeyStatus.mockReset();
   getBackupKeyStatus.mockResolvedValue({ configured: false, needsKey: false });
+  getResourceKeyStatus.mockReset();
+  getResourceKeyStatus.mockResolvedValue({ configured: false, needsKey: false, knownFingerprints: [] });
   verifyBackupKeyStatus.mockReset();
   verifyBackupKeyStatus.mockResolvedValue({ configured: false, needsKey: false });
   getRecentWorkspace.mockResolvedValue(null);

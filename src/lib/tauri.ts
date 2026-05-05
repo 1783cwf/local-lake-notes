@@ -12,6 +12,7 @@ import type {
   OssSettings,
   RestoreBackupInput,
   RestoreBackupOutput,
+  ResourceKeyStatus,
   UploadImageInput,
   UploadImageOutput,
 } from "../app/appState";
@@ -25,6 +26,7 @@ import type {
 const browserWorkspaceKey = "yuque-lake-notes.browser-workspace";
 const browserSettingsKey = "yuque-lake-notes.browser-oss-settings";
 const browserBackupKeyStatusKey = "yuque-lake-notes.browser-backup-key-status";
+const browserResourceKeyStatusKey = "yuque-lake-notes.browser-resource-key-status";
 const browserBackupsKey = "yuque-lake-notes.browser-backups";
 
 function isTauriRuntime(): boolean {
@@ -467,6 +469,47 @@ export async function resetBackupKey(secret: string): Promise<BackupKeyStatus> {
   return invoke<BackupKeyStatus>("reset_backup_key", { input: { secret, confirmReset: true } });
 }
 
+export async function getResourceKeyStatus(): Promise<ResourceKeyStatus> {
+  if (!isTauriRuntime()) {
+    return readBrowserResourceKeyStatus();
+  }
+
+  return invoke<ResourceKeyStatus>("get_resource_key_status");
+}
+
+export async function verifyResourceKeyStatus(): Promise<ResourceKeyStatus> {
+  if (!isTauriRuntime()) {
+    return readBrowserResourceKeyStatus();
+  }
+
+  return invoke<ResourceKeyStatus>("verify_resource_key_status");
+}
+
+export async function setResourceKey(secret: string): Promise<ResourceKeyStatus> {
+  if (!isTauriRuntime()) {
+    const fingerprint = browserFingerprint(secret);
+    const status: ResourceKeyStatus = {
+      configured: true,
+      needsKey: false,
+      fingerprint,
+      createdAt: new Date().toISOString(),
+      knownFingerprints: [fingerprint],
+    };
+    window.localStorage.setItem(browserResourceKeyStatusKey, JSON.stringify(status));
+    return status;
+  }
+
+  return invoke<ResourceKeyStatus>("set_resource_key", { input: { secret } });
+}
+
+export async function resetResourceKey(secret: string): Promise<ResourceKeyStatus> {
+  if (!isTauriRuntime()) {
+    return setResourceKey(secret);
+  }
+
+  return invoke<ResourceKeyStatus>("reset_resource_key", { input: { secret, confirmReset: true } });
+}
+
 export async function listBackups(): Promise<BackupRecord[]> {
   if (!isTauriRuntime()) {
     return readBrowserBackups();
@@ -672,6 +715,13 @@ function readBrowserBackupKeyStatus(): BackupKeyStatus {
   return stored
     ? JSON.parse(stored) as BackupKeyStatus
     : { configured: false, needsKey: false };
+}
+
+function readBrowserResourceKeyStatus(): ResourceKeyStatus {
+  const stored = window.localStorage.getItem(browserResourceKeyStatusKey);
+  return stored
+    ? JSON.parse(stored) as ResourceKeyStatus
+    : { configured: false, needsKey: false, knownFingerprints: [] };
 }
 
 function readBrowserBackups(): BackupRecord[] {

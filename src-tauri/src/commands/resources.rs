@@ -3,6 +3,7 @@ use std::path::Path;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use tauri::{AppHandle, Manager};
+use uuid::Uuid;
 
 use crate::commands::settings::{load_oss_settings, validate_oss_settings};
 use crate::error::{AppError, AppResult};
@@ -10,8 +11,11 @@ use crate::models::{
     ResourceDownloadInput, ResourcePreviewInput, ResourcePreviewOutput, SignedResourceUrlInput,
     SignedResourceUrlOutput,
 };
+use crate::storage::resource_crypto::decrypt_resource_bytes;
+use crate::storage::resource_key::current_resource_secret;
 use crate::storage::s3::{
-    get_object_bytes, parse_resource_ref, presign_get_object_url, validate_resource_key,
+    build_temporary_export_object_key, get_object_bytes, parse_resource_ref_detail,
+    presign_get_object_url, put_object, validate_resource_key,
 };
 
 #[tauri::command]
@@ -20,10 +24,10 @@ pub async fn prepare_resource_preview(
     input: ResourcePreviewInput,
 ) -> AppResult<ResourcePreviewOutput> {
     let settings = load_valid_settings(&app)?;
-    let (bucket, key) = parse_resource_ref(&input.resource_ref)?;
-    validate_resource_key(&settings, &bucket, &key)?;
-    let bytes = get_object_bytes(&settings, &key).await?;
-    let local_path = resource_cache_path(&app, &key)?;
+    let resource = parse_resource_ref_detail(&input.resource_ref)?;
+    validate_resource_key(&settings, &resource.bucket, &resource.key)?;
+    let bytes = read_resource_plain_bytes(&app, &settings, &resource).await?;
+    let local_path = resource_cache_path(&app, &resource.key)?;
     if let Some(parent) = local_path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -33,16 +37,22 @@ pub async fn prepare_resource_preview(
         resource_ref: input.resource_ref,
         preview_url,
         local_path: local_path.to_string_lossy().to_string(),
-        data_url: build_image_data_url(&key, &bytes),
+        data_url: build_image_data_url(
+            resource
+                .content_type
+                .as_deref()
+                .unwrap_or(resource.key.as_str()),
+            &bytes,
+        ),
     })
 }
 
 #[tauri::command]
 pub async fn download_resource(app: AppHandle, input: ResourceDownloadInput) -> AppResult<()> {
     let settings = load_valid_settings(&app)?;
-    let (bucket, key) = parse_resource_ref(&input.resource_ref)?;
-    validate_resource_key(&settings, &bucket, &key)?;
-    let bytes = get_object_bytes(&settings, &key).await?;
+    let resource = parse_resource_ref_detail(&input.resource_ref)?;
+    validate_resource_key(&settings, &resource.bucket, &resource.key)?;
+    let bytes = read_resource_plain_bytes(&app, &settings, &resource).await?;
     let path = Path::new(&input.path);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -57,9 +67,9 @@ pub async fn read_resource_bytes(
     input: ResourcePreviewInput,
 ) -> AppResult<Vec<u8>> {
     let settings = load_valid_settings(&app)?;
-    let (bucket, key) = parse_resource_ref(&input.resource_ref)?;
-    validate_resource_key(&settings, &bucket, &key)?;
-    get_object_bytes(&settings, &key).await
+    let resource = parse_resource_ref_detail(&input.resource_ref)?;
+    validate_resource_key(&settings, &resource.bucket, &resource.key)?;
+    read_resource_plain_bytes(&app, &settings, &resource).await
 }
 
 #[tauri::command]
@@ -79,15 +89,31 @@ pub async fn create_temporary_resource_url(
             settings.max_signed_url_ttl_seconds
         )));
     }
-    let (bucket, key) = parse_resource_ref(&input.resource_ref)?;
-    validate_resource_key(&settings, &bucket, &key)?;
-    let url = presign_get_object_url(
-        &settings,
-        &key,
-        input.ttl_seconds,
-        input.filename.as_deref(),
-    )
-    .await?;
+    let resource = parse_resource_ref_detail(&input.resource_ref)?;
+    validate_resource_key(&settings, &resource.bucket, &resource.key)?;
+    let filename = input
+        .filename
+        .as_deref()
+        .or(resource.name.as_deref())
+        .unwrap_or("resource");
+    let key = if resource.encryption.is_some() {
+        let bytes = read_resource_plain_bytes(&app, &settings, &resource).await?;
+        let export_id = Uuid::new_v4().to_string();
+        let temporary_key = build_temporary_export_object_key(&export_id, &resource.kind, filename);
+        let guessed_content_type = mime_guess::from_path(filename)
+            .first_or_octet_stream()
+            .essence_str()
+            .to_string();
+        let content_type = resource
+            .content_type
+            .as_deref()
+            .unwrap_or(guessed_content_type.as_str());
+        put_object(&settings, &temporary_key, bytes, content_type).await?;
+        temporary_key
+    } else {
+        resource.key.clone()
+    };
+    let url = presign_get_object_url(&settings, &key, input.ttl_seconds, Some(filename)).await?;
     Ok(SignedResourceUrlOutput {
         url,
         expires_in_seconds: input.ttl_seconds,
@@ -99,6 +125,19 @@ fn load_valid_settings(app: &AppHandle) -> AppResult<crate::models::OssSettings>
         .ok_or_else(|| AppError::InvalidOssSettings("请先配置 OSS 上传信息".to_string()))?;
     validate_oss_settings(&settings)?;
     Ok(settings)
+}
+
+async fn read_resource_plain_bytes(
+    app: &AppHandle,
+    settings: &crate::models::OssSettings,
+    resource: &crate::storage::s3::ResourceRef,
+) -> AppResult<Vec<u8>> {
+    let bytes = get_object_bytes(settings, &resource.key).await?;
+    let Some(encryption) = resource.encryption.as_ref() else {
+        return Ok(bytes);
+    };
+    let secret = current_resource_secret(app, Some(&encryption.key_fingerprint))?;
+    decrypt_resource_bytes(&bytes, &secret)
 }
 
 fn resource_cache_path(app: &AppHandle, key: &str) -> AppResult<std::path::PathBuf> {
@@ -167,6 +206,9 @@ mod tests {
 
     #[test]
     fn skips_non_image_preview_data_url() {
-        assert_eq!(build_image_data_url("files/2026/05/a.pdf", &[1, 2, 3]), None);
+        assert_eq!(
+            build_image_data_url("files/2026/05/a.pdf", &[1, 2, 3]),
+            None
+        );
     }
 }

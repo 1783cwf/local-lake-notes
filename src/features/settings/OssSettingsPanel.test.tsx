@@ -11,10 +11,13 @@ function renderPanel(overrides: Partial<Parameters<typeof OssSettingsPanel>[0]> 
       onClose={vi.fn()}
       onSave={vi.fn()}
       backupKeyStatus={{ configured: false, needsKey: false }}
+      resourceKeyStatus={{ configured: false, needsKey: false, knownFingerprints: [] }}
       backupRecords={[]}
       backupBusy={false}
+      resourceKeyBusy={false}
       activeBackupOperation={null}
       onSetBackupKey={vi.fn()}
+      onSetResourceKey={vi.fn()}
       onCreateBackup={vi.fn()}
       onRestoreBackup={vi.fn()}
       onDeleteBackup={vi.fn()}
@@ -65,6 +68,20 @@ test("可以切换到备份恢复并设置密钥", async () => {
 
   expect(onSetBackupKey).toHaveBeenCalledWith("test-secret-key", false);
   expect(onSave).not.toHaveBeenCalled();
+});
+
+test("可以切换到资源加密并设置资源密钥", async () => {
+  const user = userEvent.setup();
+  const onSetResourceKey = vi.fn().mockResolvedValue(undefined);
+
+  renderPanel({ onSetResourceKey });
+
+  await user.click(screen.getByRole("button", { name: "资源加密" }));
+  await user.type(screen.getByLabelText("资源加密密钥"), "resource-secret-key");
+  await user.click(screen.getByRole("button", { name: "设置资源密钥" }));
+
+  expect(onSetResourceKey).toHaveBeenCalledWith("resource-secret-key", false);
+  expect(screen.getAllByText("tmp/exports/").length).toBeGreaterThan(0);
 });
 
 test("删除备份前需要二次确认并提示依赖增量备份", async () => {
