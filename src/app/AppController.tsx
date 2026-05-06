@@ -6,6 +6,7 @@ import { AppRail } from "../components/AppRail";
 import { DocumentSidebar } from "../components/DocumentSidebar";
 import { TopBar } from "../components/TopBar";
 import { LakeEditor } from "../features/lake-editor/LakeEditor";
+import type { SpreadsheetEditorHandle } from "../features/spreadsheet/SpreadsheetEditor";
 import {
   createOfficialLakeMarkdownConverter,
   exportFileName,
@@ -34,6 +35,7 @@ import {
 } from "../features/workspace/workspaceStore";
 import {
   chooseWorkspaceDirectory,
+  chooseExcelImportFile,
   chooseDatabaseDirectory,
   createLakeDirectory,
   createLakeDocument,
@@ -106,7 +108,7 @@ interface TextDialogState {
 }
 
 interface AppOperationState {
-  kind: "document-export" | "workspace-export" | "image-upload" | "file-upload";
+  kind: "document-export" | "workspace-export" | "image-upload" | "file-upload" | "spreadsheet-excel";
   label: string;
   count?: number;
 }
@@ -137,6 +139,7 @@ export function AppController() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [textDialog, setTextDialog] = useState<TextDialogState | null>(null);
   const saveCurrentEditorNowRef = useRef<(() => Promise<void>) | null>(null);
+  const spreadsheetEditorRef = useRef<SpreadsheetEditorHandle | null>(null);
 
   useEffect(() => {
     void boot();
@@ -489,6 +492,60 @@ export function AppController() {
     }));
   }, [createResourceExportOptions, currentDocument]);
 
+  const importSpreadsheetExcel = useCallback(async () => {
+    if (!currentDocument || currentDocument.kind !== "spreadsheet") {
+      return;
+    }
+
+    try {
+      const selected = await chooseExcelImportFile();
+      if (!selected) {
+        return;
+      }
+      setActiveAppOperation({ kind: "spreadsheet-excel", label: "正在导入 Excel" });
+      const file = new File([new Uint8Array(selected.bytes)], selected.name, {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const content = await spreadsheetEditorRef.current?.importExcel(file);
+      if (!content) {
+        throw new Error("Excel 导入失败：表格编辑器尚未加载完成");
+      }
+      setCurrentDocument((current) => current?.kind === "spreadsheet" && current.entry.path === currentDocument.entry.path
+        ? { ...current, content }
+        : current);
+      setSaveStatus({ state: "saved", savedAt: new Date().toISOString() });
+      setAppError(null);
+    } catch (error) {
+      setAppError(toMessage(error));
+    } finally {
+      setActiveAppOperation(null);
+    }
+  }, [currentDocument]);
+
+  const exportSpreadsheetExcel = useCallback(async () => {
+    if (!currentDocument || currentDocument.kind !== "spreadsheet") {
+      return;
+    }
+
+    setActiveAppOperation({ kind: "spreadsheet-excel", label: "正在导出 Excel" });
+    try {
+      const file = await spreadsheetEditorRef.current?.exportExcel();
+      if (!file) {
+        throw new Error("Excel 导出失败：表格编辑器尚未加载完成");
+      }
+      await saveBinaryExport(
+        `${documentTitleFromPath(currentDocument.entry.path)}.xlsx`,
+        new Uint8Array(await file.arrayBuffer()),
+        [{ name: "Excel", extensions: ["xlsx"] }],
+      );
+      setAppError(null);
+    } catch (error) {
+      setAppError(toMessage(error));
+    } finally {
+      setActiveAppOperation(null);
+    }
+  }, [currentDocument]);
+
   const writeDocumentExport = useCallback(async (
     request: LakeDocumentExportRequest,
     content: string,
@@ -832,6 +889,9 @@ export function AppController() {
           onManualSave={() => setManualSaveRequest((current) => current + 1)}
           onExportDocument={exportDocument}
           exportBusy={activeAppOperation?.kind === "document-export"}
+          onImportSpreadsheetExcel={importSpreadsheetExcel}
+          onExportSpreadsheetExcel={exportSpreadsheetExcel}
+          spreadsheetExcelBusy={activeAppOperation?.kind === "spreadsheet-excel"}
           defaultExportResourceStrategy={ossSettings?.defaultExportResourceStrategy}
           defaultSignedUrlTtlSeconds={ossSettings?.defaultSignedUrlTtlSeconds}
           onRenameDocument={(title) => {
@@ -850,6 +910,7 @@ export function AppController() {
         {currentDocument?.kind === "spreadsheet" ? (
           <Suspense fallback={<SpreadsheetLoadingState />}>
             <SpreadsheetEditor
+              ref={spreadsheetEditorRef}
               document={currentDocument.entry}
               content={currentDocument.content}
               manualSaveRequest={manualSaveRequest}

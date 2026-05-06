@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useEffect } from "react";
+import { forwardRef, useEffect, useImperativeHandle, type Ref } from "react";
 
 import type {
   CreateDocumentPayload,
@@ -11,6 +11,7 @@ import { AppController } from "./AppController";
 
 const createLakeDocument = vi.fn<(title: string, parentPath?: string) => Promise<CreateDocumentPayload>>();
 const createSpreadsheetDocument = vi.fn<(title: string, parentPath?: string) => Promise<CreateDocumentPayload>>();
+const chooseExcelImportFile = vi.fn<() => Promise<{ path: string; name: string; bytes: Uint8Array } | null>>();
 const createBackup = vi.fn<(input: { forceFull: boolean }) => Promise<{
   record: {
     id: string;
@@ -124,7 +125,7 @@ vi.mock("../components/DocumentSidebar", () => ({
 }));
 
 vi.mock("../features/spreadsheet/SpreadsheetEditor", () => ({
-  SpreadsheetEditor: ({
+  SpreadsheetEditor: forwardRef(({
     document,
     content,
     manualSaveRequest,
@@ -138,10 +139,27 @@ vi.mock("../features/spreadsheet/SpreadsheetEditor", () => ({
     onSave: (relativePath: string, content: string) => Promise<void>;
     onSaveStatusChange: (status: { state: "clean" | "saved" }) => void;
     onRegisterSaveNow?: (saveNow: (() => Promise<void>) | null) => void;
-  }) => {
+  }, ref: Ref<{
+    importExcel: (file: File) => Promise<string>;
+    exportExcel: () => Promise<File>;
+  }>) => {
     useEffect(() => {
       onSaveStatusChange({ state: "clean" });
     }, [onSaveStatusChange]);
+    useImperativeHandle(ref, () => ({
+      importExcel: async (file: File) => {
+        const nextContent = `{"sheetOrder":["sheet-0001"],"sheets":{"sheet-0001":{"id":"sheet-0001","name":"${file.name}"}}}`;
+        if (document) {
+          await onSave(document.path, nextContent);
+        }
+        return nextContent;
+      },
+      exportExcel: async () => {
+        const buffer = new ArrayBuffer(3);
+        new Uint8Array(buffer).set([7, 8, 9]);
+        return new File([buffer], "budget.xlsx");
+      },
+    }), [document, onSave]);
     useEffect(() => {
       const saveNow = async () => {
         if (document) {
@@ -157,10 +175,11 @@ vi.mock("../features/spreadsheet/SpreadsheetEditor", () => ({
       }
     }, [content, document, manualSaveRequest, onSave]);
     return <div data-testid="spreadsheet-editor">表格编辑器 {document?.name}</div>;
-  },
+  }),
 }));
 
 vi.mock("../lib/tauri", () => ({
+  chooseExcelImportFile: () => chooseExcelImportFile(),
   chooseDatabaseDirectory: vi.fn(async () => "/tmp/selected-db"),
   chooseWorkspaceDirectory: vi.fn(async () => "/tmp/kb"),
   createLakeDirectory: vi.fn(),
@@ -216,6 +235,8 @@ vi.mock("../lib/tauri", () => ({
 }));
 
 beforeEach(() => {
+  chooseExcelImportFile.mockReset();
+  chooseExcelImportFile.mockResolvedValue(null);
   createSpreadsheetDocument.mockReset();
   createBackup.mockReset();
   createBackup.mockResolvedValue({
@@ -485,6 +506,57 @@ test("保存表格时写入当前 Univer 快照内容", async () => {
   await waitFor(() => {
     expect(writeSpreadsheetDocument).toHaveBeenCalledWith("budget.json", spreadsheetContent);
     expect(saveBinaryExport).not.toHaveBeenCalled();
+  });
+});
+
+test("表格文档可以导入 Excel 并写入当前表格快照", async () => {
+  const user = userEvent.setup();
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "budget.json", path: "budget.json", name: "budget", parentPath: "", size: 1, kind: "spreadsheet" }],
+    order: ["document:budget.json"],
+  });
+  chooseExcelImportFile.mockResolvedValue({
+    path: "/tmp/import.xlsx",
+    name: "import.xlsx",
+    bytes: new Uint8Array([1, 2, 3]),
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "budget" }));
+  await user.click(await screen.findByRole("button", { name: "Excel 导入导出" }));
+  await user.click(screen.getByRole("menuitem", { name: "导入 Excel" }));
+
+  await waitFor(() => {
+    expect(chooseExcelImportFile).toHaveBeenCalled();
+    expect(writeSpreadsheetDocument).toHaveBeenCalledWith("budget.json", expect.stringContaining("import.xlsx"));
+    expect(screen.queryByText("正在导入 Excel")).not.toBeInTheDocument();
+  });
+});
+
+test("表格文档可以导出当前快照为 Excel 文件", async () => {
+  const user = userEvent.setup();
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "budget.json", path: "budget.json", name: "budget", parentPath: "", size: 1, kind: "spreadsheet" }],
+    order: ["document:budget.json"],
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "budget" }));
+  await user.click(await screen.findByRole("button", { name: "Excel 导入导出" }));
+  await user.click(screen.getByRole("menuitem", { name: "导出 Excel" }));
+
+  await waitFor(() => {
+    expect(saveBinaryExport).toHaveBeenCalledWith(
+      "budget.xlsx",
+      new Uint8Array([7, 8, 9]),
+      [{ name: "Excel", extensions: ["xlsx"] }],
+    );
   });
 });
 

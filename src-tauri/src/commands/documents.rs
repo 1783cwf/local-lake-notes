@@ -167,6 +167,20 @@ pub fn read_spreadsheet_document(
 }
 
 #[tauri::command]
+pub fn read_external_excel_file(path: String) -> AppResult<Vec<u8>> {
+    let path = Path::new(&path);
+    if !path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("xlsx"))
+    {
+        return Err(AppError::InvalidExcelPath);
+    }
+
+    Ok(fs::read(path)?)
+}
+
+#[tauri::command]
 pub fn write_lake_document(
     relative_path: String,
     content: String,

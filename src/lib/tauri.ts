@@ -402,6 +402,42 @@ export async function writeSpreadsheetDocument(relativePath: string, content: st
   await invoke("write_spreadsheet_document", { relativePath, content });
 }
 
+export interface SelectedExcelFile {
+  path: string;
+  name: string;
+  bytes: Uint8Array;
+}
+
+export async function chooseExcelImportFile(): Promise<SelectedExcelFile | null> {
+  if (!isTauriRuntime()) {
+    const selected = await chooseBrowserFile([".xlsx"]);
+    if (!selected) {
+      return null;
+    }
+    return {
+      path: selected.name,
+      name: selected.name,
+      bytes: new Uint8Array(await selected.arrayBuffer()),
+    };
+  }
+
+  const selected = await open({
+    multiple: false,
+    title: "导入 Excel 表格",
+    filters: [{ name: "Excel", extensions: ["xlsx"] }],
+  });
+  if (typeof selected !== "string") {
+    return null;
+  }
+
+  const bytes = await invoke<number[]>("read_external_excel_file", { path: selected });
+  return {
+    path: selected,
+    name: pathBasename(selected),
+    bytes: new Uint8Array(bytes),
+  };
+}
+
 export async function saveTextExport(
   defaultPath: string,
   content: string,
@@ -917,6 +953,16 @@ function downloadBrowserFile(filename: string, blob: Blob): void {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function chooseBrowserFile(accept: string[]): Promise<File | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = accept.join(",");
+    input.onchange = () => resolve(input.files?.[0] ?? null);
+    input.click();
+  });
 }
 
 async function downloadBrowserRemoteFile(url: string, filename: string): Promise<void> {

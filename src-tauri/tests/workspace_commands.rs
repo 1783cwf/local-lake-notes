@@ -3,7 +3,8 @@ use std::fs;
 use tempfile::tempdir;
 use yuque_lake_notes_lib::commands::documents::{
     create_document, create_document_at, create_spreadsheet, create_spreadsheet_at,
-    resolve_existing_spreadsheet_path, resolve_writable_spreadsheet_path, safe_file_stem,
+    read_external_excel_file, resolve_existing_spreadsheet_path, resolve_writable_spreadsheet_path,
+    safe_file_stem,
 };
 use yuque_lake_notes_lib::commands::workspace::{
     list_directories, list_documents, move_workspace_item_on_disk, resolve_existing_directory_path,
@@ -112,6 +113,24 @@ fn rejects_path_traversal_and_non_snapshot_files() {
     assert!(resolve_writable_spreadsheet_path(dir.path(), "x.xlsx").is_err());
     assert!(resolve_writable_spreadsheet_path(dir.path(), "./x.json").is_err());
     assert!(resolve_existing_spreadsheet_path(dir.path(), "missing.json").is_err());
+}
+
+#[test]
+fn reads_only_external_xlsx_bytes_for_excel_import() {
+    let dir = tempdir().unwrap();
+    let excel_path = dir.path().join("budget.xlsx");
+    let json_path = dir.path().join("budget.json");
+    fs::write(&excel_path, [1_u8, 2, 3]).unwrap();
+    fs::write(&json_path, "{}").unwrap();
+
+    assert_eq!(
+        read_external_excel_file(excel_path.to_string_lossy().to_string()).unwrap(),
+        vec![1_u8, 2, 3]
+    );
+    assert!(matches!(
+        read_external_excel_file(json_path.to_string_lossy().to_string()),
+        Err(AppError::InvalidExcelPath)
+    ));
 }
 
 #[test]

@@ -13,9 +13,12 @@ interface TopBarProps {
   onManualSave: () => void;
   onRenameDocument?: (title: string) => void | Promise<void>;
   onExportDocument?: (format: DocumentExportFormat, resourceStrategy: ExportResourceStrategy, signedUrlTtlSeconds: number) => void;
+  onImportSpreadsheetExcel?: () => void;
+  onExportSpreadsheetExcel?: () => void;
   defaultExportResourceStrategy?: ExportResourceStrategy;
   defaultSignedUrlTtlSeconds?: number;
   exportBusy?: boolean;
+  spreadsheetExcelBusy?: boolean;
 }
 
 export function TopBar({
@@ -24,9 +27,12 @@ export function TopBar({
   onManualSave,
   onRenameDocument,
   onExportDocument,
+  onImportSpreadsheetExcel,
+  onExportSpreadsheetExcel,
   defaultExportResourceStrategy = "bundle",
   defaultSignedUrlTtlSeconds = 24 * 60 * 60,
   exportBusy = false,
+  spreadsheetExcelBusy = false,
 }: TopBarProps) {
   const title = document ? documentTitleFromPath(document.path) : "Lake 本地笔记";
   const [editingTitle, setEditingTitle] = useState(false);
@@ -104,7 +110,44 @@ export function TopBar({
         <IconButton label="保存" onClick={onManualSave} disabled={!document}>
           <Save size={18} />
         </IconButton>
-        {document?.kind !== "spreadsheet" ? (
+        {document?.kind === "spreadsheet" ? (
+          <div className="export-menu">
+            <button
+              type="button"
+              className="icon-button export-menu__trigger"
+              aria-label="Excel 导入导出"
+              aria-haspopup="menu"
+              aria-expanded={exportMenuOpen}
+              title={spreadsheetExcelBusy ? "正在处理 Excel" : "Excel 导入导出"}
+              disabled={!document || spreadsheetExcelBusy}
+              onClick={() => setExportMenuOpen((open) => !open)}
+              onBlur={(event) => {
+                if (!event.currentTarget.parentElement?.contains(event.relatedTarget as Node | null)) {
+                  setExportMenuOpen(false);
+                }
+              }}
+            >
+              {spreadsheetExcelBusy ? <Loader2 size={18} className="spin-icon" /> : <Download size={18} />}
+              <ChevronDown size={12} />
+            </button>
+            {exportMenuOpen ? (
+              <div className="export-menu__content" role="menu">
+                <button type="button" role="menuitem" onClick={() => {
+                  setExportMenuOpen(false);
+                  onImportSpreadsheetExcel?.();
+                }}>
+                  导入 Excel
+                </button>
+                <button type="button" role="menuitem" onClick={() => {
+                  setExportMenuOpen(false);
+                  onExportSpreadsheetExcel?.();
+                }}>
+                  导出 Excel
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ) : (
           <div className="export-menu">
             <button
               type="button"
@@ -174,7 +217,7 @@ export function TopBar({
               </div>
             ) : null}
           </div>
-        ) : null}
+        )}
         <IconButton label="分享" disabled>
           <Share2 size={18} />
         </IconButton>

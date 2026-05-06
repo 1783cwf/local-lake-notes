@@ -11,6 +11,8 @@ pub enum AppError {
     InvalidLakePath,
     #[error("只支持 Univer 表格快照 JSON")]
     InvalidSpreadsheetPath,
+    #[error("只支持 .xlsx Excel 文件")]
+    InvalidExcelPath,
     #[error("无效的文件名")]
     InvalidFilename,
     #[error("无效的拖拽目标：{0}")]

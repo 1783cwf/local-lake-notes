@@ -57,7 +57,11 @@ test("右上角导出菜单可以选择文档导出格式", async () => {
   expect(onExportDocument).toHaveBeenCalledWith("pdf", "bundle", 86400);
 });
 
-test("表格文档不显示文档导出菜单", () => {
+test("表格文档显示 Excel 导入导出菜单", async () => {
+  const user = userEvent.setup();
+  const onImportSpreadsheetExcel = vi.fn();
+  const onExportSpreadsheetExcel = vi.fn();
+
   render(
     <TopBar
       document={{
@@ -71,9 +75,19 @@ test("表格文档不显示文档导出菜单", () => {
       saveStatus={{ state: "clean" }}
       onManualSave={vi.fn()}
       onExportDocument={vi.fn()}
+      onImportSpreadsheetExcel={onImportSpreadsheetExcel}
+      onExportSpreadsheetExcel={onExportSpreadsheetExcel}
     />,
   );
 
   expect(screen.queryByRole("button", { name: "导出文档" })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "保存" })).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "Excel 导入导出" }));
+  await user.click(screen.getByRole("menuitem", { name: "导入 Excel" }));
+  expect(onImportSpreadsheetExcel).toHaveBeenCalledTimes(1);
+
+  await user.click(screen.getByRole("button", { name: "Excel 导入导出" }));
+  await user.click(screen.getByRole("menuitem", { name: "导出 Excel" }));
+  expect(onExportSpreadsheetExcel).toHaveBeenCalledTimes(1);
 });
