@@ -80,6 +80,27 @@ test("空 workbook 导入后生成可编辑空白 Sheet", async () => {
   expect(data.sheets[data.sheetOrder[0]].rowCount).toBeGreaterThan(0);
 });
 
+test("在桌面 WebView 环境中导入 XLSX 不依赖 Node process", async () => {
+  const globalWithProcess = globalThis as typeof globalThis & { process?: unknown };
+  const originalProcess = globalWithProcess.process;
+
+  try {
+    // 生产桌面端的 WebView 不提供 Node process；这个用例用于防止 ExcelJS 运行时入口回退到 Node 包。
+    Reflect.deleteProperty(globalWithProcess, "process");
+
+    const { data } = await xlsxBytesToWorkbookData(await createEmptyXlsxBytes("WebView 表格"), "WebView 表格");
+
+    expect(data.sheetOrder).toHaveLength(1);
+    expect(data.sheets[data.sheetOrder[0]].name).toBe("Sheet1");
+  } finally {
+    if (originalProcess === undefined) {
+      Reflect.deleteProperty(globalWithProcess, "process");
+    } else {
+      globalWithProcess.process = originalProcess;
+    }
+  }
+});
+
 test("损坏的 XLSX bytes 返回中文错误", async () => {
   await expect(xlsxBytesToWorkbookData(new Uint8Array([1, 2, 3]), "坏文件"))
     .rejects
