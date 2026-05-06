@@ -57,15 +57,12 @@ test("右上角导出菜单可以选择文档导出格式", async () => {
   expect(onExportDocument).toHaveBeenCalledWith("pdf", "bundle", 86400);
 });
 
-test("表格文档只显示 XLSX 另存入口", async () => {
-  const user = userEvent.setup();
-  const onExportSpreadsheet = vi.fn();
-
+test("表格文档不显示文档导出菜单", () => {
   render(
     <TopBar
       document={{
-        id: "预算.xlsx",
-        path: "预算.xlsx",
+        id: "预算.json",
+        path: "预算.json",
         name: "预算",
         parentPath: "",
         size: 1,
@@ -74,12 +71,9 @@ test("表格文档只显示 XLSX 另存入口", async () => {
       saveStatus={{ state: "clean" }}
       onManualSave={vi.fn()}
       onExportDocument={vi.fn()}
-      onExportSpreadsheet={onExportSpreadsheet}
     />,
   );
 
-  await user.click(screen.getByRole("button", { name: "另存 XLSX" }));
-
-  expect(onExportSpreadsheet).toHaveBeenCalledTimes(1);
   expect(screen.queryByRole("button", { name: "导出文档" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "保存" })).toBeInTheDocument();
 });

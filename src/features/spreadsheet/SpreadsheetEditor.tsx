@@ -16,16 +16,13 @@ import "@univerjs/preset-sheets-core/lib/index.css";
 import type { SaveStatus } from "../../app/appState";
 import type { WorkspaceDocument } from "../workspace/workspaceStore";
 import { useSpreadsheetAutosave } from "./spreadsheetAutosave";
-import {
-  workbookDataToXlsxBytes,
-  xlsxBytesToWorkbookData,
-} from "./spreadsheetXlsxBridge";
+import { parseSpreadsheetSnapshot, serializeSpreadsheetSnapshot } from "./spreadsheetSnapshot";
 
 interface SpreadsheetEditorProps {
   document: WorkspaceDocument | null;
-  bytes: Uint8Array;
+  content: string;
   manualSaveRequest: number;
-  onSave: (relativePath: string, bytes: Uint8Array) => Promise<void>;
+  onSave: (relativePath: string, content: string) => Promise<void>;
   onSaveStatusChange: (status: SaveStatus) => void;
   onRegisterSaveNow?: (saveNow: (() => Promise<void>) | null) => void;
 }
@@ -38,7 +35,7 @@ interface UniverRuntime {
 
 export function SpreadsheetEditor({
   document,
-  bytes,
+  content,
   manualSaveRequest,
   onSave,
   onSaveStatusChange,
@@ -51,19 +48,19 @@ export function SpreadsheetEditor({
   const [loadState, setLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const readCurrentBytes = useCallback(async () => {
+  const readCurrentContent = useCallback(async () => {
     const workbookData = runtimeRef.current?.workbook.save() ?? workbookDataRef.current;
     if (!workbookData) {
-      return bytes;
+      return content;
     }
-    return workbookDataToXlsxBytes(workbookData);
-  }, [bytes]);
+    return serializeSpreadsheetSnapshot(workbookData);
+  }, [content]);
 
-  const saveBytes = useCallback(async (nextBytes: Uint8Array) => {
+  const saveContent = useCallback(async (nextContent: string) => {
     if (!document) {
       return;
     }
-    await onSave(document.path, nextBytes);
+    await onSave(document.path, nextContent);
   }, [document, onSave]);
 
   const {
@@ -74,8 +71,8 @@ export function SpreadsheetEditor({
     saveNowOrThrow,
   } = useSpreadsheetAutosave({
     enabled: Boolean(document) && loadState === "ready",
-    readBytes: readCurrentBytes,
-    saveBytes,
+    readContent: readCurrentContent,
+    saveContent,
   });
 
   useEffect(() => {
@@ -113,7 +110,7 @@ export function SpreadsheetEditor({
 
     void (async () => {
       try {
-        const { data } = await xlsxBytesToWorkbookData(bytes, document.name);
+        const data = parseSpreadsheetSnapshot(content, document.name);
         if (cancelled || mountedDocumentPathRef.current !== document.path) {
           return;
         }
@@ -137,13 +134,13 @@ export function SpreadsheetEditor({
       cleanupRuntime(runtimeRef.current);
       runtimeRef.current = null;
     };
-  }, [bytes, document, scheduleSave, setStatus]);
+  }, [content, document, scheduleSave, setStatus]);
 
   if (!document) {
     return (
       <div className="empty-editor-state">
         <h1>选择或新建表格</h1>
-        <p>表格文件会以 .xlsx 直接保存在当前知识库目录。</p>
+        <p>表格文件会以 Univer workbook snapshot JSON 保存在当前知识库目录。</p>
       </div>
     );
   }

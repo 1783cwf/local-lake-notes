@@ -16,7 +16,6 @@ use crate::storage::app_database::{
 };
 
 const EMPTY_LAKE_DOCUMENT: &str = "<p><span class=\"ne-text\"> </span></p>";
-const EMPTY_XLSX_DOCUMENT: &[u8] = include_bytes!("../../assets/empty.xlsx");
 
 #[tauri::command]
 pub fn create_lake_document(
@@ -73,44 +72,6 @@ pub fn create_spreadsheet_document(
 }
 
 #[tauri::command]
-pub fn import_spreadsheet_document(
-    source_path: String,
-    parent_path: Option<String>,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> AppResult<CreateDocumentPayload> {
-    let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
-    let source = PathBuf::from(source_path);
-    validate_existing_spreadsheet_path(&source)?;
-    let title = source
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or("未命名表格")
-        .to_string();
-    let created_path = create_spreadsheet_from_bytes_at(
-        &root,
-        parent_path.as_deref().unwrap_or_default(),
-        &title,
-        &fs::read(&source)?,
-    )?;
-    push_workspace_order_item(&app, &root, format!("document:{created_path}"))?;
-    let payload = workspace_payload_for_app(&app, &root)?;
-    let created_document = payload
-        .documents
-        .iter()
-        .find(|document| document.path == created_path)
-        .cloned()
-        .ok_or(AppError::InvalidSpreadsheetPath)?;
-    Ok(CreateDocumentPayload {
-        root: payload.root,
-        directories: payload.directories,
-        documents: payload.documents,
-        order: payload.order,
-        created_document,
-    })
-}
-
-#[tauri::command]
 pub fn rename_lake_document(
     relative_path: String,
     title: String,
@@ -147,7 +108,7 @@ pub fn rename_spreadsheet_document(
     let parent = current_path
         .parent()
         .ok_or(AppError::InvalidSpreadsheetPath)?;
-    let filename = format!("{}.xlsx", safe_file_stem(&title)?);
+    let filename = format!("{}.json", safe_file_stem(&title)?);
     let target = parent.join(&filename);
     if target.exists() {
         return Err(AppError::InvalidFilename);
@@ -199,10 +160,10 @@ pub fn read_lake_document(relative_path: String, state: State<'_, AppState>) -> 
 pub fn read_spreadsheet_document(
     relative_path: String,
     state: State<'_, AppState>,
-) -> AppResult<Vec<u8>> {
+) -> AppResult<String> {
     let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
     let path = resolve_existing_spreadsheet_path(&root, &relative_path)?;
-    Ok(fs::read(path)?)
+    Ok(fs::read_to_string(path)?)
 }
 
 #[tauri::command]
@@ -219,12 +180,12 @@ pub fn write_lake_document(
 #[tauri::command]
 pub fn write_spreadsheet_document(
     relative_path: String,
-    bytes: Vec<u8>,
+    content: String,
     state: State<'_, AppState>,
 ) -> AppResult<()> {
     let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
     let path = resolve_writable_spreadsheet_path(&root, &relative_path)?;
-    atomic_write_bytes(&path, &bytes)
+    atomic_write_spreadsheet(&path, &content)
 }
 
 #[tauri::command]
@@ -292,14 +253,15 @@ pub fn create_document_at(root: &Path, parent_path: &str, title: &str) -> AppRes
 }
 
 pub fn create_spreadsheet_at(root: &Path, parent_path: &str, title: &str) -> AppResult<String> {
-    create_spreadsheet_from_bytes_at(root, parent_path, title, EMPTY_XLSX_DOCUMENT)
+    let content = empty_spreadsheet_document(title)?;
+    create_spreadsheet_from_content_at(root, parent_path, title, &content)
 }
 
-pub fn create_spreadsheet_from_bytes_at(
+pub fn create_spreadsheet_from_content_at(
     root: &Path,
     parent_path: &str,
     title: &str,
-    bytes: &[u8],
+    content: &str,
 ) -> AppResult<String> {
     let stem = safe_file_stem(title)?;
     let parent = resolve_existing_directory_path(root, parent_path)?;
@@ -308,11 +270,11 @@ pub fn create_spreadsheet_from_bytes_at(
     } else {
         parent_path.trim_matches('/').to_string()
     };
-    let mut candidate = format!("{stem}.xlsx");
+    let mut candidate = format!("{stem}.json");
     let mut counter = 2;
 
     while parent.join(&candidate).exists() {
-        candidate = format!("{stem}-{counter}.xlsx");
+        candidate = format!("{stem}-{counter}.json");
         counter += 1;
     }
 
@@ -322,8 +284,50 @@ pub fn create_spreadsheet_from_bytes_at(
         format!("{normalized_parent}/{candidate}")
     };
     let path = resolve_writable_spreadsheet_path(root, &relative_path)?;
-    atomic_write_bytes(&path, bytes)?;
+    atomic_write_spreadsheet(&path, content)?;
     Ok(relative_path)
+}
+
+fn empty_spreadsheet_document(title: &str) -> AppResult<String> {
+    // Univer 的原生保存结果是 IWorkbookData 快照对象；新建表格直接生成同结构 JSON，避免额外格式转换。
+    let snapshot = serde_json::json!({
+        "id": "local-lake-workbook",
+        "name": title,
+        "appVersion": "0.21.1",
+        "locale": "zhCN",
+        "styles": {},
+        "sheetOrder": ["sheet-0001"],
+        "sheets": {
+            "sheet-0001": {
+                "id": "sheet-0001",
+                "name": "Sheet1",
+                "tabColor": "",
+                "hidden": 0,
+                "freeze": {
+                    "xSplit": 0,
+                    "ySplit": 0,
+                    "startRow": 0,
+                    "startColumn": 0
+                },
+                "rowCount": 100,
+                "columnCount": 26,
+                "zoomRatio": 1,
+                "scrollTop": 0,
+                "scrollLeft": 0,
+                "defaultColumnWidth": 88,
+                "defaultRowHeight": 24,
+                "mergeData": [],
+                "cellData": {},
+                "rowData": {},
+                "columnData": {},
+                "rowHeader": { "width": 46 },
+                "columnHeader": { "height": 20 },
+                "showGridlines": 1,
+                "rightToLeft": 0
+            }
+        }
+    });
+    Ok(format!("{}\n", serde_json::to_string_pretty(&snapshot)?))
 }
 
 pub fn safe_file_stem(title: &str) -> AppResult<String> {
@@ -368,11 +372,11 @@ pub fn atomic_write(path: &Path, content: &str) -> AppResult<()> {
     Ok(())
 }
 
-pub fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> AppResult<()> {
+pub fn atomic_write_spreadsheet(path: &Path, content: &str) -> AppResult<()> {
     let parent = path.parent().ok_or(AppError::InvalidSpreadsheetPath)?;
     fs::create_dir_all(parent)?;
-    let temp_path = path.with_extension("xlsx.tmp");
-    fs::write(&temp_path, bytes)?;
+    let temp_path = path.with_extension("json.tmp");
+    fs::write(&temp_path, content)?;
     fs::rename(temp_path, path)?;
     Ok(())
 }
@@ -399,20 +403,6 @@ pub fn resolve_writable_spreadsheet_path(root: &Path, relative_path: &str) -> Ap
     Ok(full_path)
 }
 
-fn validate_existing_spreadsheet_path(path: &Path) -> AppResult<()> {
-    if !path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("xlsx"))
-    {
-        return Err(AppError::InvalidSpreadsheetPath);
-    }
-    if !path.is_file() {
-        return Err(AppError::InvalidSpreadsheetPath);
-    }
-    Ok(())
-}
-
 fn validate_relative_spreadsheet_path(relative_path: &str) -> AppResult<()> {
     let path = Path::new(relative_path);
     if path.is_absolute() {
@@ -421,7 +411,7 @@ fn validate_relative_spreadsheet_path(relative_path: &str) -> AppResult<()> {
     if !path
         .extension()
         .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("xlsx"))
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
     {
         return Err(AppError::InvalidSpreadsheetPath);
     }

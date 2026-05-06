@@ -379,9 +379,29 @@ pub fn document_kind_from_path(path: &Path) -> Option<WorkspaceDocumentKind> {
 
     match path.extension().and_then(|ext| ext.to_str()) {
         Some(ext) if ext.eq_ignore_ascii_case("lake") => Some(WorkspaceDocumentKind::Lake),
-        Some(ext) if ext.eq_ignore_ascii_case("xlsx") => Some(WorkspaceDocumentKind::Spreadsheet),
+        Some(ext) if ext.eq_ignore_ascii_case("json") && is_univer_workbook_snapshot_file(path) => {
+            Some(WorkspaceDocumentKind::Spreadsheet)
+        }
         _ => None,
     }
+}
+
+fn is_univer_workbook_snapshot_file(path: &Path) -> bool {
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(snapshot) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return false;
+    };
+    // 只把具备 Univer IWorkbookData 核心结构的 JSON 纳入文档树，避免误把普通 JSON 文件当作表格。
+    snapshot
+        .get("sheetOrder")
+        .and_then(|value| value.as_array())
+        .is_some()
+        && snapshot
+            .get("sheets")
+            .and_then(|value| value.as_object())
+            .is_some()
 }
 
 pub fn resolve_existing_lake_path(root: &Path, relative_path: &str) -> AppResult<PathBuf> {
@@ -460,7 +480,7 @@ fn validate_relative_workspace_document_path(relative_path: &str) -> AppResult<(
     let valid_extension = path
         .extension()
         .and_then(|ext| ext.to_str())
-        .map(|ext| ext.eq_ignore_ascii_case("lake") || ext.eq_ignore_ascii_case("xlsx"))
+        .map(|ext| ext.eq_ignore_ascii_case("lake") || ext.eq_ignore_ascii_case("json"))
         .unwrap_or(false);
     if !valid_extension {
         return Err(AppError::InvalidLakePath);

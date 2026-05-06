@@ -5,45 +5,45 @@ import type { SaveStatus } from "../../app/appState";
 interface UseSpreadsheetAutosaveOptions {
   enabled: boolean;
   delayMs?: number;
-  readBytes: () => Promise<Uint8Array>;
-  saveBytes: (bytes: Uint8Array) => Promise<void>;
+  readContent: () => Promise<string>;
+  saveContent: (content: string) => Promise<void>;
 }
 
 interface SaveContext {
   enabled: boolean;
-  readBytes: () => Promise<Uint8Array>;
-  saveBytes: (bytes: Uint8Array) => Promise<void>;
+  readContent: () => Promise<string>;
+  saveContent: (content: string) => Promise<void>;
   version: number;
 }
 
 export function useSpreadsheetAutosave({
   enabled,
   delayMs = 900,
-  readBytes,
-  saveBytes,
+  readContent,
+  saveContent,
 }: UseSpreadsheetAutosaveOptions) {
   const [status, setStatus] = useState<SaveStatus>({ state: "clean" });
   const timerRef = useRef<number | undefined>();
   const saveRunRef = useRef(0);
   const saveContextRef = useRef<SaveContext>({
     enabled,
-    readBytes,
-    saveBytes,
+    readContent,
+    saveContent,
     version: 0,
   });
   const currentContext = saveContextRef.current;
-  if (currentContext.enabled !== enabled || currentContext.saveBytes !== saveBytes) {
+  if (currentContext.enabled !== enabled || currentContext.saveContent !== saveContent) {
     saveRunRef.current += 1;
     saveContextRef.current = {
       enabled,
-      readBytes,
-      saveBytes,
+      readContent,
+      saveContent,
       version: currentContext.version + 1,
     };
-  } else if (currentContext.readBytes !== readBytes) {
+  } else if (currentContext.readContent !== readContent) {
     saveContextRef.current = {
       ...currentContext,
-      readBytes,
+      readContent,
     };
   }
 
@@ -66,8 +66,8 @@ export function useSpreadsheetAutosave({
     setStatus({ state: "saving" });
 
     try {
-      const bytes = await context.readBytes();
-      await context.saveBytes(bytes);
+      const content = await context.readContent();
+      await context.saveContent(content);
       if (saveRunRef.current === runId) {
         setStatus({ state: "saved", savedAt: new Date().toISOString() });
       }

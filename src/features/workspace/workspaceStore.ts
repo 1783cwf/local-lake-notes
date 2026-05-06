@@ -317,7 +317,7 @@ export function applyWorkspaceMove(
 
 export function documentTitleFromPath(path: string): string {
   const filename = path.split("/").pop() ?? path;
-  return filename.replace(/\.(lake|xlsx)$/i, "");
+  return filename.replace(/\.(lake|json)$/i, "");
 }
 
 function resolveTargetParentPath(

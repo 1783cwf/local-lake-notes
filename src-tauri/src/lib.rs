@@ -10,10 +10,9 @@ use commands::backup::{
 };
 use commands::documents::{
     create_lake_document, create_spreadsheet_document, delete_lake_document,
-    delete_spreadsheet_document, export_pdf_from_html, import_spreadsheet_document,
-    read_lake_document, read_spreadsheet_document, rename_lake_document,
-    rename_spreadsheet_document, write_export_bytes, write_export_file, write_lake_document,
-    write_spreadsheet_document,
+    delete_spreadsheet_document, export_pdf_from_html, read_lake_document,
+    read_spreadsheet_document, rename_lake_document, rename_spreadsheet_document,
+    write_export_bytes, write_export_file, write_lake_document, write_spreadsheet_document,
 };
 use commands::external::{download_external_file, open_external_url};
 use commands::resource_key::{
@@ -57,7 +56,6 @@ pub fn run() {
             move_workspace_item,
             create_lake_document,
             create_spreadsheet_document,
-            import_spreadsheet_document,
             rename_lake_document,
             rename_spreadsheet_document,
             delete_lake_document,

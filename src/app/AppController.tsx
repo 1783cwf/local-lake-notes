@@ -54,7 +54,6 @@ import {
   getResourceKeyStatus,
   listBackups,
   moveWorkspaceItem,
-  importSpreadsheetDocument,
   readLakeDocument,
   readSpreadsheetDocument,
   renameLakeDirectory,
@@ -277,30 +276,7 @@ export function AppController() {
       setCurrentDocument({
         kind: "spreadsheet",
         entry: asSpreadsheetDocument(payload.createdDocument),
-        bytes: await readSpreadsheetDocument(payload.createdDocument.path),
-      });
-      setAppError(null);
-    } catch (error) {
-      setAppError(toMessage(error));
-    }
-  }, []);
-
-  const importSpreadsheet = useCallback(async (parentPath = "") => {
-    try {
-      const payload = await importSpreadsheetDocument(parentPath);
-      if (!payload) {
-        return;
-      }
-      setWorkspace({
-        root: payload.root,
-        directories: payload.directories,
-        documents: payload.documents,
-        order: payload.order,
-      });
-      setCurrentDocument({
-        kind: "spreadsheet",
-        entry: asSpreadsheetDocument(payload.createdDocument),
-        bytes: await readSpreadsheetDocument(payload.createdDocument.path),
+        content: await readSpreadsheetDocument(payload.createdDocument.path),
       });
       setAppError(null);
     } catch (error) {
@@ -358,7 +334,7 @@ export function AppController() {
         : await renameLakeDocument(document.path, nextName);
       setWorkspace(payload);
       if (currentDocument?.entry.path === document.path) {
-        const extension = document.kind === "spreadsheet" ? "xlsx" : "lake";
+        const extension = document.kind === "spreadsheet" ? "json" : "lake";
         const nextPath = document.parentPath ? `${document.parentPath}/${nextName}.${extension}` : `${nextName}.${extension}`;
         const nextDocument = payload.documents.find((entry) => entry.path === nextPath);
         if (nextDocument) {
@@ -469,8 +445,8 @@ export function AppController() {
     await writeLakeDocument(relativePath, content);
   }, []);
 
-  const saveSpreadsheet = useCallback(async (relativePath: string, bytes: Uint8Array) => {
-    await writeSpreadsheetDocument(relativePath, bytes);
+  const saveSpreadsheet = useCallback(async (relativePath: string, content: string) => {
+    await writeSpreadsheetDocument(relativePath, content);
   }, []);
 
   const createResourceExportOptions = useCallback((
@@ -512,28 +488,6 @@ export function AppController() {
       signedUrlTtlSeconds: exportOptions.signedUrlTtlSeconds,
     }));
   }, [createResourceExportOptions, currentDocument]);
-
-  const exportSpreadsheet = useCallback(async () => {
-    if (!currentDocument || currentDocument.kind !== "spreadsheet") {
-      return;
-    }
-
-    setActiveAppOperation({ kind: "document-export", label: "正在另存 XLSX" });
-    try {
-      await saveCurrentEditorNowRef.current?.();
-      const bytes = await readSpreadsheetDocument(currentDocument.entry.path);
-      await saveBinaryExport(
-        exportFileName(currentDocument.entry, "markdown").replace(/\.md$/i, ".xlsx"),
-        bytes,
-        [{ name: "Excel 工作簿", extensions: ["xlsx"] }],
-      );
-      setAppError(null);
-    } catch (error) {
-      setAppError(toMessage(error));
-    } finally {
-      setActiveAppOperation(null);
-    }
-  }, [currentDocument]);
 
   const writeDocumentExport = useCallback(async (
     request: LakeDocumentExportRequest,
@@ -856,7 +810,6 @@ export function AppController() {
         onOpenDocument={openDocument}
         onCreateDocument={createDocument}
         onCreateSpreadsheet={createSpreadsheet}
-        onImportSpreadsheet={importSpreadsheet}
         onCreateDirectory={createDirectory}
         onRenameWorkspace={renameCurrentWorkspace}
         onExportWorkspaceMarkdown={exportWorkspaceMarkdownZip}
@@ -878,7 +831,6 @@ export function AppController() {
           saveStatus={saveStatus}
           onManualSave={() => setManualSaveRequest((current) => current + 1)}
           onExportDocument={exportDocument}
-          onExportSpreadsheet={exportSpreadsheet}
           exportBusy={activeAppOperation?.kind === "document-export"}
           defaultExportResourceStrategy={ossSettings?.defaultExportResourceStrategy}
           defaultSignedUrlTtlSeconds={ossSettings?.defaultSignedUrlTtlSeconds}
@@ -899,7 +851,7 @@ export function AppController() {
           <Suspense fallback={<SpreadsheetLoadingState />}>
             <SpreadsheetEditor
               document={currentDocument.entry}
-              bytes={currentDocument.bytes}
+              content={currentDocument.content}
               manualSaveRequest={manualSaveRequest}
               onSave={saveSpreadsheet}
               onSaveStatusChange={setSaveStatus}
@@ -973,7 +925,7 @@ async function readDocumentState(document: WorkspaceDocument): Promise<CurrentDo
     return {
       kind: "spreadsheet",
       entry: asSpreadsheetDocument(document),
-      bytes: await readSpreadsheetDocument(document.path),
+      content: await readSpreadsheetDocument(document.path),
     };
   }
   return {

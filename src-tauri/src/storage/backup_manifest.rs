@@ -214,7 +214,7 @@ fn scan_workspace_files(
         if !entry.file_type().is_file() {
             continue;
         }
-        if is_excel_temporary_file(entry.path()) {
+        if is_workspace_temporary_file(entry.path()) {
             continue;
         }
         let relative_path = match entry.path().strip_prefix(root) {
@@ -229,10 +229,10 @@ fn scan_workspace_files(
     Ok(snapshots)
 }
 
-fn is_excel_temporary_file(path: &Path) -> bool {
+fn is_workspace_temporary_file(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
-        .map(|name| name.starts_with("~$") && name.ends_with(".xlsx"))
+        .map(|name| name.starts_with("~$"))
         .unwrap_or(false)
 }
 

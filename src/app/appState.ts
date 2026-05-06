@@ -17,7 +17,7 @@ export type CurrentDocumentState =
   | {
     kind: "spreadsheet";
     entry: WorkspaceDocument & { kind: "spreadsheet" };
-    bytes: Uint8Array;
+    content: string;
   };
 
 export interface UploadImageInput {

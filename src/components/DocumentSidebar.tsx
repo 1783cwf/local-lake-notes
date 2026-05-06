@@ -32,7 +32,6 @@ import {
   Pencil,
   Search,
   Trash2,
-  Upload,
   X,
 } from "lucide-react";
 import { useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
@@ -60,7 +59,6 @@ interface DocumentSidebarProps {
   onOpenDocument: (document: WorkspaceDocument) => void;
   onCreateDocument: (parentPath: string) => void;
   onCreateSpreadsheet: (parentPath: string) => void;
-  onImportSpreadsheet: (parentPath: string) => void;
   onCreateDirectory: (parentPath: string) => void;
   onRenameWorkspace: () => void;
   onExportWorkspaceMarkdown: () => void;
@@ -83,7 +81,6 @@ export function DocumentSidebar({
   onOpenDocument,
   onCreateDocument,
   onCreateSpreadsheet,
-  onImportSpreadsheet,
   onCreateDirectory,
   onRenameWorkspace,
   onExportWorkspaceMarkdown,
@@ -199,9 +196,6 @@ export function DocumentSidebar({
           <button type="button" className="tiny-icon-button" onClick={() => onCreateSpreadsheet("")} aria-label="新建表格" disabled={!workspaceRoot}>
             <FileSpreadsheet size={15} />
           </button>
-          <button type="button" className="tiny-icon-button" onClick={() => onImportSpreadsheet("")} aria-label="导入 XLSX" disabled={!workspaceRoot}>
-            <Upload size={15} />
-          </button>
         </div>
       </div>
 
@@ -247,7 +241,6 @@ export function DocumentSidebar({
                     onOpenDocument={onOpenDocument}
                     onCreateDocument={onCreateDocument}
                     onCreateSpreadsheet={onCreateSpreadsheet}
-                    onImportSpreadsheet={onImportSpreadsheet}
                     onCreateDirectory={onCreateDirectory}
                     onRenameDocument={onRenameDocument}
                     onDeleteDocument={onDeleteDocument}
@@ -282,7 +275,6 @@ function SortableTreeRow({
   onOpenDocument,
   onCreateDocument,
   onCreateSpreadsheet,
-  onImportSpreadsheet,
   onCreateDirectory,
   onRenameDocument,
   onDeleteDocument,
@@ -298,7 +290,6 @@ function SortableTreeRow({
   onOpenDocument: (document: WorkspaceDocument) => void;
   onCreateDocument: (parentPath: string) => void;
   onCreateSpreadsheet: (parentPath: string) => void;
-  onImportSpreadsheet: (parentPath: string) => void;
   onCreateDirectory: (parentPath: string) => void;
   onRenameDocument: (document: WorkspaceDocument) => void;
   onDeleteDocument: (document: WorkspaceDocument) => void;
@@ -398,7 +389,6 @@ function SortableTreeRow({
               <RowButton label="新建子目录" onClick={() => onCreateDirectory(node.path)} icon={<FolderPlus size={14} />} />
               <RowButton label="新建文档" onClick={() => onCreateDocument(node.path)} icon={<FilePlus size={14} />} />
               <RowButton label="新建表格" onClick={() => onCreateSpreadsheet(node.path)} icon={<FileSpreadsheet size={14} />} />
-              <RowButton label="导入 XLSX" onClick={() => onImportSpreadsheet(node.path)} icon={<Upload size={14} />} />
               <RowButton label="重命名目录" onClick={() => onRenameDirectory(node.directory!)} icon={<Pencil size={14} />} />
               <RowButton label="删除目录" onClick={() => onDeleteDirectory(node.directory!)} icon={<Trash2 size={14} />} />
             </RowActions>

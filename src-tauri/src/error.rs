@@ -9,7 +9,7 @@ pub enum AppError {
     PathOutsideWorkspace,
     #[error("只支持 .lake 文档")]
     InvalidLakePath,
-    #[error("只支持 .xlsx 表格")]
+    #[error("只支持 Univer 表格快照 JSON")]
     InvalidSpreadsheetPath,
     #[error("无效的文件名")]
     InvalidFilename,

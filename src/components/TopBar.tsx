@@ -13,7 +13,6 @@ interface TopBarProps {
   onManualSave: () => void;
   onRenameDocument?: (title: string) => void | Promise<void>;
   onExportDocument?: (format: DocumentExportFormat, resourceStrategy: ExportResourceStrategy, signedUrlTtlSeconds: number) => void;
-  onExportSpreadsheet?: () => void;
   defaultExportResourceStrategy?: ExportResourceStrategy;
   defaultSignedUrlTtlSeconds?: number;
   exportBusy?: boolean;
@@ -25,7 +24,6 @@ export function TopBar({
   onManualSave,
   onRenameDocument,
   onExportDocument,
-  onExportSpreadsheet,
   defaultExportResourceStrategy = "bundle",
   defaultSignedUrlTtlSeconds = 24 * 60 * 60,
   exportBusy = false,
@@ -106,11 +104,7 @@ export function TopBar({
         <IconButton label="保存" onClick={onManualSave} disabled={!document}>
           <Save size={18} />
         </IconButton>
-        {document?.kind === "spreadsheet" ? (
-          <IconButton label="另存 XLSX" onClick={() => onExportSpreadsheet?.()} disabled={!document || exportBusy}>
-            {exportBusy ? <Loader2 size={18} className="spin-icon" /> : <Download size={18} />}
-          </IconButton>
-        ) : (
+        {document?.kind !== "spreadsheet" ? (
           <div className="export-menu">
             <button
               type="button"
@@ -180,7 +174,7 @@ export function TopBar({
               </div>
             ) : null}
           </div>
-        )}
+        ) : null}
         <IconButton label="分享" disabled>
           <Share2 size={18} />
         </IconButton>

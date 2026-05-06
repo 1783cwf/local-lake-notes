@@ -20,7 +20,6 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof DocumentSidebar>
     order: [],
     onCreateDocument: vi.fn(),
     onCreateSpreadsheet: vi.fn(),
-    onImportSpreadsheet: vi.fn(),
     onCreateDirectory: vi.fn(),
     onRenameWorkspace: vi.fn(),
     onExportWorkspaceMarkdown: vi.fn(),
@@ -126,18 +125,16 @@ test("可以按文档名称搜索文档", async () => {
   expect(screen.getByRole("treeitem", { name: /产品方案/ })).toBeInTheDocument();
 });
 
-test("表格文档可以搜索并通过目录入口创建或导入", async () => {
+test("表格文档可以搜索并通过目录入口创建", async () => {
   const user = userEvent.setup();
   const onCreateSpreadsheet = vi.fn();
-  const onImportSpreadsheet = vi.fn();
   renderSidebar({
-    currentPath: "notes/budget.xlsx",
+    currentPath: "notes/budget.json",
     onCreateSpreadsheet,
-    onImportSpreadsheet,
     documents: [
       {
-        id: "notes/budget.xlsx",
-        path: "notes/budget.xlsx",
+        id: "notes/budget.json",
+        path: "notes/budget.json",
         name: "预算表",
         parentPath: "notes",
         size: 1,
@@ -151,10 +148,8 @@ test("表格文档可以搜索并通过目录入口创建或导入", async () =>
   expect(screen.getByRole("treeitem", { name: /预算表/ })).toHaveClass("is-current");
 
   await user.click(screen.getAllByRole("button", { name: "新建表格" })[1]);
-  await user.click(screen.getAllByRole("button", { name: "导入 XLSX" })[1]);
 
   expect(onCreateSpreadsheet).toHaveBeenCalledWith("notes");
-  expect(onImportSpreadsheet).toHaveBeenCalledWith("notes");
 });
 
 test("按指针位置计算 after 和 inside 落点意图", () => {
