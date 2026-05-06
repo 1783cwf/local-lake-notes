@@ -7,7 +7,8 @@ use walkdir::WalkDir;
 
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    MoveWorkspaceItemInput, WorkspaceDirectory, WorkspaceDocument, WorkspacePayload,
+    MoveWorkspaceItemInput, WorkspaceDirectory, WorkspaceDocument, WorkspaceDocumentKind,
+    WorkspacePayload,
 };
 use crate::state::AppState;
 use crate::storage::app_database::{
@@ -200,7 +201,7 @@ pub fn move_workspace_item_on_disk(
     }
 
     let current_path = match kind {
-        WorkspaceItemKind::Document => resolve_existing_lake_path(root, &source_path),
+        WorkspaceItemKind::Document => resolve_existing_workspace_document_path(root, &source_path),
         WorkspaceItemKind::Folder => resolve_existing_directory_path(root, &source_path),
     }
     .map_err(|_| AppError::WorkspaceItemNotFound(input.source_id.clone()))?;
@@ -329,9 +330,9 @@ pub fn list_documents(root: &Path) -> AppResult<Vec<WorkspaceDocument>> {
         if !entry.file_type().is_file() {
             continue;
         }
-        if entry.path().extension().and_then(|ext| ext.to_str()) != Some("lake") {
+        let Some(kind) = document_kind_from_path(entry.path()) else {
             continue;
-        }
+        };
 
         let relative = entry
             .path()
@@ -360,6 +361,7 @@ pub fn list_documents(root: &Path) -> AppResult<Vec<WorkspaceDocument>> {
             path: relative_path,
             name,
             parent_path,
+            kind,
             modified_at,
             size: metadata.len(),
         });
@@ -369,11 +371,37 @@ pub fn list_documents(root: &Path) -> AppResult<Vec<WorkspaceDocument>> {
     Ok(documents)
 }
 
+pub fn document_kind_from_path(path: &Path) -> Option<WorkspaceDocumentKind> {
+    let filename = path.file_name()?.to_string_lossy();
+    if filename.starts_with("~$") {
+        return None;
+    }
+
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some(ext) if ext.eq_ignore_ascii_case("lake") => Some(WorkspaceDocumentKind::Lake),
+        Some(ext) if ext.eq_ignore_ascii_case("xlsx") => Some(WorkspaceDocumentKind::Spreadsheet),
+        _ => None,
+    }
+}
+
 pub fn resolve_existing_lake_path(root: &Path, relative_path: &str) -> AppResult<PathBuf> {
     validate_relative_lake_path(relative_path)?;
     let root = root.canonicalize()?;
     let full_path = root.join(relative_path).canonicalize()?;
     if !full_path.starts_with(&root) {
+        return Err(AppError::PathOutsideWorkspace);
+    }
+    Ok(full_path)
+}
+
+pub fn resolve_existing_workspace_document_path(
+    root: &Path,
+    relative_path: &str,
+) -> AppResult<PathBuf> {
+    validate_relative_workspace_document_path(relative_path)?;
+    let root = root.canonicalize()?;
+    let full_path = root.join(relative_path).canonicalize()?;
+    if !full_path.starts_with(&root) || !full_path.is_file() {
         return Err(AppError::PathOutsideWorkspace);
     }
     Ok(full_path)
@@ -411,6 +439,30 @@ fn validate_relative_lake_path(relative_path: &str) -> AppResult<()> {
         return Err(AppError::PathOutsideWorkspace);
     }
     if path.extension().and_then(|ext| ext.to_str()) != Some("lake") {
+        return Err(AppError::InvalidLakePath);
+    }
+    for component in path.components() {
+        if matches!(
+            component,
+            Component::CurDir | Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        ) {
+            return Err(AppError::PathOutsideWorkspace);
+        }
+    }
+    Ok(())
+}
+
+fn validate_relative_workspace_document_path(relative_path: &str) -> AppResult<()> {
+    let path = Path::new(relative_path);
+    if path.is_absolute() {
+        return Err(AppError::PathOutsideWorkspace);
+    }
+    let valid_extension = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("lake") || ext.eq_ignore_ascii_case("xlsx"))
+        .unwrap_or(false);
+    if !valid_extension {
         return Err(AppError::InvalidLakePath);
     }
     for component in path.components() {

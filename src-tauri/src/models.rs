@@ -7,8 +7,16 @@ pub struct WorkspaceDocument {
     pub path: String,
     pub name: String,
     pub parent_path: String,
+    pub kind: WorkspaceDocumentKind,
     pub modified_at: Option<String>,
     pub size: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum WorkspaceDocumentKind {
+    Lake,
+    Spreadsheet,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -2,21 +2,24 @@ use std::fs;
 
 use tempfile::tempdir;
 use yuque_lake_notes_lib::commands::documents::{
-    create_document, create_document_at, safe_file_stem,
+    create_document, create_document_at, create_spreadsheet, create_spreadsheet_at,
+    resolve_existing_spreadsheet_path, resolve_writable_spreadsheet_path, safe_file_stem,
 };
 use yuque_lake_notes_lib::commands::workspace::{
     list_directories, list_documents, move_workspace_item_on_disk, resolve_existing_directory_path,
     resolve_existing_lake_path, resolve_writable_lake_path, safe_directory_name,
 };
 use yuque_lake_notes_lib::error::AppError;
-use yuque_lake_notes_lib::models::MoveWorkspaceItemInput;
+use yuque_lake_notes_lib::models::{MoveWorkspaceItemInput, WorkspaceDocumentKind};
 
 #[test]
-fn lists_only_lake_documents_in_nested_directories() {
+fn lists_lake_and_xlsx_documents_in_nested_directories() {
     let dir = tempdir().unwrap();
     fs::create_dir(dir.path().join("notes")).unwrap();
     fs::write(dir.path().join("a.lake"), "<p>a</p>").unwrap();
     fs::write(dir.path().join("notes").join("b.lake"), "<p>b</p>").unwrap();
+    fs::write(dir.path().join("notes").join("budget.xlsx"), b"xlsx").unwrap();
+    fs::write(dir.path().join("notes").join("~$budget.xlsx"), b"temp").unwrap();
     fs::write(dir.path().join("skip.md"), "# skip").unwrap();
 
     let documents = list_documents(dir.path()).unwrap();
@@ -24,9 +27,13 @@ fn lists_only_lake_documents_in_nested_directories() {
     assert_eq!(
         documents
             .iter()
-            .map(|doc| doc.path.as_str())
+            .map(|doc| (doc.path.as_str(), doc.kind.clone()))
             .collect::<Vec<_>>(),
-        vec!["a.lake", "notes/b.lake"]
+        vec![
+            ("a.lake", WorkspaceDocumentKind::Lake),
+            ("notes/b.lake", WorkspaceDocumentKind::Lake),
+            ("notes/budget.xlsx", WorkspaceDocumentKind::Spreadsheet),
+        ]
     );
 }
 
@@ -38,6 +45,17 @@ fn creates_unique_safe_lake_document() {
     let path = create_document(dir.path(), "高级工程师的要求").unwrap();
 
     assert_eq!(path, "高级工程师的要求-2.lake");
+    assert!(dir.path().join(path).exists());
+}
+
+#[test]
+fn creates_unique_safe_spreadsheet_document() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("预算表.xlsx"), b"old").unwrap();
+
+    let path = create_spreadsheet(dir.path(), "预算表").unwrap();
+
+    assert_eq!(path, "预算表-2.xlsx");
     assert!(dir.path().join(path).exists());
 }
 
@@ -60,6 +78,17 @@ fn lists_empty_directories_and_creates_document_inside_directory() {
 }
 
 #[test]
+fn creates_spreadsheet_inside_directory() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("reports")).unwrap();
+
+    let path = create_spreadsheet_at(dir.path(), "reports", "月度 预算").unwrap();
+
+    assert_eq!(path, "reports/月度-预算.xlsx");
+    assert!(dir.path().join(path).exists());
+}
+
+#[test]
 fn rejects_path_traversal_and_non_lake_files() {
     let dir = tempdir().unwrap();
 
@@ -69,6 +98,16 @@ fn rejects_path_traversal_and_non_lake_files() {
     assert!(resolve_existing_directory_path(dir.path(), "../x").is_err());
     assert!(resolve_existing_directory_path(dir.path(), ".").is_err());
     assert!(resolve_existing_lake_path(dir.path(), "missing.lake").is_err());
+}
+
+#[test]
+fn rejects_path_traversal_and_non_xlsx_files() {
+    let dir = tempdir().unwrap();
+
+    assert!(resolve_writable_spreadsheet_path(dir.path(), "../x.xlsx").is_err());
+    assert!(resolve_writable_spreadsheet_path(dir.path(), "x.lake").is_err());
+    assert!(resolve_writable_spreadsheet_path(dir.path(), "./x.xlsx").is_err());
+    assert!(resolve_existing_spreadsheet_path(dir.path(), "missing.xlsx").is_err());
 }
 
 #[test]
@@ -87,24 +126,24 @@ fn sanitizes_file_stems_without_dropping_chinese_text() {
 fn moves_root_document_into_directory() {
     let dir = tempdir().unwrap();
     fs::create_dir(dir.path().join("notes")).unwrap();
-    fs::write(dir.path().join("a.lake"), "<p>a</p>").unwrap();
+    fs::write(dir.path().join("a.xlsx"), b"xlsx").unwrap();
 
     let moved = move_workspace_item_on_disk(
         dir.path(),
         &MoveWorkspaceItemInput {
-            source_id: "document:a.lake".to_string(),
+            source_id: "document:a.xlsx".to_string(),
             target_parent_path: "notes".to_string(),
             order: vec![],
         },
     )
     .unwrap();
 
-    assert_eq!(moved.source_path, "a.lake");
-    assert_eq!(moved.target_path, "notes/a.lake");
-    assert!(!dir.path().join("a.lake").exists());
+    assert_eq!(moved.source_path, "a.xlsx");
+    assert_eq!(moved.target_path, "notes/a.xlsx");
+    assert!(!dir.path().join("a.xlsx").exists());
     assert_eq!(
-        fs::read_to_string(dir.path().join("notes").join("a.lake")).unwrap(),
-        "<p>a</p>"
+        fs::read(dir.path().join("notes").join("a.xlsx")).unwrap(),
+        b"xlsx"
     );
 }
 

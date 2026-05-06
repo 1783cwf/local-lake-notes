@@ -1,7 +1,7 @@
 ---
 title: "feat: Univer spreadsheet documents"
 type: feat
-status: active
+status: completed
 date: 2026-05-06
 origin: user request + docs/brainstorms/2026-04-26-lake-first-notes-requirements.md
 ---

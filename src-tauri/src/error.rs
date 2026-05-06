@@ -9,6 +9,8 @@ pub enum AppError {
     PathOutsideWorkspace,
     #[error("只支持 .lake 文档")]
     InvalidLakePath,
+    #[error("只支持 .xlsx 表格")]
+    InvalidSpreadsheetPath,
     #[error("无效的文件名")]
     InvalidFilename,
     #[error("无效的拖拽目标：{0}")]

@@ -1,8 +1,11 @@
+export type WorkspaceDocumentKind = "lake" | "spreadsheet";
+
 export interface WorkspaceDocument {
   id: string;
   path: string;
   name: string;
   parentPath: string;
+  kind: WorkspaceDocumentKind;
   modifiedAt?: string;
   size: number;
 }
@@ -314,7 +317,7 @@ export function applyWorkspaceMove(
 
 export function documentTitleFromPath(path: string): string {
   const filename = path.split("/").pop() ?? path;
-  return filename.replace(/\.lake$/i, "");
+  return filename.replace(/\.(lake|xlsx)$/i, "");
 }
 
 function resolveTargetParentPath(

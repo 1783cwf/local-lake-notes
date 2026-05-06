@@ -1,5 +1,5 @@
 import type { FormEvent, PointerEvent } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 
 import { AppRail } from "../components/AppRail";
@@ -37,9 +37,11 @@ import {
   chooseDatabaseDirectory,
   createLakeDirectory,
   createLakeDocument,
+  createSpreadsheetDocument,
   createBackup,
   deleteLakeDirectory,
   deleteLakeDocument,
+  deleteSpreadsheetDocument,
   deleteBackup,
   createTemporaryResourceUrl,
   downloadResourceFile,
@@ -52,9 +54,12 @@ import {
   getResourceKeyStatus,
   listBackups,
   moveWorkspaceItem,
+  importSpreadsheetDocument,
   readLakeDocument,
+  readSpreadsheetDocument,
   renameLakeDirectory,
   renameLakeDocument,
+  renameSpreadsheetDocument,
   renameWorkspace,
   saveOssSettings,
   saveBinaryExport,
@@ -72,6 +77,7 @@ import {
   verifyBackupKeyStatus,
   verifyResourceKeyStatus,
   writeLakeDocument,
+  writeSpreadsheetDocument,
 } from "../lib/tauri";
 import type {
   CurrentDocumentState,
@@ -87,6 +93,10 @@ import type {
   UploadImageOutput,
 } from "./appState";
 import { emptySaveStatus } from "./appState";
+
+const SpreadsheetEditor = lazy(() => (
+  import("../features/spreadsheet/SpreadsheetEditor").then((module) => ({ default: module.SpreadsheetEditor }))
+));
 
 interface TextDialogState {
   title: string;
@@ -180,8 +190,7 @@ export function AppController() {
     }
 
     try {
-      const content = await readLakeDocument(currentDocument.entry.path);
-      setCurrentDocument({ entry: currentDocument.entry, content });
+      setCurrentDocument(await readDocumentState(currentDocument.entry));
       setSaveStatus(emptySaveStatus);
     } catch {
       setCurrentDocument(null);
@@ -246,8 +255,52 @@ export function AppController() {
         order: payload.order,
       });
       setCurrentDocument({
-        entry: payload.createdDocument,
+        kind: "lake",
+        entry: asLakeDocument(payload.createdDocument),
         content: await readLakeDocument(payload.createdDocument.path),
+      });
+      setAppError(null);
+    } catch (error) {
+      setAppError(toMessage(error));
+    }
+  }, []);
+
+  const createSpreadsheet = useCallback(async (parentPath = "") => {
+    try {
+      const payload = await createSpreadsheetDocument("未命名表格", parentPath);
+      setWorkspace({
+        root: payload.root,
+        directories: payload.directories,
+        documents: payload.documents,
+        order: payload.order,
+      });
+      setCurrentDocument({
+        kind: "spreadsheet",
+        entry: asSpreadsheetDocument(payload.createdDocument),
+        bytes: await readSpreadsheetDocument(payload.createdDocument.path),
+      });
+      setAppError(null);
+    } catch (error) {
+      setAppError(toMessage(error));
+    }
+  }, []);
+
+  const importSpreadsheet = useCallback(async (parentPath = "") => {
+    try {
+      const payload = await importSpreadsheetDocument(parentPath);
+      if (!payload) {
+        return;
+      }
+      setWorkspace({
+        root: payload.root,
+        directories: payload.directories,
+        documents: payload.documents,
+        order: payload.order,
+      });
+      setCurrentDocument({
+        kind: "spreadsheet",
+        entry: asSpreadsheetDocument(payload.createdDocument),
+        bytes: await readSpreadsheetDocument(payload.createdDocument.path),
       });
       setAppError(null);
     } catch (error) {
@@ -300,13 +353,16 @@ export function AppController() {
     }
 
     try {
-      const payload = await renameLakeDocument(document.path, nextName);
+      const payload = document.kind === "spreadsheet"
+        ? await renameSpreadsheetDocument(document.path, nextName)
+        : await renameLakeDocument(document.path, nextName);
       setWorkspace(payload);
       if (currentDocument?.entry.path === document.path) {
-        const nextPath = document.parentPath ? `${document.parentPath}/${nextName}.lake` : `${nextName}.lake`;
+        const extension = document.kind === "spreadsheet" ? "xlsx" : "lake";
+        const nextPath = document.parentPath ? `${document.parentPath}/${nextName}.${extension}` : `${nextName}.${extension}`;
         const nextDocument = payload.documents.find((entry) => entry.path === nextPath);
         if (nextDocument) {
-          setCurrentDocument({ entry: nextDocument, content: await readLakeDocument(nextDocument.path) });
+          setCurrentDocument(await readDocumentState(nextDocument));
         }
       }
       setAppError(null);
@@ -331,7 +387,9 @@ export function AppController() {
     }
 
     try {
-      const payload = await deleteLakeDocument(document.path);
+      const payload = document.kind === "spreadsheet"
+        ? await deleteSpreadsheetDocument(document.path)
+        : await deleteLakeDocument(document.path);
       setWorkspace(payload);
       if (currentDocument?.entry.path === document.path) {
         setCurrentDocument(null);
@@ -363,7 +421,7 @@ export function AppController() {
             const nextPath = currentDocument.entry.path.replace(directory.path, nextPrefix);
             const nextDocument = payload.documents.find((entry) => entry.path === nextPath);
             if (nextDocument) {
-              setCurrentDocument({ entry: nextDocument, content: await readLakeDocument(nextDocument.path) });
+              setCurrentDocument(await readDocumentState(nextDocument));
             }
           }
           setAppError(null);
@@ -399,8 +457,7 @@ export function AppController() {
     }
 
     try {
-      const content = await readLakeDocument(document.path);
-      setCurrentDocument({ entry: document, content });
+      setCurrentDocument(await readDocumentState(document));
       setSaveStatus(emptySaveStatus);
       setAppError(null);
     } catch (error) {
@@ -410,6 +467,10 @@ export function AppController() {
 
   const saveDocument = useCallback(async (relativePath: string, content: string) => {
     await writeLakeDocument(relativePath, content);
+  }, []);
+
+  const saveSpreadsheet = useCallback(async (relativePath: string, bytes: Uint8Array) => {
+    await writeSpreadsheetDocument(relativePath, bytes);
   }, []);
 
   const createResourceExportOptions = useCallback((
@@ -438,7 +499,7 @@ export function AppController() {
     resourceStrategy?: LakeDocumentExportRequest["resourceStrategy"],
     signedUrlTtlSeconds?: number,
   ) => {
-    if (!currentDocument) {
+    if (!currentDocument || currentDocument.kind !== "lake") {
       return;
     }
 
@@ -451,6 +512,28 @@ export function AppController() {
       signedUrlTtlSeconds: exportOptions.signedUrlTtlSeconds,
     }));
   }, [createResourceExportOptions, currentDocument]);
+
+  const exportSpreadsheet = useCallback(async () => {
+    if (!currentDocument || currentDocument.kind !== "spreadsheet") {
+      return;
+    }
+
+    setActiveAppOperation({ kind: "document-export", label: "正在另存 XLSX" });
+    try {
+      await saveCurrentEditorNowRef.current?.();
+      const bytes = await readSpreadsheetDocument(currentDocument.entry.path);
+      await saveBinaryExport(
+        exportFileName(currentDocument.entry, "markdown").replace(/\.md$/i, ".xlsx"),
+        bytes,
+        [{ name: "Excel 工作簿", extensions: ["xlsx"] }],
+      );
+      setAppError(null);
+    } catch (error) {
+      setAppError(toMessage(error));
+    } finally {
+      setActiveAppOperation(null);
+    }
+  }, [currentDocument]);
 
   const writeDocumentExport = useCallback(async (
     request: LakeDocumentExportRequest,
@@ -514,8 +597,15 @@ export function AppController() {
       const converter = createOfficialLakeMarkdownConverter();
       let zip: Uint8Array;
       try {
+        const lakeDocuments = workspace.documents.filter((document) => document.kind === "lake");
+        const lakeDocumentIds = new Set(lakeDocuments.map((document) => `document:${document.path}`));
+        const lakeWorkspace = {
+          ...workspace,
+          documents: lakeDocuments,
+          order: workspace.order.filter((itemId) => itemId.startsWith("folder:") || lakeDocumentIds.has(itemId)),
+        };
         zip = await lakeWorkspaceToMarkdownZipWithResources(
-          workspace,
+          lakeWorkspace,
           readLakeDocument,
           createResourceExportOptions(),
           converter.convert,
@@ -765,6 +855,8 @@ export function AppController() {
         currentPath={currentPath}
         onOpenDocument={openDocument}
         onCreateDocument={createDocument}
+        onCreateSpreadsheet={createSpreadsheet}
+        onImportSpreadsheet={importSpreadsheet}
         onCreateDirectory={createDirectory}
         onRenameWorkspace={renameCurrentWorkspace}
         onExportWorkspaceMarkdown={exportWorkspaceMarkdownZip}
@@ -786,6 +878,7 @@ export function AppController() {
           saveStatus={saveStatus}
           onManualSave={() => setManualSaveRequest((current) => current + 1)}
           onExportDocument={exportDocument}
+          onExportSpreadsheet={exportSpreadsheet}
           exportBusy={activeAppOperation?.kind === "document-export"}
           defaultExportResourceStrategy={ossSettings?.defaultExportResourceStrategy}
           defaultSignedUrlTtlSeconds={ossSettings?.defaultSignedUrlTtlSeconds}
@@ -802,20 +895,33 @@ export function AppController() {
           </div>
         ) : null}
         {appError ? <div className="app-error">{appError}</div> : null}
-        <LakeEditor
-          document={currentDocument?.entry ?? null}
-          content={currentDocument?.content ?? ""}
-          manualSaveRequest={manualSaveRequest}
-          exportRequest={exportRequest}
-          onSave={saveDocument}
-          onExportContent={writeDocumentExport}
-          onUploadImage={uploadEditorImage}
-          onUploadFile={uploadEditorFile}
-          onDownloadFile={downloadEditorFile}
-          onPrepareResourcePreview={prepareEditorResourcePreview}
-          onSaveStatusChange={setSaveStatus}
-          onRegisterSaveNow={registerEditorSaveNow}
-        />
+        {currentDocument?.kind === "spreadsheet" ? (
+          <Suspense fallback={<SpreadsheetLoadingState />}>
+            <SpreadsheetEditor
+              document={currentDocument.entry}
+              bytes={currentDocument.bytes}
+              manualSaveRequest={manualSaveRequest}
+              onSave={saveSpreadsheet}
+              onSaveStatusChange={setSaveStatus}
+              onRegisterSaveNow={registerEditorSaveNow}
+            />
+          </Suspense>
+        ) : (
+          <LakeEditor
+            document={currentDocument?.entry ?? null}
+            content={currentDocument?.kind === "lake" ? currentDocument.content : ""}
+            manualSaveRequest={manualSaveRequest}
+            exportRequest={exportRequest}
+            onSave={saveDocument}
+            onExportContent={writeDocumentExport}
+            onUploadImage={uploadEditorImage}
+            onUploadFile={uploadEditorFile}
+            onDownloadFile={downloadEditorFile}
+            onPrepareResourcePreview={prepareEditorResourcePreview}
+            onSaveStatusChange={setSaveStatus}
+            onRegisterSaveNow={registerEditorSaveNow}
+          />
+        )}
       </main>
       <OssSettingsPanel
         open={settingsOpen}
@@ -862,6 +968,35 @@ function formatExportLabel(format: DocumentExportFormat): string {
   }
 }
 
+async function readDocumentState(document: WorkspaceDocument): Promise<CurrentDocumentState> {
+  if (document.kind === "spreadsheet") {
+    return {
+      kind: "spreadsheet",
+      entry: asSpreadsheetDocument(document),
+      bytes: await readSpreadsheetDocument(document.path),
+    };
+  }
+  return {
+    kind: "lake",
+    entry: asLakeDocument(document),
+    content: await readLakeDocument(document.path),
+  };
+}
+
+function asLakeDocument(document: WorkspaceDocument): WorkspaceDocument & { kind: "lake" } {
+  if (document.kind !== "lake") {
+    throw new Error("当前文档不是 Lake 文档");
+  }
+  return document as WorkspaceDocument & { kind: "lake" };
+}
+
+function asSpreadsheetDocument(document: WorkspaceDocument): WorkspaceDocument & { kind: "spreadsheet" } {
+  if (document.kind !== "spreadsheet") {
+    throw new Error("当前文档不是表格文档");
+  }
+  return document as WorkspaceDocument & { kind: "spreadsheet" };
+}
+
 function rebindCurrentDocument(
   currentDocument: CurrentDocumentState | null,
   workspace: WorkspacePayload,
@@ -874,7 +1009,7 @@ function rebindCurrentDocument(
   if (!isSameOrChildPath(currentDocument.entry.path, move.sourcePath)) {
     const refreshedEntry = workspace.documents.find((entry) => entry.path === currentDocument.entry.path);
     return {
-      document: refreshedEntry ? { ...currentDocument, entry: refreshedEntry } : currentDocument,
+      document: refreshedEntry ? rebindDocumentEntry(currentDocument, refreshedEntry) : currentDocument,
       missing: false,
     };
   }
@@ -882,8 +1017,18 @@ function rebindCurrentDocument(
   const nextPath = replacePathPrefix(currentDocument.entry.path, move.sourcePath, move.targetPath);
   const nextEntry = workspace.documents.find((entry) => entry.path === nextPath);
   return nextEntry
-    ? { document: { ...currentDocument, entry: nextEntry }, missing: false }
+    ? { document: rebindDocumentEntry(currentDocument, nextEntry), missing: false }
     : { document: null, missing: true };
+}
+
+function rebindDocumentEntry(
+  currentDocument: CurrentDocumentState,
+  entry: WorkspaceDocument,
+): CurrentDocumentState {
+  if (currentDocument.kind === "spreadsheet") {
+    return { ...currentDocument, entry: asSpreadsheetDocument(entry) };
+  }
+  return { ...currentDocument, entry: asLakeDocument(entry) };
 }
 
 function replacePathPrefix(path: string, fromPath: string, toPath: string): string {
@@ -1005,6 +1150,17 @@ function TextInputDialog({
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+function SpreadsheetLoadingState() {
+  return (
+    <div className="spreadsheet-editor-root">
+      <div className="spreadsheet-editor-state" role="status">
+        <Loader2 size={18} className="spin-icon" />
+        <span>正在加载表格编辑器</span>
+      </div>
     </div>
   );
 }

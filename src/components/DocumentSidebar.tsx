@@ -24,6 +24,7 @@ import {
   ChevronRight,
   Download,
   FilePlus,
+  FileSpreadsheet,
   FileText,
   Folder,
   FolderPlus,
@@ -31,6 +32,7 @@ import {
   Pencil,
   Search,
   Trash2,
+  Upload,
   X,
 } from "lucide-react";
 import { useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
@@ -57,6 +59,8 @@ interface DocumentSidebarProps {
   currentPath: string | null;
   onOpenDocument: (document: WorkspaceDocument) => void;
   onCreateDocument: (parentPath: string) => void;
+  onCreateSpreadsheet: (parentPath: string) => void;
+  onImportSpreadsheet: (parentPath: string) => void;
   onCreateDirectory: (parentPath: string) => void;
   onRenameWorkspace: () => void;
   onExportWorkspaceMarkdown: () => void;
@@ -78,6 +82,8 @@ export function DocumentSidebar({
   currentPath,
   onOpenDocument,
   onCreateDocument,
+  onCreateSpreadsheet,
+  onImportSpreadsheet,
   onCreateDirectory,
   onRenameWorkspace,
   onExportWorkspaceMarkdown,
@@ -190,6 +196,12 @@ export function DocumentSidebar({
           <button type="button" className="tiny-icon-button" onClick={() => onCreateDocument("")} aria-label="新建文档" disabled={!workspaceRoot}>
             <FilePlus size={15} />
           </button>
+          <button type="button" className="tiny-icon-button" onClick={() => onCreateSpreadsheet("")} aria-label="新建表格" disabled={!workspaceRoot}>
+            <FileSpreadsheet size={15} />
+          </button>
+          <button type="button" className="tiny-icon-button" onClick={() => onImportSpreadsheet("")} aria-label="导入 XLSX" disabled={!workspaceRoot}>
+            <Upload size={15} />
+          </button>
         </div>
       </div>
 
@@ -234,6 +246,8 @@ export function DocumentSidebar({
                     onToggleFolder={toggleFolder}
                     onOpenDocument={onOpenDocument}
                     onCreateDocument={onCreateDocument}
+                    onCreateSpreadsheet={onCreateSpreadsheet}
+                    onImportSpreadsheet={onImportSpreadsheet}
                     onCreateDirectory={onCreateDirectory}
                     onRenameDocument={onRenameDocument}
                     onDeleteDocument={onDeleteDocument}
@@ -267,6 +281,8 @@ function SortableTreeRow({
   onToggleFolder,
   onOpenDocument,
   onCreateDocument,
+  onCreateSpreadsheet,
+  onImportSpreadsheet,
   onCreateDirectory,
   onRenameDocument,
   onDeleteDocument,
@@ -281,6 +297,8 @@ function SortableTreeRow({
   onToggleFolder: (itemId: string) => void;
   onOpenDocument: (document: WorkspaceDocument) => void;
   onCreateDocument: (parentPath: string) => void;
+  onCreateSpreadsheet: (parentPath: string) => void;
+  onImportSpreadsheet: (parentPath: string) => void;
   onCreateDirectory: (parentPath: string) => void;
   onRenameDocument: (document: WorkspaceDocument) => void;
   onDeleteDocument: (document: WorkspaceDocument) => void;
@@ -379,6 +397,8 @@ function SortableTreeRow({
             <RowActions>
               <RowButton label="新建子目录" onClick={() => onCreateDirectory(node.path)} icon={<FolderPlus size={14} />} />
               <RowButton label="新建文档" onClick={() => onCreateDocument(node.path)} icon={<FilePlus size={14} />} />
+              <RowButton label="新建表格" onClick={() => onCreateSpreadsheet(node.path)} icon={<FileSpreadsheet size={14} />} />
+              <RowButton label="导入 XLSX" onClick={() => onImportSpreadsheet(node.path)} icon={<Upload size={14} />} />
               <RowButton label="重命名目录" onClick={() => onRenameDirectory(node.directory!)} icon={<Pencil size={14} />} />
               <RowButton label="删除目录" onClick={() => onDeleteDirectory(node.directory!)} icon={<Trash2 size={14} />} />
             </RowActions>
@@ -386,7 +406,7 @@ function SortableTreeRow({
         </>
       ) : (
         <>
-          <FileText size={15} />
+          {node.document?.kind === "spreadsheet" ? <FileSpreadsheet size={15} /> : <FileText size={15} />}
           <span>{node.name}</span>
           {node.document ? (
             <RowActions>
@@ -421,7 +441,7 @@ function TreeRowOverlay({ node }: { node: FlatDocumentTreeNode }) {
   return (
     <div className="tree-row tree-row--overlay">
       <GripVertical size={13} className="drag-handle" />
-      {node.type === "folder" ? <Folder size={15} /> : <FileText size={15} />}
+      {node.type === "folder" ? <Folder size={15} /> : node.document?.kind === "spreadsheet" ? <FileSpreadsheet size={15} /> : <FileText size={15} />}
       <span>{node.name}</span>
     </div>
   );

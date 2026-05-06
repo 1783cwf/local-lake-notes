@@ -21,6 +21,7 @@ import type {
   CreateDocumentPayload,
   MoveWorkspaceItemInput,
   WorkspaceDirectory,
+  WorkspaceDocumentKind,
   WorkspacePayload,
 } from "../features/workspace/workspaceStore";
 
@@ -261,12 +262,13 @@ export async function moveWorkspaceItem(input: MoveWorkspaceItemInput): Promise<
 export async function createLakeDocument(title: string, parentPath = ""): Promise<CreateDocumentPayload> {
   if (!isTauriRuntime()) {
     const workspace = await listLakeDocuments();
-    const path = nextBrowserDocumentPath(title, parentPath, workspace.documents.map((document) => document.path));
+    const path = nextBrowserDocumentPath(title, parentPath, workspace.documents.map((document) => document.path), "lake");
     const createdDocument = {
       id: path,
       path,
-      name: path.replace(/\.lake$/i, ""),
+      name: pathBasename(path).replace(/\.lake$/i, ""),
       parentPath,
+      kind: "lake" as const,
       size: 0,
     };
     const payload: CreateDocumentPayload = {
@@ -284,57 +286,98 @@ export async function createLakeDocument(title: string, parentPath = ""): Promis
   return invoke<CreateDocumentPayload>("create_lake_document", { title, parentPath });
 }
 
-export async function renameLakeDocument(relativePath: string, title: string): Promise<WorkspacePayload> {
+export async function createSpreadsheetDocument(title: string, parentPath = ""): Promise<CreateDocumentPayload> {
   if (!isTauriRuntime()) {
     const workspace = await listLakeDocuments();
-    const document = workspace.documents.find((entry) => entry.path === relativePath);
-    if (!document) {
-      return workspace;
-    }
-    const safeTitle = safeBrowserName(title);
-    const nextPath = document.parentPath ? `${document.parentPath}/${safeTitle}.lake` : `${safeTitle}.lake`;
-    moveBrowserDocument(relativePath, nextPath);
-    const payload = {
-      ...workspace,
-      documents: workspace.documents.map((entry) => entry.path === relativePath ? {
-        ...entry,
-        id: nextPath,
-        path: nextPath,
-        name: safeTitle,
-      } : entry),
-      order: workspace.order.map((itemId) => itemId === `document:${relativePath}` ? `document:${nextPath}` : itemId),
+    const path = nextBrowserDocumentPath(title, parentPath, workspace.documents.map((document) => document.path), "spreadsheet");
+    const bytes = await emptyBrowserSpreadsheetBytes();
+    const createdDocument = {
+      id: path,
+      path,
+      name: pathBasename(path).replace(/\.xlsx$/i, ""),
+      parentPath,
+      kind: "spreadsheet" as const,
+      size: bytes.length,
+    };
+    const payload: CreateDocumentPayload = {
+      root: workspace.root,
+      directories: workspace.directories,
+      documents: [...workspace.documents, createdDocument],
+      order: [...workspace.order, `document:${path}`],
+      createdDocument,
     };
     saveBrowserWorkspace(payload);
+    writeBrowserBytes(browserDocumentKey(createdDocument.path), bytes);
     return payload;
+  }
+
+  return invoke<CreateDocumentPayload>("create_spreadsheet_document", { title, parentPath });
+}
+
+export async function importSpreadsheetDocument(parentPath = ""): Promise<CreateDocumentPayload | null> {
+  if (!isTauriRuntime()) {
+    throw new Error("浏览器预览不支持导入本地 XLSX");
+  }
+
+  const selected = await open({
+    directory: false,
+    multiple: false,
+    title: "导入 Excel 表格",
+    filters: [{ name: "Excel 工作簿", extensions: ["xlsx"] }],
+  });
+  if (typeof selected !== "string") {
+    return null;
+  }
+
+  return invoke<CreateDocumentPayload>("import_spreadsheet_document", { sourcePath: selected, parentPath });
+}
+
+export async function renameLakeDocument(relativePath: string, title: string): Promise<WorkspacePayload> {
+  if (!isTauriRuntime()) {
+    return renameBrowserDocument(relativePath, title, "lake");
   }
 
   return invoke<WorkspacePayload>("rename_lake_document", { relativePath, title });
 }
 
+export async function renameSpreadsheetDocument(relativePath: string, title: string): Promise<WorkspacePayload> {
+  if (!isTauriRuntime()) {
+    return renameBrowserDocument(relativePath, title, "spreadsheet");
+  }
+
+  return invoke<WorkspacePayload>("rename_spreadsheet_document", { relativePath, title });
+}
+
 export async function deleteLakeDocument(relativePath: string): Promise<WorkspacePayload> {
   if (!isTauriRuntime()) {
-    const workspace = await listLakeDocuments();
-    window.localStorage.removeItem(browserDocumentKey(relativePath));
-    const payload = {
-      ...workspace,
-      documents: workspace.documents.filter((document) => document.path !== relativePath),
-      order: workspace.order.filter((itemId) => itemId !== `document:${relativePath}`),
-    };
-    saveBrowserWorkspace(payload);
-    return payload;
+    return deleteBrowserDocument(relativePath);
   }
 
   return invoke<WorkspacePayload>("delete_lake_document", { relativePath });
 }
 
-function nextBrowserDocumentPath(title: string, parentPath: string, existingPaths: string[]): string {
+export async function deleteSpreadsheetDocument(relativePath: string): Promise<WorkspacePayload> {
+  if (!isTauriRuntime()) {
+    return deleteBrowserDocument(relativePath);
+  }
+
+  return invoke<WorkspacePayload>("delete_spreadsheet_document", { relativePath });
+}
+
+function nextBrowserDocumentPath(
+  title: string,
+  parentPath: string,
+  existingPaths: string[],
+  kind: WorkspaceDocumentKind,
+): string {
   const takenPaths = new Set(existingPaths);
-  const baseName = title.trim() || "未命名文档";
-  let candidate = parentPath ? `${parentPath}/${baseName}.lake` : `${baseName}.lake`;
+  const baseName = safeBrowserName(title || (kind === "spreadsheet" ? "未命名表格" : "未命名文档"));
+  const extension = kind === "spreadsheet" ? "xlsx" : "lake";
+  let candidate = parentPath ? `${parentPath}/${baseName}.${extension}` : `${baseName}.${extension}`;
   let counter = 2;
 
   while (takenPaths.has(candidate)) {
-    candidate = parentPath ? `${parentPath}/${baseName}-${counter}.lake` : `${baseName}-${counter}.lake`;
+    candidate = parentPath ? `${parentPath}/${baseName}-${counter}.${extension}` : `${baseName}-${counter}.${extension}`;
     counter += 1;
   }
 
@@ -356,6 +399,23 @@ export async function writeLakeDocument(relativePath: string, content: string): 
   }
 
   await invoke("write_lake_document", { relativePath, content });
+}
+
+export async function readSpreadsheetDocument(relativePath: string): Promise<Uint8Array> {
+  if (!isTauriRuntime()) {
+    return readBrowserBytes(browserDocumentKey(relativePath));
+  }
+
+  return new Uint8Array(await invoke<number[]>("read_spreadsheet_document", { relativePath }));
+}
+
+export async function writeSpreadsheetDocument(relativePath: string, bytes: Uint8Array): Promise<void> {
+  if (!isTauriRuntime()) {
+    writeBrowserBytes(browserDocumentKey(relativePath), bytes);
+    return;
+  }
+
+  await invoke("write_spreadsheet_document", { relativePath, bytes: Array.from(bytes) });
 }
 
 export async function saveTextExport(
@@ -821,6 +881,68 @@ function browserDocumentKey(relativePath: string): string {
   return `yuque-lake-notes.browser-doc:${relativePath}`;
 }
 
+async function emptyBrowserSpreadsheetBytes(): Promise<Uint8Array> {
+  const { createEmptyXlsxBytes } = await import("../features/spreadsheet/spreadsheetXlsxBridge");
+  return createEmptyXlsxBytes("未命名表格");
+}
+
+async function readBrowserBytes(key: string): Promise<Uint8Array> {
+  const content = window.localStorage.getItem(key);
+  if (!content) {
+    return emptyBrowserSpreadsheetBytes();
+  }
+  return Uint8Array.from(atob(content), (character) => character.charCodeAt(0));
+}
+
+function writeBrowserBytes(key: string, bytes: Uint8Array): void {
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  window.localStorage.setItem(key, btoa(binary));
+}
+
+async function renameBrowserDocument(
+  relativePath: string,
+  title: string,
+  kind: WorkspaceDocumentKind,
+): Promise<WorkspacePayload> {
+  const workspace = await listLakeDocuments();
+  const document = workspace.documents.find((entry) => entry.path === relativePath);
+  if (!document) {
+    return workspace;
+  }
+  const safeTitle = safeBrowserName(title);
+  const extension = kind === "spreadsheet" ? "xlsx" : "lake";
+  const nextPath = document.parentPath ? `${document.parentPath}/${safeTitle}.${extension}` : `${safeTitle}.${extension}`;
+  moveBrowserDocument(relativePath, nextPath);
+  const payload = {
+    ...workspace,
+    documents: workspace.documents.map((entry) => entry.path === relativePath ? {
+      ...entry,
+      id: nextPath,
+      path: nextPath,
+      name: safeTitle,
+      kind,
+    } : entry),
+    order: workspace.order.map((itemId) => itemId === `document:${relativePath}` ? `document:${nextPath}` : itemId),
+  };
+  saveBrowserWorkspace(payload);
+  return payload;
+}
+
+async function deleteBrowserDocument(relativePath: string): Promise<WorkspacePayload> {
+  const workspace = await listLakeDocuments();
+  window.localStorage.removeItem(browserDocumentKey(relativePath));
+  const payload = {
+    ...workspace,
+    documents: workspace.documents.filter((document) => document.path !== relativePath),
+    order: workspace.order.filter((itemId) => itemId !== `document:${relativePath}`),
+  };
+  saveBrowserWorkspace(payload);
+  return payload;
+}
+
 function saveBrowserWorkspace(workspace: WorkspacePayload): void {
   window.localStorage.setItem(browserWorkspaceKey, JSON.stringify(workspace));
 }
@@ -874,7 +996,10 @@ function normalizeBrowserWorkspace(workspace: Partial<WorkspacePayload>): Worksp
   return {
     root: workspace.root ?? "/browser-preview",
     directories: workspace.directories ?? [],
-    documents: workspace.documents ?? [],
+    documents: (workspace.documents ?? []).map((document) => ({
+      ...document,
+      kind: document.kind ?? (document.path.toLowerCase().endsWith(".xlsx") ? "spreadsheet" : "lake"),
+    })),
     order: workspace.order ?? [],
   };
 }

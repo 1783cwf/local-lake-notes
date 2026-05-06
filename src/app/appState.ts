@@ -8,10 +8,17 @@ export interface SaveStatus {
   savedAt?: string;
 }
 
-export interface CurrentDocumentState {
-  entry: WorkspaceDocument;
-  content: string;
-}
+export type CurrentDocumentState =
+  | {
+    kind: "lake";
+    entry: WorkspaceDocument & { kind: "lake" };
+    content: string;
+  }
+  | {
+    kind: "spreadsheet";
+    entry: WorkspaceDocument & { kind: "spreadsheet" };
+    bytes: Uint8Array;
+  };
 
 export interface UploadImageInput {
   bytes: number[];
