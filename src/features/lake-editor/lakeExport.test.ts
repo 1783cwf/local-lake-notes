@@ -236,7 +236,7 @@ test("知识库 Markdown 按目录树导出为 ZIP", async () => {
     {
       root: "/tmp/kb",
       directories: [{ id: "notes", path: "notes", name: "notes", parentPath: "" }],
-      documents: [{ id: "notes/a.lake", path: "notes/a.lake", name: "a", parentPath: "notes", size: 1 }],
+      documents: [{ id: "notes/a.lake", path: "notes/a.lake", name: "a", parentPath: "notes", size: 1, kind: "lake" }],
       order: ["folder:notes", "document:notes/a.lake"],
     },
     async () => "<p>正文</p>",
@@ -248,7 +248,7 @@ test("知识库 Markdown 按目录树导出为 ZIP", async () => {
   expect(entries[0].content).toBe("");
   expect(entries[1].content).toBe("![图片](file:///tmp/a.png)\n");
   expect(convertDocument).toHaveBeenCalledWith(
-    { id: "notes/a.lake", path: "notes/a.lake", name: "a", parentPath: "notes", size: 1 },
+    { id: "notes/a.lake", path: "notes/a.lake", name: "a", parentPath: "notes", size: 1, kind: "lake" },
     "<p>正文</p>",
   );
 });
@@ -266,7 +266,7 @@ test("官方 Markdown 转换器使用 Lake setDocument 和 getDocument", async (
 
   const converter = createOfficialLakeMarkdownConverter();
   const markdown = await converter.convert(
-    { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1 },
+    { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
     "<p>正文</p>",
   );
   converter.dispose();

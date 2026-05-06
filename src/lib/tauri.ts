@@ -21,8 +21,11 @@ import type {
   CreateDocumentPayload,
   MoveWorkspaceItemInput,
   WorkspaceDirectory,
+  WorkspaceDocumentKind,
   WorkspacePayload,
 } from "../features/workspace/workspaceStore";
+import { createEmptySpreadsheetWorkbookData } from "../features/spreadsheet/spreadsheetDocument";
+import { serializeSpreadsheetSnapshot } from "../features/spreadsheet/spreadsheetSnapshot";
 
 const browserWorkspaceKey = "yuque-lake-notes.browser-workspace";
 const browserSettingsKey = "yuque-lake-notes.browser-oss-settings";
@@ -261,12 +264,13 @@ export async function moveWorkspaceItem(input: MoveWorkspaceItemInput): Promise<
 export async function createLakeDocument(title: string, parentPath = ""): Promise<CreateDocumentPayload> {
   if (!isTauriRuntime()) {
     const workspace = await listLakeDocuments();
-    const path = nextBrowserDocumentPath(title, parentPath, workspace.documents.map((document) => document.path));
+    const path = nextBrowserDocumentPath(title, parentPath, workspace.documents.map((document) => document.path), "lake");
     const createdDocument = {
       id: path,
       path,
-      name: path.replace(/\.lake$/i, ""),
+      name: pathBasename(path).replace(/\.lake$/i, ""),
       parentPath,
+      kind: "lake" as const,
       size: 0,
     };
     const payload: CreateDocumentPayload = {
@@ -284,57 +288,80 @@ export async function createLakeDocument(title: string, parentPath = ""): Promis
   return invoke<CreateDocumentPayload>("create_lake_document", { title, parentPath });
 }
 
-export async function renameLakeDocument(relativePath: string, title: string): Promise<WorkspacePayload> {
+export async function createSpreadsheetDocument(title: string, parentPath = ""): Promise<CreateDocumentPayload> {
   if (!isTauriRuntime()) {
     const workspace = await listLakeDocuments();
-    const document = workspace.documents.find((entry) => entry.path === relativePath);
-    if (!document) {
-      return workspace;
-    }
-    const safeTitle = safeBrowserName(title);
-    const nextPath = document.parentPath ? `${document.parentPath}/${safeTitle}.lake` : `${safeTitle}.lake`;
-    moveBrowserDocument(relativePath, nextPath);
-    const payload = {
-      ...workspace,
-      documents: workspace.documents.map((entry) => entry.path === relativePath ? {
-        ...entry,
-        id: nextPath,
-        path: nextPath,
-        name: safeTitle,
-      } : entry),
-      order: workspace.order.map((itemId) => itemId === `document:${relativePath}` ? `document:${nextPath}` : itemId),
+    const path = nextBrowserDocumentPath(title, parentPath, workspace.documents.map((document) => document.path), "spreadsheet");
+    const content = serializeSpreadsheetSnapshot(createEmptySpreadsheetWorkbookData(title || "未命名表格"));
+    const createdDocument = {
+      id: path,
+      path,
+      name: pathBasename(path).replace(/\.json$/i, ""),
+      parentPath,
+      kind: "spreadsheet" as const,
+      size: new Blob([content]).size,
+    };
+    const payload: CreateDocumentPayload = {
+      root: workspace.root,
+      directories: workspace.directories,
+      documents: [...workspace.documents, createdDocument],
+      order: [...workspace.order, `document:${path}`],
+      createdDocument,
     };
     saveBrowserWorkspace(payload);
+    window.localStorage.setItem(browserDocumentKey(createdDocument.path), content);
     return payload;
+  }
+
+  return invoke<CreateDocumentPayload>("create_spreadsheet_document", { title, parentPath });
+}
+
+export async function renameLakeDocument(relativePath: string, title: string): Promise<WorkspacePayload> {
+  if (!isTauriRuntime()) {
+    return renameBrowserDocument(relativePath, title, "lake");
   }
 
   return invoke<WorkspacePayload>("rename_lake_document", { relativePath, title });
 }
 
+export async function renameSpreadsheetDocument(relativePath: string, title: string): Promise<WorkspacePayload> {
+  if (!isTauriRuntime()) {
+    return renameBrowserDocument(relativePath, title, "spreadsheet");
+  }
+
+  return invoke<WorkspacePayload>("rename_spreadsheet_document", { relativePath, title });
+}
+
 export async function deleteLakeDocument(relativePath: string): Promise<WorkspacePayload> {
   if (!isTauriRuntime()) {
-    const workspace = await listLakeDocuments();
-    window.localStorage.removeItem(browserDocumentKey(relativePath));
-    const payload = {
-      ...workspace,
-      documents: workspace.documents.filter((document) => document.path !== relativePath),
-      order: workspace.order.filter((itemId) => itemId !== `document:${relativePath}`),
-    };
-    saveBrowserWorkspace(payload);
-    return payload;
+    return deleteBrowserDocument(relativePath);
   }
 
   return invoke<WorkspacePayload>("delete_lake_document", { relativePath });
 }
 
-function nextBrowserDocumentPath(title: string, parentPath: string, existingPaths: string[]): string {
+export async function deleteSpreadsheetDocument(relativePath: string): Promise<WorkspacePayload> {
+  if (!isTauriRuntime()) {
+    return deleteBrowserDocument(relativePath);
+  }
+
+  return invoke<WorkspacePayload>("delete_spreadsheet_document", { relativePath });
+}
+
+function nextBrowserDocumentPath(
+  title: string,
+  parentPath: string,
+  existingPaths: string[],
+  kind: WorkspaceDocumentKind,
+): string {
   const takenPaths = new Set(existingPaths);
-  const baseName = title.trim() || "未命名文档";
-  let candidate = parentPath ? `${parentPath}/${baseName}.lake` : `${baseName}.lake`;
+  const baseName = safeBrowserName(title || (kind === "spreadsheet" ? "未命名表格" : "未命名文档"));
+  const extension = kind === "spreadsheet" ? "json" : "lake";
+  let candidate = parentPath ? `${parentPath}/${baseName}.${extension}` : `${baseName}.${extension}`;
   let counter = 2;
 
   while (takenPaths.has(candidate)) {
-    candidate = parentPath ? `${parentPath}/${baseName}-${counter}.lake` : `${baseName}-${counter}.lake`;
+    candidate = parentPath ? `${parentPath}/${baseName}-${counter}.${extension}` : `${baseName}-${counter}.${extension}`;
     counter += 1;
   }
 
@@ -356,6 +383,59 @@ export async function writeLakeDocument(relativePath: string, content: string): 
   }
 
   await invoke("write_lake_document", { relativePath, content });
+}
+
+export async function readSpreadsheetDocument(relativePath: string): Promise<string> {
+  if (!isTauriRuntime()) {
+    return window.localStorage.getItem(browserDocumentKey(relativePath)) ?? serializeSpreadsheetSnapshot(createEmptySpreadsheetWorkbookData());
+  }
+
+  return invoke<string>("read_spreadsheet_document", { relativePath });
+}
+
+export async function writeSpreadsheetDocument(relativePath: string, content: string): Promise<void> {
+  if (!isTauriRuntime()) {
+    window.localStorage.setItem(browserDocumentKey(relativePath), content);
+    return;
+  }
+
+  await invoke("write_spreadsheet_document", { relativePath, content });
+}
+
+export interface SelectedExcelFile {
+  path: string;
+  name: string;
+  bytes: Uint8Array;
+}
+
+export async function chooseExcelImportFile(): Promise<SelectedExcelFile | null> {
+  if (!isTauriRuntime()) {
+    const selected = await chooseBrowserFile([".xlsx"]);
+    if (!selected) {
+      return null;
+    }
+    return {
+      path: selected.name,
+      name: selected.name,
+      bytes: new Uint8Array(await selected.arrayBuffer()),
+    };
+  }
+
+  const selected = await open({
+    multiple: false,
+    title: "导入 Excel 表格",
+    filters: [{ name: "Excel", extensions: ["xlsx"] }],
+  });
+  if (typeof selected !== "string") {
+    return null;
+  }
+
+  const bytes = await invoke<number[]>("read_external_excel_file", { path: selected });
+  return {
+    path: selected,
+    name: pathBasename(selected),
+    bytes: new Uint8Array(bytes),
+  };
 }
 
 export async function saveTextExport(
@@ -821,6 +901,47 @@ function browserDocumentKey(relativePath: string): string {
   return `yuque-lake-notes.browser-doc:${relativePath}`;
 }
 
+async function renameBrowserDocument(
+  relativePath: string,
+  title: string,
+  kind: WorkspaceDocumentKind,
+): Promise<WorkspacePayload> {
+  const workspace = await listLakeDocuments();
+  const document = workspace.documents.find((entry) => entry.path === relativePath);
+  if (!document) {
+    return workspace;
+  }
+  const safeTitle = safeBrowserName(title);
+  const extension = kind === "spreadsheet" ? "json" : "lake";
+  const nextPath = document.parentPath ? `${document.parentPath}/${safeTitle}.${extension}` : `${safeTitle}.${extension}`;
+  moveBrowserDocument(relativePath, nextPath);
+  const payload = {
+    ...workspace,
+    documents: workspace.documents.map((entry) => entry.path === relativePath ? {
+      ...entry,
+      id: nextPath,
+      path: nextPath,
+      name: safeTitle,
+      kind,
+    } : entry),
+    order: workspace.order.map((itemId) => itemId === `document:${relativePath}` ? `document:${nextPath}` : itemId),
+  };
+  saveBrowserWorkspace(payload);
+  return payload;
+}
+
+async function deleteBrowserDocument(relativePath: string): Promise<WorkspacePayload> {
+  const workspace = await listLakeDocuments();
+  window.localStorage.removeItem(browserDocumentKey(relativePath));
+  const payload = {
+    ...workspace,
+    documents: workspace.documents.filter((document) => document.path !== relativePath),
+    order: workspace.order.filter((itemId) => itemId !== `document:${relativePath}`),
+  };
+  saveBrowserWorkspace(payload);
+  return payload;
+}
+
 function saveBrowserWorkspace(workspace: WorkspacePayload): void {
   window.localStorage.setItem(browserWorkspaceKey, JSON.stringify(workspace));
 }
@@ -832,6 +953,16 @@ function downloadBrowserFile(filename: string, blob: Blob): void {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function chooseBrowserFile(accept: string[]): Promise<File | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = accept.join(",");
+    input.onchange = () => resolve(input.files?.[0] ?? null);
+    input.click();
+  });
 }
 
 async function downloadBrowserRemoteFile(url: string, filename: string): Promise<void> {
@@ -874,7 +1005,10 @@ function normalizeBrowserWorkspace(workspace: Partial<WorkspacePayload>): Worksp
   return {
     root: workspace.root ?? "/browser-preview",
     directories: workspace.directories ?? [],
-    documents: workspace.documents ?? [],
+    documents: (workspace.documents ?? []).map((document) => ({
+      ...document,
+      kind: document.kind ?? (document.path.toLowerCase().endsWith(".json") ? "spreadsheet" : "lake"),
+    })),
     order: workspace.order ?? [],
   };
 }

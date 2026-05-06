@@ -14,6 +14,7 @@ const doc = (path: string, parentPath = ""): WorkspaceDocument => ({
   path,
   name: documentTitleFromPath(path),
   parentPath,
+  kind: path.endsWith(".json") ? "spreadsheet" : "lake",
   size: 1,
 });
 
@@ -24,14 +25,20 @@ const dir = (path: string, parentPath = ""): WorkspaceDirectory => ({
   parentPath,
 });
 
-test("按目录构建 Lake 文档树并优先显示文件夹", () => {
+test("按目录构建文档树并优先显示文件夹", () => {
   const tree = buildDocumentTree(
-    [doc("b.lake"), doc("notes/a.lake", "notes"), doc("notes/deep/c.lake", "notes/deep")],
+    [
+      doc("b.lake"),
+      doc("notes/a.lake", "notes"),
+      doc("notes/budget.json", "notes"),
+      doc("notes/deep/c.lake", "notes/deep"),
+    ],
     [dir("notes"), dir("notes/deep", "notes")],
   );
 
   expect(tree.map((node) => node.name)).toEqual(["notes", "b"]);
-  expect(tree[0].children.map((node) => node.name)).toEqual(["deep", "a"]);
+  expect(tree[0].children.map((node) => node.name)).toEqual(["deep", "a", "budget"]);
+  expect(tree[0].children.find((node) => node.name === "budget")?.document?.kind).toBe("spreadsheet");
 });
 
 test("按保存的拖拽顺序排列同级节点", () => {
@@ -49,14 +56,18 @@ test("从 .lake 路径提取文档标题", () => {
   expect(documentTitleFromPath("nested/高级工程师的要求.lake")).toBe("高级工程师的要求");
 });
 
+test("从 Univer 快照 JSON 路径提取表格标题", () => {
+  expect(documentTitleFromPath("nested/预算表.json")).toBe("预算表");
+});
+
 test("计算文档拖入目录的目标父目录和乐观路径", () => {
   const workspace = workspacePayload(
-    [doc("a.lake"), doc("notes/b.lake", "notes")],
+    [doc("a.json"), doc("notes/b.lake", "notes")],
     [dir("notes")],
   );
   const tree = buildDocumentTree(workspace.documents, workspace.directories, workspace.order);
 
-  const move = resolveWorkspaceMove(tree, "document:a.lake", {
+  const move = resolveWorkspaceMove(tree, "document:a.json", {
     placement: "inside",
     targetId: "folder:notes",
   });
@@ -65,10 +76,10 @@ test("计算文档拖入目录的目标父目录和乐观路径", () => {
     ok: true,
     noop: false,
     targetParentPath: "notes",
-    targetPath: "notes/a.lake",
+    targetPath: "notes/a.json",
   });
   expect(move.ok && applyWorkspaceMove(workspace, move).documents.find((entry) => entry.name === "a")?.path)
-    .toBe("notes/a.lake");
+    .toBe("notes/a.json");
 });
 
 test("计算文档拖到根列表末尾", () => {

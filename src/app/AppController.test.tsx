@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { forwardRef, useEffect, useImperativeHandle, type Ref } from "react";
 
 import type {
   CreateDocumentPayload,
@@ -9,6 +10,8 @@ import type {
 import { AppController } from "./AppController";
 
 const createLakeDocument = vi.fn<(title: string, parentPath?: string) => Promise<CreateDocumentPayload>>();
+const createSpreadsheetDocument = vi.fn<(title: string, parentPath?: string) => Promise<CreateDocumentPayload>>();
+const chooseExcelImportFile = vi.fn<() => Promise<{ path: string; name: string; bytes: Uint8Array } | null>>();
 const createBackup = vi.fn<(input: { forceFull: boolean }) => Promise<{
   record: {
     id: string;
@@ -24,6 +27,7 @@ const createBackup = vi.fn<(input: { forceFull: boolean }) => Promise<{
 }>>();
 const deleteBackup = vi.fn<(input: { backupId: string }) => Promise<{ deletedBackupIds: string[] }>>();
 const deleteLakeDocument = vi.fn<(path: string) => Promise<WorkspacePayload>>();
+const deleteSpreadsheetDocument = vi.fn<(path: string) => Promise<WorkspacePayload>>();
 const createTemporaryResourceUrl = vi.fn<(resourceRef: string, ttlSeconds: number, filename?: string) => Promise<string>>();
 const downloadResourceFile = vi.fn<(input: { url: string; filename: string; resourceRef?: string }) => Promise<string | null>>();
 const getDatabaseLocation = vi.fn(async () => ({
@@ -48,6 +52,7 @@ const listBackups = vi.fn(async () => [] as Array<{
 }>);
 const moveWorkspaceItem = vi.fn<(input: MoveWorkspaceItemInput) => Promise<WorkspacePayload>>();
 const readLakeDocument = vi.fn<(path: string) => Promise<string>>(async () => "<p>hello</p>");
+const readSpreadsheetDocument = vi.fn<(path: string) => Promise<string>>(async () => "{\"sheetOrder\":[\"sheet-0001\"],\"sheets\":{\"sheet-0001\":{\"id\":\"sheet-0001\",\"name\":\"Sheet1\"}}}");
 const restoreBackup = vi.fn<(input: { backupId: string; allowKeyMismatch?: boolean }) => Promise<{
   restoredBackupId: string;
   restoredAt: string;
@@ -59,6 +64,7 @@ const savePdfExport = vi.fn<(defaultPath: string, html: string, filters: Array<{
 const saveTextExport = vi.fn<(defaultPath: string, content: string, filters: Array<{ name: string; extensions: string[] }>) => Promise<string | null>>();
 const setWorkspaceRoot = vi.fn<(path: string) => Promise<WorkspacePayload>>();
 const writeLakeDocument = vi.fn<(path: string, content: string) => Promise<void>>();
+const writeSpreadsheetDocument = vi.fn<(path: string, content: string) => Promise<void>>();
 
 vi.mock("../components/DocumentSidebar", () => ({
   DocumentSidebar: ({
@@ -66,6 +72,7 @@ vi.mock("../components/DocumentSidebar", () => ({
     documents,
     currentPath,
     onCreateDocument,
+    onCreateSpreadsheet,
     onExportWorkspaceMarkdown,
     onOpenDocument,
     onDeleteDocument,
@@ -75,6 +82,7 @@ vi.mock("../components/DocumentSidebar", () => ({
     documents: Array<{ path: string; name: string; parentPath: string; size: number }>;
     currentPath: string | null;
     onCreateDocument: (parentPath: string) => void;
+    onCreateSpreadsheet: (parentPath: string) => void;
     onExportWorkspaceMarkdown: () => void;
     onOpenDocument: (document: { path: string; name: string; parentPath: string; size: number }) => void;
     onDeleteDocument: (document: { path: string; name: string; parentPath: string; size: number }) => void;
@@ -85,6 +93,9 @@ vi.mock("../components/DocumentSidebar", () => ({
       <div data-testid="current-path">{currentPath ?? ""}</div>
       <button type="button" onClick={() => onCreateDocument("")}>
         侧栏新建文档
+      </button>
+      <button type="button" onClick={() => onCreateSpreadsheet("")}>
+        侧栏新建表格
       </button>
       <button type="button" onClick={onExportWorkspaceMarkdown}>
         导出知识库 Markdown ZIP
@@ -113,18 +124,75 @@ vi.mock("../components/DocumentSidebar", () => ({
   ),
 }));
 
+vi.mock("../features/spreadsheet/SpreadsheetEditor", () => ({
+  SpreadsheetEditor: forwardRef(({
+    document,
+    content,
+    manualSaveRequest,
+    onSave,
+    onSaveStatusChange,
+    onRegisterSaveNow,
+  }: {
+    document: { path: string; name: string } | null;
+    content: string;
+    manualSaveRequest: number;
+    onSave: (relativePath: string, content: string) => Promise<void>;
+    onSaveStatusChange: (status: { state: "clean" | "saved" }) => void;
+    onRegisterSaveNow?: (saveNow: (() => Promise<void>) | null) => void;
+  }, ref: Ref<{
+    importExcel: (file: File) => Promise<string>;
+    exportExcel: () => Promise<File>;
+  }>) => {
+    useEffect(() => {
+      onSaveStatusChange({ state: "clean" });
+    }, [onSaveStatusChange]);
+    useImperativeHandle(ref, () => ({
+      importExcel: async (file: File) => {
+        const nextContent = `{"sheetOrder":["sheet-0001"],"sheets":{"sheet-0001":{"id":"sheet-0001","name":"${file.name}"}}}`;
+        if (document) {
+          await onSave(document.path, nextContent);
+        }
+        return nextContent;
+      },
+      exportExcel: async () => {
+        const buffer = new ArrayBuffer(3);
+        new Uint8Array(buffer).set([7, 8, 9]);
+        return new File([buffer], "budget.xlsx");
+      },
+    }), [document, onSave]);
+    useEffect(() => {
+      const saveNow = async () => {
+        if (document) {
+          await onSave(document.path, content);
+        }
+      };
+      onRegisterSaveNow?.(saveNow);
+      return () => onRegisterSaveNow?.(null);
+    }, [content, document, onRegisterSaveNow, onSave]);
+    useEffect(() => {
+      if (manualSaveRequest > 0 && document) {
+        void onSave(document.path, content);
+      }
+    }, [content, document, manualSaveRequest, onSave]);
+    return <div data-testid="spreadsheet-editor">表格编辑器 {document?.name}</div>;
+  }),
+}));
+
 vi.mock("../lib/tauri", () => ({
+  chooseExcelImportFile: () => chooseExcelImportFile(),
   chooseDatabaseDirectory: vi.fn(async () => "/tmp/selected-db"),
   chooseWorkspaceDirectory: vi.fn(async () => "/tmp/kb"),
   createLakeDirectory: vi.fn(),
   createBackup: (input: { forceFull: boolean }) => createBackup(input),
   createLakeDocument: (title: string, parentPath?: string) => createLakeDocument(title, parentPath),
+  createSpreadsheetDocument: (title: string, parentPath?: string) => createSpreadsheetDocument(title, parentPath),
   createTemporaryResourceUrl: (resourceRef: string, ttlSeconds: number, filename?: string) => (
     createTemporaryResourceUrl(resourceRef, ttlSeconds, filename)
   ),
   deleteLakeDirectory: vi.fn(),
   deleteBackup: (input: { backupId: string }) => deleteBackup(input),
   deleteLakeDocument: (path: string) => deleteLakeDocument(path),
+  deleteSpreadsheetDocument: (path: string) => deleteSpreadsheetDocument(path),
   downloadResourceFile: (input: { url: string; filename: string; resourceRef?: string }) => downloadResourceFile(input),
   getDatabaseLocation: () => getDatabaseLocation(),
   getOssSettings: vi.fn(async () => null),
@@ -138,8 +206,10 @@ vi.mock("../lib/tauri", () => ({
   openExternalUrl: vi.fn(),
   prepareResourcePreview: vi.fn(async (resourceRef: string) => resourceRef),
   readLakeDocument: (path: string) => readLakeDocument(path),
+  readSpreadsheetDocument: (path: string) => readSpreadsheetDocument(path),
   renameLakeDirectory: vi.fn(),
   renameLakeDocument: vi.fn(),
+  renameSpreadsheetDocument: vi.fn(),
   renameWorkspace: vi.fn(),
   saveOssSettings: vi.fn(),
   saveBinaryExport: (defaultPath: string, bytes: Uint8Array, filters: Array<{ name: string; extensions: string[] }>) => saveBinaryExport(defaultPath, bytes, filters),
@@ -161,9 +231,13 @@ vi.mock("../lib/tauri", () => ({
   uploadFile: vi.fn(),
   uploadImage: vi.fn(),
   writeLakeDocument: (path: string, content: string) => writeLakeDocument(path, content),
+  writeSpreadsheetDocument: (path: string, content: string) => writeSpreadsheetDocument(path, content),
 }));
 
 beforeEach(() => {
+  chooseExcelImportFile.mockReset();
+  chooseExcelImportFile.mockResolvedValue(null);
+  createSpreadsheetDocument.mockReset();
   createBackup.mockReset();
   createBackup.mockResolvedValue({
     record: {
@@ -184,6 +258,7 @@ beforeEach(() => {
   createTemporaryResourceUrl.mockReset();
   createTemporaryResourceUrl.mockImplementation(async (resourceRef, ttlSeconds) => `${resourceRef}&ttl=${ttlSeconds}`);
   deleteLakeDocument.mockReset();
+  deleteSpreadsheetDocument.mockReset();
   downloadResourceFile.mockReset();
   downloadResourceFile.mockResolvedValue("/tmp/attachment.pdf");
   getDatabaseLocation.mockReset();
@@ -204,7 +279,10 @@ beforeEach(() => {
   listBackups.mockReset();
   listBackups.mockResolvedValue([]);
   moveWorkspaceItem.mockReset();
+  readLakeDocument.mockReset();
   readLakeDocument.mockResolvedValue("<p>hello</p>");
+  readSpreadsheetDocument.mockReset();
+  readSpreadsheetDocument.mockResolvedValue("{\"sheetOrder\":[\"sheet-0001\"],\"sheets\":{\"sheet-0001\":{\"id\":\"sheet-0001\",\"name\":\"Sheet1\"}}}");
   restoreBackup.mockReset();
   restoreBackup.mockResolvedValue({
     restoredBackupId: "backup",
@@ -220,6 +298,8 @@ beforeEach(() => {
   saveTextExport.mockResolvedValue("/tmp/export.md");
   setWorkspaceRoot.mockReset();
   writeLakeDocument.mockResolvedValue(undefined);
+  writeSpreadsheetDocument.mockReset();
+  writeSpreadsheetDocument.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -239,6 +319,7 @@ test("选择目录后展示 workspace 文档", async () => {
         name: "a",
         parentPath: "",
         size: 1,
+        kind: "lake",
       },
     ],
     order: [],
@@ -268,13 +349,13 @@ test("移动当前打开文档后绑定到后端返回的新路径", async () =>
   getRecentWorkspace.mockResolvedValue({
     root: "/tmp/kb",
     directories: [{ id: "notes", path: "notes", name: "notes", parentPath: "" }],
-    documents: [{ id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1 }],
+    documents: [{ id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" }],
     order: ["document:a.lake", "folder:notes"],
   });
   moveWorkspaceItem.mockResolvedValue({
     root: "/tmp/kb",
     directories: [{ id: "notes", path: "notes", name: "notes", parentPath: "" }],
-    documents: [{ id: "notes/a.lake", path: "notes/a.lake", name: "a", parentPath: "notes", size: 1 }],
+    documents: [{ id: "notes/a.lake", path: "notes/a.lake", name: "a", parentPath: "notes", size: 1, kind: "lake" }],
     order: ["folder:notes", "document:notes/a.lake"],
   });
 
@@ -299,7 +380,7 @@ test("后端移动失败时回滚 workspace 并展示错误", async () => {
   getRecentWorkspace.mockResolvedValue({
     root: "/tmp/kb",
     directories: [{ id: "notes", path: "notes", name: "notes", parentPath: "" }],
-    documents: [{ id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1 }],
+    documents: [{ id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" }],
     order: ["document:a.lake", "folder:notes"],
   });
   moveWorkspaceItem.mockRejectedValue(new Error("目标位置已存在同名项目：notes/a.lake"));
@@ -321,17 +402,17 @@ test("删除当前新建文档后仍可打开已有文档", async () => {
   const initialWorkspace: WorkspacePayload = {
     root: "/tmp/kb",
     directories: [],
-    documents: [{ id: "old.lake", path: "old.lake", name: "old", parentPath: "", size: 1 }],
+    documents: [{ id: "old.lake", path: "old.lake", name: "old", parentPath: "", size: 1, kind: "lake" }],
     order: ["document:old.lake"],
   };
   const createdWorkspace: CreateDocumentPayload = {
     ...initialWorkspace,
     documents: [
       initialWorkspace.documents[0],
-      { id: "未命名文档.lake", path: "未命名文档.lake", name: "未命名文档", parentPath: "", size: 1 },
+      { id: "未命名文档.lake", path: "未命名文档.lake", name: "未命名文档", parentPath: "", size: 1, kind: "lake" },
     ],
     order: ["document:old.lake", "document:未命名文档.lake"],
-    createdDocument: { id: "未命名文档.lake", path: "未命名文档.lake", name: "未命名文档", parentPath: "", size: 1 },
+    createdDocument: { id: "未命名文档.lake", path: "未命名文档.lake", name: "未命名文档", parentPath: "", size: 1, kind: "lake" },
   };
   getRecentWorkspace.mockResolvedValue(initialWorkspace);
   createLakeDocument.mockResolvedValue(createdWorkspace);
@@ -356,6 +437,126 @@ test("删除当前新建文档后仍可打开已有文档", async () => {
   await waitFor(() => {
     expect(screen.getByTestId("current-path")).toHaveTextContent("old.lake");
     expect(screen.queryByText("当前文档保存失败，请先处理后再切换")).not.toBeInTheDocument();
+  });
+});
+
+test("可以新建表格并打开表格编辑器", async () => {
+  const user = userEvent.setup();
+  const payload: CreateDocumentPayload = {
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "未命名表格.json", path: "未命名表格.json", name: "未命名表格", parentPath: "", size: 1, kind: "spreadsheet" }],
+    order: ["document:未命名表格.json"],
+    createdDocument: { id: "未命名表格.json", path: "未命名表格.json", name: "未命名表格", parentPath: "", size: 1, kind: "spreadsheet" },
+  };
+  getRecentWorkspace.mockResolvedValue({ root: "/tmp/kb", directories: [], documents: [], order: [] });
+  createSpreadsheetDocument.mockResolvedValue(payload);
+  readSpreadsheetDocument.mockResolvedValue("{\"sheetOrder\":[\"sheet-0001\"],\"sheets\":{\"sheet-0001\":{\"id\":\"sheet-0001\",\"name\":\"Sheet1\"}}}");
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("button", { name: "侧栏新建表格" }));
+
+  await waitFor(() => {
+    expect(createSpreadsheetDocument).toHaveBeenCalledWith("未命名表格", "");
+    expect(readSpreadsheetDocument).toHaveBeenCalledWith("未命名表格.json");
+    expect(screen.getByTestId("current-path")).toHaveTextContent("未命名表格.json");
+    expect(screen.getByTestId("spreadsheet-editor")).toHaveTextContent("表格编辑器 未命名表格");
+  });
+});
+
+test("打开表格时读取 Univer 快照内容且不展示文档导出入口", async () => {
+  const user = userEvent.setup();
+  const spreadsheetContent = "{\"sheetOrder\":[\"sheet-0001\"],\"sheets\":{\"sheet-0001\":{\"id\":\"sheet-0001\",\"name\":\"Sheet1\"}}}";
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "budget.json", path: "budget.json", name: "budget", parentPath: "", size: 1, kind: "spreadsheet" }],
+    order: ["document:budget.json"],
+  });
+  readSpreadsheetDocument.mockResolvedValue(spreadsheetContent);
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "budget" }));
+
+  await waitFor(() => {
+    expect(readSpreadsheetDocument).toHaveBeenCalledWith("budget.json");
+    expect(screen.getByTestId("spreadsheet-editor")).toHaveTextContent("表格编辑器 budget");
+    expect(screen.queryByRole("button", { name: "导出文档" })).not.toBeInTheDocument();
+  });
+});
+
+test("保存表格时写入当前 Univer 快照内容", async () => {
+  const user = userEvent.setup();
+  const spreadsheetContent = "{\"sheetOrder\":[\"sheet-0001\"],\"sheets\":{\"sheet-0001\":{\"id\":\"sheet-0001\",\"name\":\"Sheet1\"}}}";
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "budget.json", path: "budget.json", name: "budget", parentPath: "", size: 1, kind: "spreadsheet" }],
+    order: ["document:budget.json"],
+  });
+  readSpreadsheetDocument.mockResolvedValue(spreadsheetContent);
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "budget" }));
+  await user.click(await screen.findByRole("button", { name: "保存" }));
+
+  await waitFor(() => {
+    expect(writeSpreadsheetDocument).toHaveBeenCalledWith("budget.json", spreadsheetContent);
+    expect(saveBinaryExport).not.toHaveBeenCalled();
+  });
+});
+
+test("表格文档可以导入 Excel 并写入当前表格快照", async () => {
+  const user = userEvent.setup();
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "budget.json", path: "budget.json", name: "budget", parentPath: "", size: 1, kind: "spreadsheet" }],
+    order: ["document:budget.json"],
+  });
+  chooseExcelImportFile.mockResolvedValue({
+    path: "/tmp/import.xlsx",
+    name: "import.xlsx",
+    bytes: new Uint8Array([1, 2, 3]),
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "budget" }));
+  await user.click(await screen.findByRole("button", { name: "Excel 导入导出" }));
+  await user.click(screen.getByRole("menuitem", { name: "导入 Excel" }));
+
+  await waitFor(() => {
+    expect(chooseExcelImportFile).toHaveBeenCalled();
+    expect(writeSpreadsheetDocument).toHaveBeenCalledWith("budget.json", expect.stringContaining("import.xlsx"));
+    expect(screen.queryByText("正在导入 Excel")).not.toBeInTheDocument();
+  });
+});
+
+test("表格文档可以导出当前快照为 Excel 文件", async () => {
+  const user = userEvent.setup();
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "budget.json", path: "budget.json", name: "budget", parentPath: "", size: 1, kind: "spreadsheet" }],
+    order: ["document:budget.json"],
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "budget" }));
+  await user.click(await screen.findByRole("button", { name: "Excel 导入导出" }));
+  await user.click(screen.getByRole("menuitem", { name: "导出 Excel" }));
+
+  await waitFor(() => {
+    expect(saveBinaryExport).toHaveBeenCalledWith(
+      "budget.xlsx",
+      new Uint8Array([7, 8, 9]),
+      [{ name: "Excel", extensions: ["xlsx"] }],
+    );
   });
 });
 
@@ -389,8 +590,11 @@ test("可以导出整个知识库 Markdown ZIP", async () => {
   getRecentWorkspace.mockResolvedValue({
     root: "/tmp/kb",
     directories: [{ id: "notes", path: "notes", name: "notes", parentPath: "" }],
-    documents: [{ id: "notes/a.lake", path: "notes/a.lake", name: "a", parentPath: "notes", size: 1 }],
-    order: ["folder:notes", "document:notes/a.lake"],
+    documents: [
+      { id: "notes/a.lake", path: "notes/a.lake", name: "a", parentPath: "notes", size: 1, kind: "lake" },
+      { id: "notes/budget.json", path: "notes/budget.json", name: "budget", parentPath: "notes", size: 1, kind: "spreadsheet" },
+    ],
+    order: ["folder:notes", "document:notes/a.lake", "document:notes/budget.json"],
   });
   readLakeDocument.mockResolvedValue("<h1>hello</h1><p>world</p>");
 
@@ -407,6 +611,8 @@ test("可以导出整个知识库 Markdown ZIP", async () => {
     expect(editor.setDocument).toHaveBeenCalledWith("text/lake", "<h1>hello</h1><p>world</p>");
     expect(editor.getDocument).toHaveBeenCalledWith("text/markdown");
     expect(editor.destroy).toHaveBeenCalled();
+    expect(readLakeDocument).toHaveBeenCalledTimes(1);
+    expect(readSpreadsheetDocument).not.toHaveBeenCalled();
   });
 });
 
@@ -424,7 +630,7 @@ test("创建备份前先保存当前打开文档的最新内容", async () => {
   getRecentWorkspace.mockResolvedValue({
     root: "/tmp/kb",
     directories: [],
-    documents: [{ id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1 }],
+    documents: [{ id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" }],
     order: ["document:a.lake"],
   });
   readLakeDocument.mockResolvedValue("<p>备份前旧内容</p>");
@@ -458,7 +664,7 @@ test("恢复备份后刷新当前打开文档内容", async () => {
   const workspace: WorkspacePayload = {
     root: "/tmp/kb",
     directories: [],
-    documents: [{ id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1 }],
+    documents: [{ id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" }],
     order: ["document:a.lake"],
   };
   getRecentWorkspace.mockResolvedValue(workspace);

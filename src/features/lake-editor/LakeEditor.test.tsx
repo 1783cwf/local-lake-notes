@@ -9,6 +9,7 @@ const documentEntry = {
   name: "a",
   parentPath: "",
   size: 0,
+  kind: "lake" as const,
 };
 
 afterEach(() => {

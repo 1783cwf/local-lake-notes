@@ -214,6 +214,9 @@ fn scan_workspace_files(
         if !entry.file_type().is_file() {
             continue;
         }
+        if is_workspace_temporary_file(entry.path()) {
+            continue;
+        }
         let relative_path = match entry.path().strip_prefix(root) {
             Ok(path) => normalize_archive_path(path)?,
             Err(_) => return Err(AppError::PathOutsideWorkspace),
@@ -224,6 +227,13 @@ fn scan_workspace_files(
         )?);
     }
     Ok(snapshots)
+}
+
+fn is_workspace_temporary_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.starts_with("~$"))
+        .unwrap_or(false)
 }
 
 pub fn snapshot_file(logical_path: String, source_path: &Path) -> AppResult<FileSnapshot> {

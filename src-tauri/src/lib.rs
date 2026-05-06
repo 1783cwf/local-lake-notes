@@ -9,8 +9,11 @@ use commands::backup::{
     restore_backup, set_backup_key, verify_backup_key_status,
 };
 use commands::documents::{
-    create_lake_document, delete_lake_document, export_pdf_from_html, read_lake_document,
-    rename_lake_document, write_export_bytes, write_export_file, write_lake_document,
+    create_lake_document, create_spreadsheet_document, delete_lake_document,
+    delete_spreadsheet_document, export_pdf_from_html, read_lake_document,
+    read_external_excel_file, read_spreadsheet_document, rename_lake_document,
+    rename_spreadsheet_document, write_export_bytes, write_export_file, write_lake_document,
+    write_spreadsheet_document,
 };
 use commands::external::{download_external_file, open_external_url};
 use commands::resource_key::{
@@ -30,6 +33,54 @@ use commands::workspace::{
 };
 use state::AppState;
 use storage::app_database::initialize_app_database;
+use tauri::{
+    menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
+    Manager,
+};
+
+const OPEN_DEVTOOLS_MENU_ID: &str = "open-devtools";
+
+fn configure_app_menu(app: &tauri::App) -> tauri::Result<()> {
+    let app_handle = app.handle();
+    let menu = Menu::default(app_handle)?;
+    let open_devtools = MenuItem::with_id(
+        app_handle,
+        OPEN_DEVTOOLS_MENU_ID,
+        "打开开发者工具",
+        true,
+        Some("CmdOrCtrl+Alt+KeyI"),
+    )?;
+
+    let view_menu = menu
+        .items()?
+        .into_iter()
+        .filter_map(|item| item.as_submenu().cloned())
+        .find(|submenu| submenu.text().is_ok_and(|text| text == "View"));
+
+    if let Some(view_menu) = view_menu {
+        view_menu.append(&PredefinedMenuItem::separator(app_handle)?)?;
+        view_menu.append(&open_devtools)?;
+    } else {
+        // Windows/Linux 没有默认 View 菜单时补一个，保持诊断入口在各平台一致可见。
+        menu.append(&Submenu::with_items(
+            app_handle,
+            "View",
+            true,
+            &[&open_devtools],
+        )?)?;
+    }
+
+    app.set_menu(menu)?;
+    app.on_menu_event(|app_handle, event| {
+        if event.id().as_ref() == OPEN_DEVTOOLS_MENU_ID {
+            if let Some(window) = app_handle.get_webview_window("main") {
+                window.open_devtools();
+            }
+        }
+    });
+
+    Ok(())
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -40,6 +91,7 @@ pub fn run() {
             initialize_app_database(app.handle()).map_err(|error| {
                 std::io::Error::new(std::io::ErrorKind::Other, error.to_string())
             })?;
+            configure_app_menu(app)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -53,10 +105,16 @@ pub fn run() {
             save_workspace_order,
             move_workspace_item,
             create_lake_document,
+            create_spreadsheet_document,
             rename_lake_document,
+            rename_spreadsheet_document,
             delete_lake_document,
+            delete_spreadsheet_document,
             read_lake_document,
+            read_spreadsheet_document,
+            read_external_excel_file,
             write_lake_document,
+            write_spreadsheet_document,
             write_export_file,
             write_export_bytes,
             export_pdf_from_html,

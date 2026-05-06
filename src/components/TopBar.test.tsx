@@ -15,6 +15,7 @@ test("双击文档标题后可以提交新名称", async () => {
         name: "未命名文档",
         parentPath: "",
         size: 1,
+        kind: "lake",
       }}
       saveStatus={{ state: "clean" }}
       onManualSave={vi.fn()}
@@ -42,6 +43,7 @@ test("右上角导出菜单可以选择文档导出格式", async () => {
         name: "导出测试",
         parentPath: "",
         size: 1,
+        kind: "lake",
       }}
       saveStatus={{ state: "clean" }}
       onManualSave={vi.fn()}
@@ -53,4 +55,39 @@ test("右上角导出菜单可以选择文档导出格式", async () => {
   await user.click(screen.getByRole("menuitem", { name: "PDF" }));
 
   expect(onExportDocument).toHaveBeenCalledWith("pdf", "bundle", 86400);
+});
+
+test("表格文档显示 Excel 导入导出菜单", async () => {
+  const user = userEvent.setup();
+  const onImportSpreadsheetExcel = vi.fn();
+  const onExportSpreadsheetExcel = vi.fn();
+
+  render(
+    <TopBar
+      document={{
+        id: "预算.json",
+        path: "预算.json",
+        name: "预算",
+        parentPath: "",
+        size: 1,
+        kind: "spreadsheet",
+      }}
+      saveStatus={{ state: "clean" }}
+      onManualSave={vi.fn()}
+      onExportDocument={vi.fn()}
+      onImportSpreadsheetExcel={onImportSpreadsheetExcel}
+      onExportSpreadsheetExcel={onExportSpreadsheetExcel}
+    />,
+  );
+
+  expect(screen.queryByRole("button", { name: "导出文档" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "保存" })).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "Excel 导入导出" }));
+  await user.click(screen.getByRole("menuitem", { name: "导入 Excel" }));
+  expect(onImportSpreadsheetExcel).toHaveBeenCalledTimes(1);
+
+  await user.click(screen.getByRole("button", { name: "Excel 导入导出" }));
+  await user.click(screen.getByRole("menuitem", { name: "导出 Excel" }));
+  expect(onExportSpreadsheetExcel).toHaveBeenCalledTimes(1);
 });

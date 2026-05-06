@@ -8,6 +8,7 @@ test("E2E smoke 基础文档树链路可用", () => {
       path: "guide.lake",
       name: "guide",
       parentPath: "",
+      kind: "lake",
       size: 10,
     },
   ]);

@@ -13,6 +13,8 @@ fn builds_full_and_incremental_manifests() {
     let workspace = dir.path().join("workspace");
     fs::create_dir_all(&workspace).unwrap();
     fs::write(workspace.join("a.lake"), "<p>a</p>").unwrap();
+    fs::write(workspace.join("budget.json"), r#"{"sheetOrder":["sheet-0001"],"sheets":{"sheet-0001":{"id":"sheet-0001","name":"Sheet1"}}}"#).unwrap();
+    fs::write(workspace.join("~$budget.json"), b"temporary").unwrap();
     let database = dir.path().join("db.sqlite3");
     fs::write(&database, "db-v1").unwrap();
     let known = vec![KnownWorkspace {
@@ -50,6 +52,14 @@ fn builds_full_and_incremental_manifests() {
         .files
         .iter()
         .any(|entry| entry.logical_path.ends_with("a.lake")));
+    assert!(incremental
+        .files
+        .iter()
+        .any(|entry| entry.logical_path.ends_with("budget.json")));
+    assert!(!incremental
+        .files
+        .iter()
+        .any(|entry| entry.logical_path.ends_with("~$budget.json")));
     assert!(changed_files
         .iter()
         .any(|file| file.entry.logical_path.ends_with("b.lake")));

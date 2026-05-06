@@ -717,6 +717,38 @@ button {
   margin: 0 !important;
 }
 
+.spreadsheet-editor-root {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.spreadsheet-editor-container {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.spreadsheet-editor-state {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--muted);
+  background: rgb(255 255 255 / 78%);
+  font-size: 14px;
+}
+
+.spreadsheet-editor-state--error {
+  flex-direction: column;
+  color: #9f2b1d;
+}
+
 .lake-file-card-active {
   border-radius: 3px;
   outline: 1px solid #8bbcff;

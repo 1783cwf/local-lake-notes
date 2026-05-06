@@ -1,6 +1,6 @@
 {
   "name": "local-lake-notes",
-  "version": "0.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -19,9 +19,14 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@tauri-apps/api": "2.10.1",
     "@tauri-apps/plugin-dialog": "2.7.0",
+    "@univerjs/core": "^0.21.1",
+    "@univerjs/preset-sheets-core": "^0.21.1",
+    "@univerjs/themes": "^0.21.1",
+    "exceljs": "^4.4.0",
     "lucide-react": "1.1.0",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "rxjs": "^7.8.2"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.10.1",
