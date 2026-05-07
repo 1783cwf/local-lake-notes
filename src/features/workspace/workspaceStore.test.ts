@@ -14,7 +14,7 @@ const doc = (path: string, parentPath = ""): WorkspaceDocument => ({
   path,
   name: documentTitleFromPath(path),
   parentPath,
-  kind: path.endsWith(".json") ? "spreadsheet" : "lake",
+  kind: path.endsWith(".dbtable.json") ? "multidimensional-table" : path.endsWith(".json") ? "spreadsheet" : "lake",
   size: 1,
 });
 
@@ -58,6 +58,10 @@ test("从 .lake 路径提取文档标题", () => {
 
 test("从 Univer 快照 JSON 路径提取表格标题", () => {
   expect(documentTitleFromPath("nested/预算表.json")).toBe("预算表");
+});
+
+test("从多维表格 JSON 路径提取标题", () => {
+  expect(documentTitleFromPath("nested/上线记录.dbtable.json")).toBe("上线记录");
 });
 
 test("计算文档拖入目录的目标父目录和乐观路径", () => {

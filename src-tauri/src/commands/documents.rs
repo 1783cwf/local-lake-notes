@@ -16,6 +16,7 @@ use crate::storage::app_database::{
 };
 
 const EMPTY_LAKE_DOCUMENT: &str = "<p><span class=\"ne-text\"> </span></p>";
+const MULTIDIMENSIONAL_TABLE_KIND: &str = "multidimensional-table";
 
 #[tauri::command]
 pub fn create_lake_document(
@@ -62,6 +63,36 @@ pub fn create_spreadsheet_document(
         .find(|document| document.path == created_path)
         .cloned()
         .ok_or(AppError::InvalidSpreadsheetPath)?;
+    Ok(CreateDocumentPayload {
+        root: payload.root,
+        directories: payload.directories,
+        documents: payload.documents,
+        order: payload.order,
+        created_document,
+    })
+}
+
+#[tauri::command]
+pub fn create_multidimensional_table_document(
+    title: String,
+    parent_path: Option<String>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<CreateDocumentPayload> {
+    let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
+    let created_path = create_multidimensional_table_at(
+        &root,
+        parent_path.as_deref().unwrap_or_default(),
+        &title,
+    )?;
+    push_workspace_order_item(&app, &root, format!("document:{created_path}"))?;
+    let payload = workspace_payload_for_app(&app, &root)?;
+    let created_document = payload
+        .documents
+        .iter()
+        .find(|document| document.path == created_path)
+        .cloned()
+        .ok_or(AppError::InvalidMultidimensionalTablePath)?;
     Ok(CreateDocumentPayload {
         root: payload.root,
         directories: payload.directories,
@@ -124,6 +155,33 @@ pub fn rename_spreadsheet_document(
 }
 
 #[tauri::command]
+pub fn rename_multidimensional_table_document(
+    relative_path: String,
+    title: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<WorkspacePayload> {
+    let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
+    let current_path = resolve_existing_multidimensional_table_path(&root, &relative_path)?;
+    let parent = current_path
+        .parent()
+        .ok_or(AppError::InvalidMultidimensionalTablePath)?;
+    let filename = format!("{}.dbtable.json", safe_file_stem(&title)?);
+    let target = parent.join(&filename);
+    if target.exists() {
+        return Err(AppError::InvalidFilename);
+    }
+    fs::rename(current_path, target)?;
+    rewrite_workspace_order_path(
+        &app,
+        &root,
+        &relative_path,
+        &replace_file_name(&relative_path, &filename),
+    )?;
+    workspace_payload_for_app(&app, &root)
+}
+
+#[tauri::command]
 pub fn delete_lake_document(
     relative_path: String,
     app: AppHandle,
@@ -150,6 +208,19 @@ pub fn delete_spreadsheet_document(
 }
 
 #[tauri::command]
+pub fn delete_multidimensional_table_document(
+    relative_path: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<WorkspacePayload> {
+    let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
+    let path = resolve_existing_multidimensional_table_path(&root, &relative_path)?;
+    fs::remove_file(path)?;
+    prune_workspace_order_path(&app, &root, &relative_path)?;
+    workspace_payload_for_app(&app, &root)
+}
+
+#[tauri::command]
 pub fn read_lake_document(relative_path: String, state: State<'_, AppState>) -> AppResult<String> {
     let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
     let path = resolve_existing_lake_path(&root, &relative_path)?;
@@ -163,6 +234,16 @@ pub fn read_spreadsheet_document(
 ) -> AppResult<String> {
     let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
     let path = resolve_existing_spreadsheet_path(&root, &relative_path)?;
+    Ok(fs::read_to_string(path)?)
+}
+
+#[tauri::command]
+pub fn read_multidimensional_table_document(
+    relative_path: String,
+    state: State<'_, AppState>,
+) -> AppResult<String> {
+    let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
+    let path = resolve_existing_multidimensional_table_path(&root, &relative_path)?;
     Ok(fs::read_to_string(path)?)
 }
 
@@ -203,6 +284,17 @@ pub fn write_spreadsheet_document(
 }
 
 #[tauri::command]
+pub fn write_multidimensional_table_document(
+    relative_path: String,
+    content: String,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
+    let path = resolve_writable_multidimensional_table_path(&root, &relative_path)?;
+    atomic_write_multidimensional_table(&path, &content)
+}
+
+#[tauri::command]
 pub fn write_export_file(path: String, content: String) -> AppResult<()> {
     let path = Path::new(&path);
     ensure_export_parent(path)?;
@@ -238,6 +330,10 @@ pub fn create_document(root: &Path, title: &str) -> AppResult<String> {
 
 pub fn create_spreadsheet(root: &Path, title: &str) -> AppResult<String> {
     create_spreadsheet_at(root, "", title)
+}
+
+pub fn create_multidimensional_table(root: &Path, title: &str) -> AppResult<String> {
+    create_multidimensional_table_at(root, "", title)
 }
 
 pub fn create_document_at(root: &Path, parent_path: &str, title: &str) -> AppResult<String> {
@@ -302,6 +398,46 @@ pub fn create_spreadsheet_from_content_at(
     Ok(relative_path)
 }
 
+pub fn create_multidimensional_table_at(
+    root: &Path,
+    parent_path: &str,
+    title: &str,
+) -> AppResult<String> {
+    let content = empty_multidimensional_table_document()?;
+    create_multidimensional_table_from_content_at(root, parent_path, title, &content)
+}
+
+pub fn create_multidimensional_table_from_content_at(
+    root: &Path,
+    parent_path: &str,
+    title: &str,
+    content: &str,
+) -> AppResult<String> {
+    let stem = safe_file_stem(title)?;
+    let parent = resolve_existing_directory_path(root, parent_path)?;
+    let normalized_parent = if parent_path.trim().is_empty() {
+        String::new()
+    } else {
+        parent_path.trim_matches('/').to_string()
+    };
+    let mut candidate = format!("{stem}.dbtable.json");
+    let mut counter = 2;
+
+    while parent.join(&candidate).exists() {
+        candidate = format!("{stem}-{counter}.dbtable.json");
+        counter += 1;
+    }
+
+    let relative_path = if normalized_parent.is_empty() {
+        candidate.clone()
+    } else {
+        format!("{normalized_parent}/{candidate}")
+    };
+    let path = resolve_writable_multidimensional_table_path(root, &relative_path)?;
+    atomic_write_multidimensional_table(&path, content)?;
+    Ok(relative_path)
+}
+
 fn empty_spreadsheet_document(title: &str) -> AppResult<String> {
     // Univer 的原生保存结果是 IWorkbookData 快照对象；新建表格直接生成同结构 JSON，避免额外格式转换。
     let snapshot = serde_json::json!({
@@ -340,6 +476,54 @@ fn empty_spreadsheet_document(title: &str) -> AppResult<String> {
                 "rightToLeft": 0
             }
         }
+    });
+    Ok(format!("{}\n", serde_json::to_string_pretty(&snapshot)?))
+}
+
+fn empty_multidimensional_table_document() -> AppResult<String> {
+    // 多维表格是 record-based schema，不能复用 Univer workbook；这里生成带 kind 判别字段的独立 JSON。
+    let snapshot = serde_json::json!({
+        "kind": MULTIDIMENSIONAL_TABLE_KIND,
+        "version": 1,
+        "fields": [
+            { "id": "title", "name": "标题", "type": "text", "primary": true },
+            {
+                "id": "status",
+                "name": "上线状态",
+                "type": "singleSelect",
+                "options": [
+                    { "id": "status-pending", "label": "待上线", "color": "green" },
+                    { "id": "status-progress", "label": "进行中", "color": "blue" },
+                    { "id": "status-paused", "label": "搁置", "color": "yellow" },
+                    { "id": "status-done", "label": "已上线", "color": "gray" }
+                ]
+            },
+            {
+                "id": "type",
+                "name": "类型",
+                "type": "multiSelect",
+                "options": [
+                    { "id": "type-dual-center", "label": "双中心", "color": "cyan" },
+                    { "id": "type-gateway", "label": "流量网关", "color": "green" },
+                    { "id": "type-automation", "label": "智能批文", "color": "orange" }
+                ]
+            },
+            { "id": "description", "name": "主要内容", "type": "longText" },
+            { "id": "launchDate", "name": "上线日期", "type": "date" },
+            { "id": "attachment", "name": "附件", "type": "attachment" }
+        ],
+        "records": [],
+        "views": [
+            { "id": "view-table", "name": "表格", "type": "table" },
+            {
+                "id": "view-board",
+                "name": "看板",
+                "type": "board",
+                "groupByFieldId": "status",
+                "cardFieldIds": ["type", "description", "launchDate", "attachment"]
+            }
+        ],
+        "activeViewId": "view-board"
     });
     Ok(format!("{}\n", serde_json::to_string_pretty(&snapshot)?))
 }
@@ -395,6 +579,17 @@ pub fn atomic_write_spreadsheet(path: &Path, content: &str) -> AppResult<()> {
     Ok(())
 }
 
+pub fn atomic_write_multidimensional_table(path: &Path, content: &str) -> AppResult<()> {
+    let parent = path
+        .parent()
+        .ok_or(AppError::InvalidMultidimensionalTablePath)?;
+    fs::create_dir_all(parent)?;
+    let temp_path = path.with_extension("dbtable.json.tmp");
+    fs::write(&temp_path, content)?;
+    fs::rename(temp_path, path)?;
+    Ok(())
+}
+
 pub fn resolve_existing_spreadsheet_path(root: &Path, relative_path: &str) -> AppResult<PathBuf> {
     validate_relative_spreadsheet_path(relative_path)?;
     let root = root.canonicalize()?;
@@ -428,6 +623,58 @@ fn validate_relative_spreadsheet_path(relative_path: &str) -> AppResult<()> {
         .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
     {
         return Err(AppError::InvalidSpreadsheetPath);
+    }
+    for component in path.components() {
+        if matches!(
+            component,
+            Component::CurDir | Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        ) {
+            return Err(AppError::PathOutsideWorkspace);
+        }
+    }
+    Ok(())
+}
+
+pub fn resolve_existing_multidimensional_table_path(
+    root: &Path,
+    relative_path: &str,
+) -> AppResult<PathBuf> {
+    validate_relative_multidimensional_table_path(relative_path)?;
+    let root = root.canonicalize()?;
+    let full_path = root.join(relative_path).canonicalize()?;
+    if !full_path.starts_with(&root) {
+        return Err(AppError::PathOutsideWorkspace);
+    }
+    Ok(full_path)
+}
+
+pub fn resolve_writable_multidimensional_table_path(
+    root: &Path,
+    relative_path: &str,
+) -> AppResult<PathBuf> {
+    validate_relative_multidimensional_table_path(relative_path)?;
+    let root = root.canonicalize()?;
+    let full_path = root.join(relative_path);
+    let parent = full_path
+        .parent()
+        .ok_or(AppError::InvalidMultidimensionalTablePath)?;
+    let parent = parent.canonicalize()?;
+    if !parent.starts_with(&root) {
+        return Err(AppError::PathOutsideWorkspace);
+    }
+    Ok(full_path)
+}
+
+fn validate_relative_multidimensional_table_path(relative_path: &str) -> AppResult<()> {
+    let path = Path::new(relative_path);
+    if path.is_absolute() {
+        return Err(AppError::PathOutsideWorkspace);
+    }
+    if !relative_path
+        .to_ascii_lowercase()
+        .ends_with(".dbtable.json")
+    {
+        return Err(AppError::InvalidMultidimensionalTablePath);
     }
     for component in path.components() {
         if matches!(

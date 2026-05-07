@@ -49,6 +49,7 @@ export function LakeEditor({
   const editorRef = useRef<LakeEditorInstance | null>(null);
   const handledExportRequestRef = useRef(0);
   const resourcePreviewsRef = useRef<ResourcePreview[]>([]);
+  const documentPath = document?.path ?? null;
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const readLakeContent = useCallback(() => {
@@ -97,16 +98,16 @@ export function LakeEditor({
 
   const saveContent = useCallback(
     async (nextContent: string) => {
-      if (!document) {
+      if (!documentPath) {
         return;
       }
-      await onSave(document.path, nextContent);
+      await onSave(documentPath, nextContent);
     },
-    [document, onSave],
+    [documentPath, onSave],
   );
 
   const { status, setStatus, scheduleSave, saveNow, saveNowOrThrow } = useLakeAutosave({
-    enabled: Boolean(document),
+    enabled: Boolean(documentPath),
     readContent,
     saveContent,
   });
@@ -116,12 +117,13 @@ export function LakeEditor({
   }, [onSaveStatusChange, status]);
 
   useEffect(() => {
-    onRegisterSaveNow?.(document ? saveNowOrThrow : null);
+    onRegisterSaveNow?.(documentPath ? saveNowOrThrow : null);
     return () => onRegisterSaveNow?.(null);
-  }, [document, onRegisterSaveNow, saveNowOrThrow]);
+  }, [documentPath, onRegisterSaveNow, saveNowOrThrow]);
 
+  // Lake 实例只跟容器和文档路径绑定；内容刷新单独处理，避免 workspace 刷新时销毁编辑器导致右侧空白。
   useLayoutEffect(() => {
-    if (!document || !containerRef.current) {
+    if (!documentPath || !containerRef.current) {
       destroyLakeEditor(editorRef.current);
       editorRef.current = null;
       setLoadError(null);
@@ -135,7 +137,6 @@ export function LakeEditor({
 
     setLoadError(null);
     destroyLakeEditor(editorRef.current);
-    let cancelled = false;
     let editor: LakeEditorInstance;
     try {
       editor = createLakeEditor(containerRef.current, {
@@ -147,21 +148,6 @@ export function LakeEditor({
         downloadFile: (file) => onDownloadFile({ url: file.src, filename: file.name, resourceRef: resolveResourceRef(file.src) }),
       });
       editorRef.current = editor;
-      void hydrateLakeResources(content, async (resourceRef) => {
-        const previewUrl = await onPrepareResourcePreview(resourceRef);
-        rememberPreview(resourceRef, previewUrl);
-        return previewUrl;
-      }).then((hydratedContent) => {
-        if (!cancelled) {
-          editor.setDocument("text/lake", hydratedContent);
-          setStatus({ state: "clean" });
-        }
-      }).catch((error) => {
-        if (!cancelled) {
-          setLoadError(toMessage(error));
-        }
-      });
-      setStatus({ state: "clean" });
     } catch (error) {
       editorRef.current = null;
       setLoadError(toMessage(error));
@@ -169,13 +155,41 @@ export function LakeEditor({
     }
 
     return () => {
-      cancelled = true;
       destroyLakeEditor(editor);
       if (editorRef.current === editor) {
         editorRef.current = null;
       }
     };
-  }, [content, document, onDownloadFile, onPrepareResourcePreview, onUploadFile, onUploadImage, scheduleSave, setStatus]);
+  }, [documentPath, onDownloadFile, onUploadFile, onUploadImage, registerUploadPreview, resolveResourceRef, scheduleSave]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!documentPath || !editor) {
+      return;
+    }
+
+    let cancelled = false;
+    resourcePreviewsRef.current = [];
+    setLoadError(null);
+    void hydrateLakeResources(content, async (resourceRef) => {
+      const previewUrl = await onPrepareResourcePreview(resourceRef);
+      rememberPreview(resourceRef, previewUrl);
+      return previewUrl;
+    }).then((hydratedContent) => {
+      if (!cancelled && editorRef.current === editor) {
+        editor.setDocument("text/lake", hydratedContent);
+        setStatus({ state: "clean" });
+      }
+    }).catch((error) => {
+      if (!cancelled && editorRef.current === editor) {
+        setLoadError(toMessage(error));
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [content, documentPath, onPrepareResourcePreview, rememberPreview, setStatus]);
 
   useEffect(() => {
     if (manualSaveRequest > 0) {

@@ -29,12 +29,23 @@ import {
   Folder,
   FolderPlus,
   GripVertical,
+  LayoutGrid,
   Pencil,
   Search,
   Trash2,
   X,
 } from "lucide-react";
-import { useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  forwardRef,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
 
 import type {
   DocumentTreeNode,
@@ -59,6 +70,7 @@ interface DocumentSidebarProps {
   onOpenDocument: (document: WorkspaceDocument) => void;
   onCreateDocument: (parentPath: string) => void;
   onCreateSpreadsheet: (parentPath: string) => void;
+  onCreateMultidimensionalTable: (parentPath: string) => void;
   onCreateDirectory: (parentPath: string) => void;
   onRenameWorkspace: () => void;
   onExportWorkspaceMarkdown: () => void;
@@ -72,6 +84,11 @@ interface DocumentSidebarProps {
 
 const rootDropId = "__workspace-root-end__";
 
+type SidebarContextMenu =
+  | { kind: "root"; x: number; y: number; parentPath: string }
+  | { kind: "folder"; x: number; y: number; node: FlatDocumentTreeNode & { directory: WorkspaceDirectory } }
+  | { kind: "document"; x: number; y: number; node: FlatDocumentTreeNode & { document: WorkspaceDocument } };
+
 export function DocumentSidebar({
   workspaceRoot,
   directories,
@@ -81,6 +98,7 @@ export function DocumentSidebar({
   onOpenDocument,
   onCreateDocument,
   onCreateSpreadsheet,
+  onCreateMultidimensionalTable,
   onCreateDirectory,
   onRenameWorkspace,
   onExportWorkspaceMarkdown,
@@ -110,6 +128,8 @@ export function DocumentSidebar({
     intent: WorkspaceDropIntent;
     resolution: WorkspaceMoveResolution;
   } | null>(null);
+  const [contextMenu, setContextMenu] = useState<SidebarContextMenu | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const activeNode = activeId ? flatNodes.find((node) => node.itemId === activeId) ?? null : null;
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -172,6 +192,53 @@ export function DocumentSidebar({
     setActiveId(null);
     setDropState(null);
   };
+  const openRootContextMenu = (event: ReactMouseEvent) => {
+    if (!workspaceRoot || event.defaultPrevented) {
+      return;
+    }
+    event.preventDefault();
+    setContextMenu({ kind: "root", parentPath: "", ...contextMenuPosition(event) });
+  };
+  const openNodeContextMenu = (event: ReactMouseEvent, node: FlatDocumentTreeNode) => {
+    if (!workspaceRoot) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (node.type === "folder" && node.directory) {
+      setContextMenu({ kind: "folder", node: node as FlatDocumentTreeNode & { directory: WorkspaceDirectory }, ...contextMenuPosition(event) });
+      return;
+    }
+    if (node.type === "document" && node.document) {
+      setContextMenu({ kind: "document", node: node as FlatDocumentTreeNode & { document: WorkspaceDocument }, ...contextMenuPosition(event) });
+    }
+  };
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return;
+    }
+
+    const closeContextMenu = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && contextMenuRef.current?.contains(target)) {
+        return;
+      }
+      setContextMenu(null);
+    };
+    const closeContextMenuByEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setContextMenu(null);
+      }
+    };
+
+    window.document.addEventListener("pointerdown", closeContextMenu);
+    window.document.addEventListener("keydown", closeContextMenuByEscape);
+    return () => {
+      window.document.removeEventListener("pointerdown", closeContextMenu);
+      window.document.removeEventListener("keydown", closeContextMenuByEscape);
+    };
+  }, [contextMenu]);
 
   return (
     <aside className={`document-sidebar${collapsed ? " is-collapsed" : ""}`} aria-hidden={collapsed || undefined}>
@@ -196,10 +263,13 @@ export function DocumentSidebar({
           <button type="button" className="tiny-icon-button" onClick={() => onCreateSpreadsheet("")} aria-label="新建表格" disabled={!workspaceRoot}>
             <FileSpreadsheet size={15} />
           </button>
+          <button type="button" className="tiny-icon-button" onClick={() => onCreateMultidimensionalTable("")} aria-label="新建多维表格" disabled={!workspaceRoot}>
+            <LayoutGrid size={15} />
+          </button>
         </div>
       </div>
 
-      <div className="sidebar-section">
+      <div className="sidebar-section" onContextMenu={openRootContextMenu}>
         <div className="sidebar-section__title">目录</div>
         <label className={`sidebar-search${!workspaceRoot || documents.length === 0 ? " is-disabled" : ""}`}>
           <Search size={14} />
@@ -241,11 +311,13 @@ export function DocumentSidebar({
                     onOpenDocument={onOpenDocument}
                     onCreateDocument={onCreateDocument}
                     onCreateSpreadsheet={onCreateSpreadsheet}
+                    onCreateMultidimensionalTable={onCreateMultidimensionalTable}
                     onCreateDirectory={onCreateDirectory}
                     onRenameDocument={onRenameDocument}
                     onDeleteDocument={onDeleteDocument}
                     onRenameDirectory={onRenameDirectory}
                     onDeleteDirectory={onDeleteDirectory}
+                    onOpenContextMenu={openNodeContextMenu}
                   />
                 ))}
                 <RootDropZone active={Boolean(activeId)} dropState={dropState} />
@@ -260,6 +332,21 @@ export function DocumentSidebar({
             <p>{normalizedSearchQuery ? "没有匹配的文档" : workspaceRoot ? "还没有 Lake 文档" : "选择目录后显示文档"}</p>
           </div>
         )}
+        {contextMenu ? (
+          <SidebarContextMenuPanel
+            ref={contextMenuRef}
+            menu={contextMenu}
+            onClose={() => setContextMenu(null)}
+            onCreateDocument={onCreateDocument}
+            onCreateSpreadsheet={onCreateSpreadsheet}
+            onCreateMultidimensionalTable={onCreateMultidimensionalTable}
+            onCreateDirectory={onCreateDirectory}
+            onRenameDocument={onRenameDocument}
+            onDeleteDocument={onDeleteDocument}
+            onRenameDirectory={onRenameDirectory}
+            onDeleteDirectory={onDeleteDirectory}
+          />
+        ) : null}
       </div>
     </aside>
   );
@@ -275,11 +362,13 @@ function SortableTreeRow({
   onOpenDocument,
   onCreateDocument,
   onCreateSpreadsheet,
+  onCreateMultidimensionalTable,
   onCreateDirectory,
   onRenameDocument,
   onDeleteDocument,
   onRenameDirectory,
   onDeleteDirectory,
+  onOpenContextMenu,
 }: {
   node: FlatDocumentTreeNode;
   expanded: boolean;
@@ -290,11 +379,13 @@ function SortableTreeRow({
   onOpenDocument: (document: WorkspaceDocument) => void;
   onCreateDocument: (parentPath: string) => void;
   onCreateSpreadsheet: (parentPath: string) => void;
+  onCreateMultidimensionalTable: (parentPath: string) => void;
   onCreateDirectory: (parentPath: string) => void;
   onRenameDocument: (document: WorkspaceDocument) => void;
   onDeleteDocument: (document: WorkspaceDocument) => void;
   onRenameDirectory: (directory: WorkspaceDirectory) => void;
   onDeleteDirectory: (directory: WorkspaceDirectory) => void;
+  onOpenContextMenu: (event: ReactMouseEvent, node: FlatDocumentTreeNode) => void;
 }) {
   const {
     attributes,
@@ -355,6 +446,7 @@ function SortableTreeRow({
       aria-expanded={node.type === "folder" && node.hasChildren ? expanded : undefined}
       tabIndex={0}
       onKeyDown={onKeyDown}
+      onContextMenu={(event) => onOpenContextMenu(event, node)}
     >
       <button
         type="button"
@@ -389,6 +481,7 @@ function SortableTreeRow({
               <RowButton label="新建子目录" onClick={() => onCreateDirectory(node.path)} icon={<FolderPlus size={14} />} />
               <RowButton label="新建文档" onClick={() => onCreateDocument(node.path)} icon={<FilePlus size={14} />} />
               <RowButton label="新建表格" onClick={() => onCreateSpreadsheet(node.path)} icon={<FileSpreadsheet size={14} />} />
+              <RowButton label="新建多维表格" onClick={() => onCreateMultidimensionalTable(node.path)} icon={<LayoutGrid size={14} />} />
               <RowButton label="重命名目录" onClick={() => onRenameDirectory(node.directory!)} icon={<Pencil size={14} />} />
               <RowButton label="删除目录" onClick={() => onDeleteDirectory(node.directory!)} icon={<Trash2 size={14} />} />
             </RowActions>
@@ -396,7 +489,7 @@ function SortableTreeRow({
         </>
       ) : (
         <>
-          {node.document?.kind === "spreadsheet" ? <FileSpreadsheet size={15} /> : <FileText size={15} />}
+          {documentIcon(node.document)}
           <span>{node.name}</span>
           {node.document ? (
             <RowActions>
@@ -431,14 +524,107 @@ function TreeRowOverlay({ node }: { node: FlatDocumentTreeNode }) {
   return (
     <div className="tree-row tree-row--overlay">
       <GripVertical size={13} className="drag-handle" />
-      {node.type === "folder" ? <Folder size={15} /> : node.document?.kind === "spreadsheet" ? <FileSpreadsheet size={15} /> : <FileText size={15} />}
+      {node.type === "folder" ? <Folder size={15} /> : documentIcon(node.document)}
       <span>{node.name}</span>
     </div>
   );
 }
 
+function documentIcon(document: WorkspaceDocument | undefined) {
+  if (document?.kind === "spreadsheet") {
+    return <FileSpreadsheet size={15} />;
+  }
+  if (document?.kind === "multidimensional-table") {
+    return <LayoutGrid size={15} />;
+  }
+  return <FileText size={15} />;
+}
+
 function RowActions({ children }: { children: ReactNode }) {
   return <div className="tree-row__actions">{children}</div>;
+}
+
+const SidebarContextMenuPanel = forwardRef<HTMLDivElement, {
+  menu: SidebarContextMenu;
+  onClose: () => void;
+  onCreateDocument: (parentPath: string) => void;
+  onCreateSpreadsheet: (parentPath: string) => void;
+  onCreateMultidimensionalTable: (parentPath: string) => void;
+  onCreateDirectory: (parentPath: string) => void;
+  onRenameDocument: (document: WorkspaceDocument) => void;
+  onDeleteDocument: (document: WorkspaceDocument) => void;
+  onRenameDirectory: (directory: WorkspaceDirectory) => void;
+  onDeleteDirectory: (directory: WorkspaceDirectory) => void;
+}>(({
+  menu,
+  onClose,
+  onCreateDocument,
+  onCreateSpreadsheet,
+  onCreateMultidimensionalTable,
+  onCreateDirectory,
+  onRenameDocument,
+  onDeleteDocument,
+  onRenameDirectory,
+  onDeleteDirectory,
+}, ref) => {
+  const parentPath = menu.kind === "root" ? menu.parentPath : menu.node.path;
+  const runAction = (action: () => void) => {
+    action();
+    onClose();
+  };
+
+  return (
+    <div
+      ref={ref}
+      className="sidebar-context-menu"
+      role="menu"
+      aria-label="目录右键菜单"
+      style={{ "--context-menu-x": `${menu.x}px`, "--context-menu-y": `${menu.y}px` } as CSSProperties}
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      {(menu.kind === "root" || menu.kind === "folder") ? (
+        <>
+          <ContextMenuButton label="新建目录" icon={<FolderPlus size={15} />} onClick={() => runAction(() => onCreateDirectory(parentPath))} />
+          <ContextMenuButton label="新建文档" icon={<FilePlus size={15} />} onClick={() => runAction(() => onCreateDocument(parentPath))} />
+          <ContextMenuButton label="新建表格" icon={<FileSpreadsheet size={15} />} onClick={() => runAction(() => onCreateSpreadsheet(parentPath))} />
+          <ContextMenuButton label="新建多维表格" icon={<LayoutGrid size={15} />} onClick={() => runAction(() => onCreateMultidimensionalTable(parentPath))} />
+        </>
+      ) : null}
+      {menu.kind === "folder" ? (
+        <>
+          <div className="sidebar-context-menu__separator" />
+          <ContextMenuButton label="重命名目录" icon={<Pencil size={15} />} onClick={() => runAction(() => onRenameDirectory(menu.node.directory))} />
+          <ContextMenuButton danger label="删除目录" icon={<Trash2 size={15} />} onClick={() => runAction(() => onDeleteDirectory(menu.node.directory))} />
+        </>
+      ) : null}
+      {menu.kind === "document" ? (
+        <>
+          <ContextMenuButton label="重命名文档" icon={<Pencil size={15} />} onClick={() => runAction(() => onRenameDocument(menu.node.document))} />
+          <ContextMenuButton danger label="删除文档" icon={<Trash2 size={15} />} onClick={() => runAction(() => onDeleteDocument(menu.node.document))} />
+        </>
+      ) : null}
+    </div>
+  );
+});
+SidebarContextMenuPanel.displayName = "SidebarContextMenuPanel";
+
+function ContextMenuButton({
+  label,
+  icon,
+  danger = false,
+  onClick,
+}: {
+  label: string;
+  icon: ReactNode;
+  danger?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button type="button" role="menuitem" className={danger ? "is-danger" : undefined} onClick={onClick}>
+      {icon}
+      {label}
+    </button>
+  );
 }
 
 function RowButton({ label, icon, onClick }: { label: string; icon: ReactNode; onClick: () => void }) {
@@ -459,6 +645,13 @@ function RowButton({ label, icon, onClick }: { label: string; icon: ReactNode; o
       {icon}
     </button>
   );
+}
+
+function contextMenuPosition(event: ReactMouseEvent): { x: number; y: number } {
+  return {
+    x: Math.min(event.clientX, window.innerWidth - 188),
+    y: Math.min(event.clientY, window.innerHeight - 244),
+  };
 }
 
 export function resolvePointerIntent(

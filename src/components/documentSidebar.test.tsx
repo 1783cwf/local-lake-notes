@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 
@@ -20,6 +20,7 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof DocumentSidebar>
     order: [],
     onCreateDocument: vi.fn(),
     onCreateSpreadsheet: vi.fn(),
+    onCreateMultidimensionalTable: vi.fn(),
     onCreateDirectory: vi.fn(),
     onRenameWorkspace: vi.fn(),
     onExportWorkspaceMarkdown: vi.fn(),
@@ -152,6 +153,33 @@ test("表格文档可以搜索并通过目录入口创建", async () => {
   expect(onCreateSpreadsheet).toHaveBeenCalledWith("notes");
 });
 
+test("多维表格文档可以搜索并通过目录入口创建", async () => {
+  const user = userEvent.setup();
+  const onCreateMultidimensionalTable = vi.fn();
+  renderSidebar({
+    currentPath: "notes/project.dbtable.json",
+    onCreateMultidimensionalTable,
+    documents: [
+      {
+        id: "notes/project.dbtable.json",
+        path: "notes/project.dbtable.json",
+        name: "上线记录",
+        parentPath: "notes",
+        size: 1,
+        kind: "multidimensional-table",
+      },
+    ],
+  });
+
+  await user.type(screen.getByRole("searchbox", { name: "搜索文档" }), "上线");
+
+  expect(screen.getByRole("treeitem", { name: /上线记录/ })).toHaveClass("is-current");
+
+  await user.click(screen.getAllByRole("button", { name: "新建多维表格" })[1]);
+
+  expect(onCreateMultidimensionalTable).toHaveBeenCalledWith("notes");
+});
+
 test("按指针位置计算 after 和 inside 落点意图", () => {
   renderSidebar({
     currentPath: "a.lake",
@@ -209,4 +237,60 @@ test("点击行操作不会触发打开文档", () => {
 
   expect(onDeleteDocument).toHaveBeenCalledTimes(1);
   expect(onOpenDocument).not.toHaveBeenCalled();
+});
+
+test("目录区域右键可以新建目录、文档、表格和多维表格", async () => {
+  const user = userEvent.setup();
+  const onCreateDirectory = vi.fn();
+  const onCreateDocument = vi.fn();
+  const onCreateSpreadsheet = vi.fn();
+  const onCreateMultidimensionalTable = vi.fn();
+  renderSidebar({
+    onCreateDirectory,
+    onCreateDocument,
+    onCreateSpreadsheet,
+    onCreateMultidimensionalTable,
+  });
+
+  fireEvent.contextMenu(screen.getByRole("treeitem", { name: /notes/ }), { clientX: 120, clientY: 180 });
+  const folderMenu = screen.getByRole("menu", { name: "目录右键菜单" });
+
+  await user.click(within(folderMenu).getByRole("menuitem", { name: "新建表格" }));
+  expect(onCreateSpreadsheet).toHaveBeenCalledWith("notes");
+
+  fireEvent.contextMenu(screen.getByRole("treeitem", { name: /notes/ }), { clientX: 120, clientY: 180 });
+  await user.click(within(screen.getByRole("menu", { name: "目录右键菜单" })).getByRole("menuitem", { name: "新建多维表格" }));
+  expect(onCreateMultidimensionalTable).toHaveBeenCalledWith("notes");
+
+  fireEvent.contextMenu(document.querySelector(".sidebar-section")!, { clientX: 120, clientY: 180 });
+  const rootMenu = screen.getByRole("menu", { name: "目录右键菜单" });
+  await user.click(within(rootMenu).getByRole("menuitem", { name: "新建文档" }));
+  expect(onCreateDocument).toHaveBeenCalledWith("");
+
+  fireEvent.contextMenu(document.querySelector(".sidebar-section")!, { clientX: 120, clientY: 180 });
+  await user.click(within(screen.getByRole("menu", { name: "目录右键菜单" })).getByRole("menuitem", { name: "新建目录" }));
+  expect(onCreateDirectory).toHaveBeenCalledWith("");
+});
+
+test("文档右键菜单支持重命名、删除并可点击外部关闭", async () => {
+  const user = userEvent.setup();
+  const onRenameDocument = vi.fn();
+  const onDeleteDocument = vi.fn();
+  const { props } = renderSidebar({ onRenameDocument, onDeleteDocument });
+
+  fireEvent.contextMenu(screen.getByRole("treeitem", { name: /a/ }), { clientX: 120, clientY: 180 });
+  const documentMenu = screen.getByRole("menu", { name: "目录右键菜单" });
+
+  await user.click(within(documentMenu).getByRole("menuitem", { name: "重命名文档" }));
+  expect(onRenameDocument).toHaveBeenCalledWith(props.documents[0]);
+  expect(screen.queryByRole("menu", { name: "目录右键菜单" })).not.toBeInTheDocument();
+
+  fireEvent.contextMenu(screen.getByRole("treeitem", { name: /a/ }), { clientX: 120, clientY: 180 });
+  await user.click(within(screen.getByRole("menu", { name: "目录右键菜单" })).getByRole("menuitem", { name: "删除文档" }));
+  expect(onDeleteDocument).toHaveBeenCalledWith(props.documents[0]);
+
+  fireEvent.contextMenu(screen.getByRole("treeitem", { name: /a/ }), { clientX: 120, clientY: 180 });
+  expect(screen.getByRole("menu", { name: "目录右键菜单" })).toBeInTheDocument();
+  await user.click(screen.getByRole("treeitem", { name: /notes/ }));
+  expect(screen.queryByRole("menu", { name: "目录右键菜单" })).not.toBeInTheDocument();
 });

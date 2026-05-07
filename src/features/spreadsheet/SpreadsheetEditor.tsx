@@ -31,7 +31,9 @@ interface SpreadsheetEditorProps {
 interface UniverRuntime {
   univer: Univer;
   workbook: FWorkbook;
+  host: HTMLDivElement;
   disposeChangeListener: () => void;
+  disposed: boolean;
 }
 
 interface PendingSpreadsheetPointer {
@@ -214,7 +216,11 @@ function createUniverRuntime(
   workbookData: IWorkbookData,
   onChanged: () => void,
 ): UniverRuntime {
-  container.replaceChildren();
+  const host = document.createElement("div");
+  host.className = "spreadsheet-editor-host";
+  // 每个 Univer 实例使用独立 host。旧实例延迟 dispose 时只会操作自己的 host，
+  // 不会和新实例共用同一个 React root container，避免 NotFoundError。
+  container.replaceChildren(host);
   const univer = new Univer({
     theme: defaultTheme,
     locale: LocaleType.ZH_CN,
@@ -225,7 +231,7 @@ function createUniverRuntime(
     logLevel: LogLevel.ERROR,
   });
   const preset = UniverSheetsCorePreset({
-    container,
+    container: host,
     toolbar: true,
     formulaBar: true,
     footer: {
@@ -252,6 +258,8 @@ function createUniverRuntime(
   return {
     univer,
     workbook,
+    host,
+    disposed: false,
     disposeChangeListener: () => {
       commandListener.dispose();
       disposePointerReleaseGuard();
@@ -468,11 +476,29 @@ function isEventInsideContainer(event: PointerEvent | MouseEvent, container: HTM
 }
 
 function cleanupRuntime(runtime: UniverRuntime | null) {
-  if (!runtime) {
+  if (!runtime || runtime.disposed) {
     return;
   }
+  runtime.disposed = true;
   runtime.disposeChangeListener();
-  runtime.univer.dispose();
+  // Univer 内部也会同步卸载自己的 React root。React 18 开发模式会在同一轮
+  // passive effect 中双调用清理函数；这里延后到当前提交完成后再 dispose，
+  // 避免 “synchronously unmount a root while React was already rendering” 和后续白屏。
+  window.setTimeout(() => {
+    try {
+      runtime.univer.dispose();
+    } catch (error) {
+      if (!isIgnorableUniverDisposeError(error)) {
+        console.warn("表格编辑器清理运行时失败", error);
+      }
+    } finally {
+      runtime.host.remove();
+    }
+  }, 0);
+}
+
+function isIgnorableUniverDisposeError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "NotFoundError";
 }
 
 function stripXlsxExtension(fileName: string): string {

@@ -18,6 +18,11 @@ export type CurrentDocumentState =
     kind: "spreadsheet";
     entry: WorkspaceDocument & { kind: "spreadsheet" };
     content: string;
+  }
+  | {
+    kind: "multidimensional-table";
+    entry: WorkspaceDocument & { kind: "multidimensional-table" };
+    content: string;
   };
 
 export interface UploadImageInput {

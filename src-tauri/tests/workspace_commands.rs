@@ -2,9 +2,11 @@ use std::fs;
 
 use tempfile::tempdir;
 use yuque_lake_notes_lib::commands::documents::{
-    create_document, create_document_at, create_spreadsheet, create_spreadsheet_at,
-    read_external_excel_file, resolve_existing_spreadsheet_path, resolve_writable_spreadsheet_path,
-    safe_file_stem,
+    create_document, create_document_at, create_multidimensional_table,
+    create_multidimensional_table_at, create_spreadsheet, create_spreadsheet_at,
+    read_external_excel_file, resolve_existing_multidimensional_table_path,
+    resolve_existing_spreadsheet_path, resolve_writable_multidimensional_table_path,
+    resolve_writable_spreadsheet_path, safe_file_stem,
 };
 use yuque_lake_notes_lib::commands::workspace::{
     list_directories, list_documents, move_workspace_item_on_disk, resolve_existing_directory_path,
@@ -15,6 +17,8 @@ use yuque_lake_notes_lib::models::{MoveWorkspaceItemInput, WorkspaceDocumentKind
 
 const WORKBOOK_SNAPSHOT: &str =
     r#"{"sheetOrder":["sheet-0001"],"sheets":{"sheet-0001":{"id":"sheet-0001","name":"Sheet1"}}}"#;
+const MULTIDIMENSIONAL_TABLE_SNAPSHOT: &str =
+    r#"{"kind":"multidimensional-table","version":1,"fields":[],"records":[],"views":[],"activeViewId":"view-table"}"#;
 
 #[test]
 fn lists_lake_and_univer_snapshot_documents_in_nested_directories() {
@@ -23,6 +27,11 @@ fn lists_lake_and_univer_snapshot_documents_in_nested_directories() {
     fs::write(dir.path().join("a.lake"), "<p>a</p>").unwrap();
     fs::write(dir.path().join("notes").join("b.lake"), "<p>b</p>").unwrap();
     fs::write(dir.path().join("notes").join("budget.json"), WORKBOOK_SNAPSHOT).unwrap();
+    fs::write(
+        dir.path().join("notes").join("上线记录.dbtable.json"),
+        MULTIDIMENSIONAL_TABLE_SNAPSHOT,
+    )
+    .unwrap();
     fs::write(dir.path().join("notes").join("普通.json"), "{}").unwrap();
     fs::write(dir.path().join("skip.md"), "# skip").unwrap();
 
@@ -37,6 +46,10 @@ fn lists_lake_and_univer_snapshot_documents_in_nested_directories() {
             ("a.lake", WorkspaceDocumentKind::Lake),
             ("notes/b.lake", WorkspaceDocumentKind::Lake),
             ("notes/budget.json", WorkspaceDocumentKind::Spreadsheet),
+            (
+                "notes/上线记录.dbtable.json",
+                WorkspaceDocumentKind::MultidimensionalTable
+            ),
         ]
     );
 }
@@ -60,6 +73,21 @@ fn creates_unique_safe_spreadsheet_document() {
     let path = create_spreadsheet(dir.path(), "预算表").unwrap();
 
     assert_eq!(path, "预算表-2.json");
+    assert!(dir.path().join(path).exists());
+}
+
+#[test]
+fn creates_unique_safe_multidimensional_table_document() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("上线记录.dbtable.json"),
+        MULTIDIMENSIONAL_TABLE_SNAPSHOT,
+    )
+    .unwrap();
+
+    let path = create_multidimensional_table(dir.path(), "上线记录").unwrap();
+
+    assert_eq!(path, "上线记录-2.dbtable.json");
     assert!(dir.path().join(path).exists());
 }
 
@@ -93,6 +121,17 @@ fn creates_spreadsheet_inside_directory() {
 }
 
 #[test]
+fn creates_multidimensional_table_inside_directory() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("projects")).unwrap();
+
+    let path = create_multidimensional_table_at(dir.path(), "projects", "摩卡 上线").unwrap();
+
+    assert_eq!(path, "projects/摩卡-上线.dbtable.json");
+    assert!(dir.path().join(path).exists());
+}
+
+#[test]
 fn rejects_path_traversal_and_non_lake_files() {
     let dir = tempdir().unwrap();
 
@@ -113,6 +152,17 @@ fn rejects_path_traversal_and_non_snapshot_files() {
     assert!(resolve_writable_spreadsheet_path(dir.path(), "x.xlsx").is_err());
     assert!(resolve_writable_spreadsheet_path(dir.path(), "./x.json").is_err());
     assert!(resolve_existing_spreadsheet_path(dir.path(), "missing.json").is_err());
+}
+
+#[test]
+fn rejects_path_traversal_and_non_multidimensional_table_files() {
+    let dir = tempdir().unwrap();
+
+    assert!(resolve_writable_multidimensional_table_path(dir.path(), "../x.dbtable.json").is_err());
+    assert!(resolve_writable_multidimensional_table_path(dir.path(), "x.json").is_err());
+    assert!(resolve_writable_multidimensional_table_path(dir.path(), "x.lake").is_err());
+    assert!(resolve_writable_multidimensional_table_path(dir.path(), "./x.dbtable.json").is_err());
+    assert!(resolve_existing_multidimensional_table_path(dir.path(), "missing.dbtable.json").is_err());
 }
 
 #[test]

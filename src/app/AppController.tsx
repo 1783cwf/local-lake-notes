@@ -6,6 +6,7 @@ import { AppRail } from "../components/AppRail";
 import { DocumentSidebar } from "../components/DocumentSidebar";
 import { TopBar } from "../components/TopBar";
 import { LakeEditor } from "../features/lake-editor/LakeEditor";
+import type { MultidimensionalTableEditorHandle } from "../features/multidimensional-table/MultidimensionalTableEditor";
 import type { SpreadsheetEditorHandle } from "../features/spreadsheet/SpreadsheetEditor";
 import {
   createOfficialLakeMarkdownConverter,
@@ -44,10 +45,12 @@ import {
   chooseDatabaseDirectory,
   createLakeDirectory,
   createLakeDocument,
+  createMultidimensionalTableDocument,
   createSpreadsheetDocument,
   createBackup,
   deleteLakeDirectory,
   deleteLakeDocument,
+  deleteMultidimensionalTableDocument,
   deleteSpreadsheetDocument,
   deleteBackup,
   createTemporaryResourceUrl,
@@ -62,9 +65,11 @@ import {
   listBackups,
   moveWorkspaceItem,
   readLakeDocument,
+  readMultidimensionalTableDocument,
   readSpreadsheetDocument,
   renameLakeDirectory,
   renameLakeDocument,
+  renameMultidimensionalTableDocument,
   renameSpreadsheetDocument,
   renameWorkspace,
   saveOssSettings,
@@ -83,6 +88,7 @@ import {
   verifyBackupKeyStatus,
   verifyResourceKeyStatus,
   writeLakeDocument,
+  writeMultidimensionalTableDocument,
   writeSpreadsheetDocument,
 } from "../lib/tauri";
 import type {
@@ -102,6 +108,10 @@ import { emptySaveStatus } from "./appState";
 
 const SpreadsheetEditor = lazy(() => (
   import("../features/spreadsheet/SpreadsheetEditor").then((module) => ({ default: module.SpreadsheetEditor }))
+));
+const MultidimensionalTableEditor = lazy(() => (
+  import("../features/multidimensional-table/MultidimensionalTableEditor")
+    .then((module) => ({ default: module.MultidimensionalTableEditor }))
 ));
 
 interface TextDialogState {
@@ -145,6 +155,7 @@ export function AppController() {
   const [textDialog, setTextDialog] = useState<TextDialogState | null>(null);
   const saveCurrentEditorNowRef = useRef<(() => Promise<void>) | null>(null);
   const spreadsheetEditorRef = useRef<SpreadsheetEditorHandle | null>(null);
+  const multidimensionalTableEditorRef = useRef<MultidimensionalTableEditorHandle | null>(null);
 
   useEffect(() => {
     void boot();
@@ -292,6 +303,26 @@ export function AppController() {
     }
   }, []);
 
+  const createMultidimensionalTable = useCallback(async (parentPath = "") => {
+    try {
+      const payload = await createMultidimensionalTableDocument("未命名多维表格", parentPath);
+      setWorkspace({
+        root: payload.root,
+        directories: payload.directories,
+        documents: payload.documents,
+        order: payload.order,
+      });
+      setCurrentDocument({
+        kind: "multidimensional-table",
+        entry: asMultidimensionalTableDocument(payload.createdDocument),
+        content: await readMultidimensionalTableDocument(payload.createdDocument.path),
+      });
+      setAppError(null);
+    } catch (error) {
+      setAppError(toMessage(error));
+    }
+  }, []);
+
   const createDirectory = useCallback((parentPath = "") => {
     setTextDialog({
       title: "新建目录",
@@ -339,11 +370,13 @@ export function AppController() {
     try {
       const payload = document.kind === "spreadsheet"
         ? await renameSpreadsheetDocument(document.path, nextName)
-        : await renameLakeDocument(document.path, nextName);
+        : document.kind === "multidimensional-table"
+          ? await renameMultidimensionalTableDocument(document.path, nextName)
+          : await renameLakeDocument(document.path, nextName);
       setWorkspace(payload);
       if (currentDocument?.entry.path === document.path) {
-        const extension = document.kind === "spreadsheet" ? "json" : "lake";
-        const nextPath = document.parentPath ? `${document.parentPath}/${nextName}.${extension}` : `${nextName}.${extension}`;
+        const extension = documentExtension(document);
+        const nextPath = document.parentPath ? `${document.parentPath}/${nextName}${extension}` : `${nextName}${extension}`;
         const nextDocument = payload.documents.find((entry) => entry.path === nextPath);
         if (nextDocument) {
           setCurrentDocument(await readDocumentState(nextDocument));
@@ -373,7 +406,9 @@ export function AppController() {
     try {
       const payload = document.kind === "spreadsheet"
         ? await deleteSpreadsheetDocument(document.path)
-        : await deleteLakeDocument(document.path);
+        : document.kind === "multidimensional-table"
+          ? await deleteMultidimensionalTableDocument(document.path)
+          : await deleteLakeDocument(document.path);
       setWorkspace(payload);
       if (currentDocument?.entry.path === document.path) {
         setCurrentDocument(null);
@@ -455,6 +490,10 @@ export function AppController() {
 
   const saveSpreadsheet = useCallback(async (relativePath: string, content: string) => {
     await writeSpreadsheetDocument(relativePath, content);
+  }, []);
+
+  const saveMultidimensionalTable = useCallback(async (relativePath: string, content: string) => {
+    await writeMultidimensionalTableDocument(relativePath, content);
   }, []);
 
   const createResourceExportOptions = useCallback((
@@ -633,6 +672,7 @@ export function AppController() {
         }
       }
       entries.push(...await workspaceSpreadsheetExcelEntries(workspace));
+      entries.push(...await workspaceMultidimensionalTableEntries(workspace));
       await saveBinaryExport(
         workspaceExportFileName(workspace.root),
         workspaceEntriesToZip(entries),
@@ -876,6 +916,7 @@ export function AppController() {
         onOpenDocument={openDocument}
         onCreateDocument={createDocument}
         onCreateSpreadsheet={createSpreadsheet}
+        onCreateMultidimensionalTable={createMultidimensionalTable}
         onCreateDirectory={createDirectory}
         onRenameWorkspace={renameCurrentWorkspace}
         onExportWorkspaceMarkdown={exportWorkspaceMarkdownZip}
@@ -924,6 +965,22 @@ export function AppController() {
               content={currentDocument.content}
               manualSaveRequest={manualSaveRequest}
               onSave={saveSpreadsheet}
+              onSaveStatusChange={setSaveStatus}
+              onRegisterSaveNow={registerEditorSaveNow}
+            />
+          </Suspense>
+        ) : currentDocument?.kind === "multidimensional-table" ? (
+          <Suspense fallback={<SpreadsheetLoadingState />}>
+            <MultidimensionalTableEditor
+              ref={multidimensionalTableEditorRef}
+              document={currentDocument.entry}
+              content={currentDocument.content}
+              manualSaveRequest={manualSaveRequest}
+              onSave={saveMultidimensionalTable}
+              onUploadImage={uploadEditorImage}
+              onUploadFile={uploadEditorFile}
+              onDownloadFile={downloadEditorFile}
+              onPrepareResourcePreview={prepareEditorResourcePreview}
               onSaveStatusChange={setSaveStatus}
               onRegisterSaveNow={registerEditorSaveNow}
             />
@@ -998,6 +1055,13 @@ async function readDocumentState(document: WorkspaceDocument): Promise<CurrentDo
       content: await readSpreadsheetDocument(document.path),
     };
   }
+  if (document.kind === "multidimensional-table") {
+    return {
+      kind: "multidimensional-table",
+      entry: asMultidimensionalTableDocument(document),
+      content: await readMultidimensionalTableDocument(document.path),
+    };
+  }
   return {
     kind: "lake",
     entry: asLakeDocument(document),
@@ -1017,6 +1081,13 @@ function asSpreadsheetDocument(document: WorkspaceDocument): WorkspaceDocument &
     throw new Error("当前文档不是表格文档");
   }
   return document as WorkspaceDocument & { kind: "spreadsheet" };
+}
+
+function asMultidimensionalTableDocument(document: WorkspaceDocument): WorkspaceDocument & { kind: "multidimensional-table" } {
+  if (document.kind !== "multidimensional-table") {
+    throw new Error("当前文档不是多维表格文档");
+  }
+  return document as WorkspaceDocument & { kind: "multidimensional-table" };
 }
 
 async function workspaceSpreadsheetExcelEntries(workspace: WorkspacePayload): Promise<WorkspaceZipEntryInput[]> {
@@ -1053,6 +1124,32 @@ function spreadsheetExportZipPath(path: string): string {
     .join("/");
 }
 
+async function workspaceMultidimensionalTableEntries(workspace: WorkspacePayload): Promise<WorkspaceZipEntryInput[]> {
+  const tree = buildDocumentTree(workspace.documents, workspace.directories, workspace.order);
+  const entries: WorkspaceZipEntryInput[] = [];
+
+  for (const node of flattenDocumentTree(tree)) {
+    if (node.type !== "document" || node.document?.kind !== "multidimensional-table") {
+      continue;
+    }
+
+    // 多维表格是 record-based JSON，首期批量导出保留原始文件，避免错误转换为 Markdown 或 Excel。
+    entries.push({
+      path: safeZipPath(node.document.path),
+      content: await readMultidimensionalTableDocument(node.document.path),
+    });
+  }
+
+  return entries;
+}
+
+function safeZipPath(path: string): string {
+  return path.split("/")
+    .filter(Boolean)
+    .map((part) => part.trim().replace(/[\\/:*?"<>|\s]+/g, "-").replace(/^-+|-+$/g, "") || "未命名")
+    .join("/");
+}
+
 function rebindCurrentDocument(
   currentDocument: CurrentDocumentState | null,
   workspace: WorkspacePayload,
@@ -1084,7 +1181,20 @@ function rebindDocumentEntry(
   if (currentDocument.kind === "spreadsheet") {
     return { ...currentDocument, entry: asSpreadsheetDocument(entry) };
   }
+  if (currentDocument.kind === "multidimensional-table") {
+    return { ...currentDocument, entry: asMultidimensionalTableDocument(entry) };
+  }
   return { ...currentDocument, entry: asLakeDocument(entry) };
+}
+
+function documentExtension(document: WorkspaceDocument): string {
+  if (document.kind === "spreadsheet") {
+    return ".json";
+  }
+  if (document.kind === "multidimensional-table") {
+    return ".dbtable.json";
+  }
+  return ".lake";
 }
 
 function replacePathPrefix(path: string, fromPath: string, toPath: string): string {

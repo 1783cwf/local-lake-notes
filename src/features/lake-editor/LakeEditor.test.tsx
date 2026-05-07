@@ -68,6 +68,50 @@ test("打开文档时把 text/lake 内容设置进语雀编辑器", async () => 
   });
 });
 
+test("同一路径文档元数据刷新时不重建语雀编辑器实例", async () => {
+  const destroy = vi.fn();
+  const editor: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => "<p>内容</p>"),
+    on: vi.fn(),
+    destroy,
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+  const stableProps = {
+    manualSaveRequest: 0,
+    exportRequest: null,
+    onSave: vi.fn(),
+    onExportContent: vi.fn(),
+    onUploadImage: vi.fn(),
+    onUploadFile: vi.fn(),
+    onDownloadFile: vi.fn(),
+    onPrepareResourcePreview: vi.fn(async (resourceRef: string) => resourceRef),
+    onSaveStatusChange: vi.fn(),
+  };
+
+  const { rerender } = render(
+    <LakeEditor
+      document={documentEntry}
+      content="<p>内容</p>"
+      {...stableProps}
+    />,
+  );
+  await waitFor(() => expect(editor.setDocument).toHaveBeenCalledWith("text/lake", "<p>内容</p>"));
+
+  rerender(
+    <LakeEditor
+      document={{ ...documentEntry, modifiedAt: "2026-05-07T00:00:00Z" }}
+      content="<p>内容</p>"
+      {...stableProps}
+    />,
+  );
+
+  expect(window.Doc.createOpenEditor).toHaveBeenCalledTimes(1);
+  expect(destroy).not.toHaveBeenCalled();
+});
+
 test("关闭当前文档时在编辑器容器移除前销毁 Lake 实例", () => {
   const destroyCalls: boolean[] = [];
   window.Doc = {
