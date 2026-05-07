@@ -1,5 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import ExcelJS from "exceljs";
+import { CellValueType } from "@univerjs/core";
 import { forwardRef, useEffect, useImperativeHandle, type Ref } from "react";
 
 import type {
@@ -98,7 +100,7 @@ vi.mock("../components/DocumentSidebar", () => ({
         侧栏新建表格
       </button>
       <button type="button" onClick={onExportWorkspaceMarkdown}>
-        导出知识库 Markdown ZIP
+        导出知识库 ZIP
       </button>
       {documents.map((document) => (
         <div key={document.path}>
@@ -576,7 +578,7 @@ test("可以收起并展开目录侧栏", async () => {
   expect(screen.getByRole("button", { name: "收起目录侧栏" })).toBeInTheDocument();
 });
 
-test("可以导出整个知识库 Markdown ZIP", async () => {
+test("可以导出整个知识库 ZIP，表格文档会转换为 Excel", async () => {
   const user = userEvent.setup();
   const editor = {
     setDocument: vi.fn(),
@@ -597,11 +599,29 @@ test("可以导出整个知识库 Markdown ZIP", async () => {
     order: ["folder:notes", "document:notes/a.lake", "document:notes/budget.json"],
   });
   readLakeDocument.mockResolvedValue("<h1>hello</h1><p>world</p>");
+  readSpreadsheetDocument.mockResolvedValue(JSON.stringify({
+    name: "budget",
+    sheetOrder: ["sheet-0001"],
+    styles: {},
+    sheets: {
+      "sheet-0001": {
+        id: "sheet-0001",
+        name: "预算",
+        cellData: {
+          0: {
+            0: { v: "收入", t: CellValueType.STRING },
+            1: { v: 100, t: CellValueType.NUMBER },
+          },
+        },
+      },
+    },
+  }));
 
   render(<AppController />);
 
-  await user.click(await screen.findByRole("button", { name: "导出知识库 Markdown ZIP" }));
+  await user.click(await screen.findByRole("button", { name: "导出知识库 ZIP" }));
 
+  let zipEntries: Array<{ path: string; bytes: Uint8Array; content: string }> = [];
   await waitFor(() => {
     expect(saveBinaryExport).toHaveBeenCalledWith(
       "kb.zip",
@@ -612,8 +632,21 @@ test("可以导出整个知识库 Markdown ZIP", async () => {
     expect(editor.getDocument).toHaveBeenCalledWith("text/markdown");
     expect(editor.destroy).toHaveBeenCalled();
     expect(readLakeDocument).toHaveBeenCalledTimes(1);
-    expect(readSpreadsheetDocument).not.toHaveBeenCalled();
+    expect(readSpreadsheetDocument).toHaveBeenCalledWith("notes/budget.json");
   });
+  zipEntries = readStoredZipEntries(saveBinaryExport.mock.calls[0][1]);
+  const workbook = new ExcelJS.Workbook();
+  const spreadsheetEntry = zipEntries.find((entry) => entry.path === "notes/budget.xlsx");
+  expect(spreadsheetEntry).toBeTruthy();
+  await workbook.xlsx.load(spreadsheetEntry?.bytes.buffer.slice(
+    spreadsheetEntry.bytes.byteOffset,
+    spreadsheetEntry.bytes.byteOffset + spreadsheetEntry.bytes.byteLength,
+  ) as ArrayBuffer);
+
+  expect(zipEntries.map((entry) => entry.path)).toEqual(["notes/", "notes/a.md", "notes/budget.xlsx"]);
+  expect(zipEntries.find((entry) => entry.path === "notes/a.md")?.content).toContain("![图片](file:///tmp/a.png)");
+  expect(workbook.getWorksheet("预算")?.getCell("A1").value).toBe("收入");
+  expect(workbook.getWorksheet("预算")?.getCell("B1").value).toBe(100);
 });
 
 test("创建备份前先保存当前打开文档的最新内容", async () => {
@@ -733,3 +766,33 @@ test("可以删除备份并刷新备份列表", async () => {
     expect(screen.getByText("暂无备份")).toBeInTheDocument();
   });
 });
+
+function readStoredZipEntries(bytes: Uint8Array): Array<{ path: string; bytes: Uint8Array; content: string }> {
+  const decoder = new TextDecoder();
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const entries: Array<{ path: string; bytes: Uint8Array; content: string }> = [];
+  let offset = 0;
+
+  while (offset < bytes.length) {
+    const signature = view.getUint32(offset, true);
+    if (signature !== 0x04034b50) {
+      break;
+    }
+
+    const compressedSize = view.getUint32(offset + 18, true);
+    const pathLength = view.getUint16(offset + 26, true);
+    const extraLength = view.getUint16(offset + 28, true);
+    const pathStart = offset + 30;
+    const contentStart = pathStart + pathLength + extraLength;
+    const contentEnd = contentStart + compressedSize;
+    const contentBytes = bytes.slice(contentStart, contentEnd);
+    entries.push({
+      path: decoder.decode(bytes.slice(pathStart, pathStart + pathLength)),
+      bytes: contentBytes,
+      content: decoder.decode(contentBytes),
+    });
+    offset = contentEnd;
+  }
+
+  return entries;
+}

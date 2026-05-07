@@ -184,7 +184,7 @@ export function DocumentSidebar({
           <button type="button" className="tiny-icon-button" onClick={onRenameWorkspace} aria-label="重命名知识库" disabled={!workspaceRoot}>
             <Pencil size={15} />
           </button>
-          <button type="button" className="tiny-icon-button" onClick={onExportWorkspaceMarkdown} aria-label="导出知识库 Markdown ZIP" disabled={!workspaceRoot}>
+          <button type="button" className="tiny-icon-button" onClick={onExportWorkspaceMarkdown} aria-label="导出知识库 ZIP" disabled={!workspaceRoot}>
             <Download size={15} />
           </button>
           <button type="button" className="tiny-icon-button" onClick={() => onCreateDirectory("")} aria-label="新建目录" disabled={!workspaceRoot}>

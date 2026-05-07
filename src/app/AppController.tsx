@@ -14,13 +14,17 @@ import {
   lakeDocumentToHtmlBundle,
   lakeDocumentMarkdownToBundle,
   lakeDocumentMarkdownToTextWithResources,
-  lakeWorkspaceToMarkdownZipWithResources,
+  lakeWorkspaceMarkdownEntriesWithResources,
+  workspaceEntriesToZip,
   workspaceExportFileName,
   type DocumentExportFormat,
   type LakeDocumentExportRequest,
   type LakeDocumentResourceExportOptions,
+  type WorkspaceZipEntryInput,
 } from "../features/lake-editor/lakeExport";
 import { OssSettingsPanel } from "../features/settings/OssSettingsPanel";
+import { exportXlsxWorkbookData } from "../features/spreadsheet/spreadsheetXlsxBridge";
+import { parseSpreadsheetSnapshot } from "../features/spreadsheet/spreadsheetSnapshot";
 import type {
   WorkspaceDocument,
   WorkspaceDropIntent,
@@ -31,6 +35,7 @@ import {
   applyWorkspaceMove,
   buildDocumentTree,
   documentTitleFromPath,
+  flattenDocumentTree,
   resolveWorkspaceMove,
 } from "../features/workspace/workspaceStore";
 import {
@@ -603,30 +608,34 @@ export function AppController() {
       return;
     }
 
-    setActiveAppOperation({ kind: "workspace-export", label: "正在导出知识库 Markdown ZIP" });
+    setActiveAppOperation({ kind: "workspace-export", label: "正在导出知识库 ZIP" });
     try {
-      const converter = createOfficialLakeMarkdownConverter();
-      let zip: Uint8Array;
-      try {
-        const lakeDocuments = workspace.documents.filter((document) => document.kind === "lake");
-        const lakeDocumentIds = new Set(lakeDocuments.map((document) => `document:${document.path}`));
-        const lakeWorkspace = {
-          ...workspace,
-          documents: lakeDocuments,
-          order: workspace.order.filter((itemId) => itemId.startsWith("folder:") || lakeDocumentIds.has(itemId)),
-        };
-        zip = await lakeWorkspaceToMarkdownZipWithResources(
-          lakeWorkspace,
-          readLakeDocument,
-          createResourceExportOptions(),
-          converter.convert,
-        );
-      } finally {
-        converter.dispose();
+      const entries: WorkspaceZipEntryInput[] = [];
+      const lakeDocuments = workspace.documents.filter((document) => document.kind === "lake");
+      if (lakeDocuments.length > 0) {
+        const converter = createOfficialLakeMarkdownConverter();
+        try {
+          const exportOptions = createResourceExportOptions();
+          const lakeDocumentIds = new Set(lakeDocuments.map((document) => `document:${document.path}`));
+          const lakeWorkspace = {
+            ...workspace,
+            documents: lakeDocuments,
+            order: workspace.order.filter((itemId) => itemId.startsWith("folder:") || lakeDocumentIds.has(itemId)),
+          };
+          entries.push(...await lakeWorkspaceMarkdownEntriesWithResources(
+            lakeWorkspace,
+            readLakeDocument,
+            exportOptions,
+            converter.convert,
+          ));
+        } finally {
+          converter.dispose();
+        }
       }
+      entries.push(...await workspaceSpreadsheetExcelEntries(workspace));
       await saveBinaryExport(
         workspaceExportFileName(workspace.root),
-        zip,
+        workspaceEntriesToZip(entries),
         [{ name: "ZIP", extensions: ["zip"] }],
       );
       setAppError(null);
@@ -1008,6 +1017,40 @@ function asSpreadsheetDocument(document: WorkspaceDocument): WorkspaceDocument &
     throw new Error("当前文档不是表格文档");
   }
   return document as WorkspaceDocument & { kind: "spreadsheet" };
+}
+
+async function workspaceSpreadsheetExcelEntries(workspace: WorkspacePayload): Promise<WorkspaceZipEntryInput[]> {
+  const tree = buildDocumentTree(workspace.documents, workspace.directories, workspace.order);
+  const entries: WorkspaceZipEntryInput[] = [];
+
+  for (const node of flattenDocumentTree(tree)) {
+    if (node.type !== "document" || node.document?.kind !== "spreadsheet") {
+      continue;
+    }
+
+    // 批量导出里表格必须保持可编辑的 Excel 文件，而不是把 Univer JSON 快照写成 Markdown。
+    const snapshot = parseSpreadsheetSnapshot(
+      await readSpreadsheetDocument(node.document.path),
+      documentTitleFromPath(node.document.path),
+    );
+    const file = await exportXlsxWorkbookData(snapshot);
+    entries.push({
+      path: spreadsheetExportZipPath(node.document.path),
+      content: new Uint8Array(await file.arrayBuffer()),
+    });
+  }
+
+  return entries;
+}
+
+function spreadsheetExportZipPath(path: string): string {
+  return path.split("/")
+    .filter(Boolean)
+    .map((part, index, parts) => {
+      const filePart = index === parts.length - 1 ? part.replace(/\.json$/i, ".xlsx") : part;
+      return filePart.trim().replace(/[\\/:*?"<>|\s]+/g, "-").replace(/^-+|-+$/g, "") || "未命名";
+    })
+    .join("/");
 }
 
 function rebindCurrentDocument(
