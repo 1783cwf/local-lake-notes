@@ -345,12 +345,7 @@ pub fn list_documents(root: &Path) -> AppResult<Vec<WorkspaceDocument>> {
             .ok()
             .map(DateTime::<Utc>::from)
             .map(|time| time.to_rfc3339());
-        let name = entry
-            .path()
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .unwrap_or("Untitled")
-            .to_string();
+        let name = document_title_from_path(entry.path());
         let parent_path = relative
             .parent()
             .map(normalize_relative_path)
@@ -376,6 +371,13 @@ pub fn document_kind_from_path(path: &Path) -> Option<WorkspaceDocumentKind> {
     if filename.starts_with("~$") {
         return None;
     }
+    if filename
+        .to_ascii_lowercase()
+        .ends_with(".dbtable.json")
+        && is_multidimensional_table_file(path)
+    {
+        return Some(WorkspaceDocumentKind::MultidimensionalTable);
+    }
 
     match path.extension().and_then(|ext| ext.to_str()) {
         Some(ext) if ext.eq_ignore_ascii_case("lake") => Some(WorkspaceDocumentKind::Lake),
@@ -384,6 +386,36 @@ pub fn document_kind_from_path(path: &Path) -> Option<WorkspaceDocumentKind> {
         }
         _ => None,
     }
+}
+
+fn document_title_from_path(path: &Path) -> String {
+    let filename = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("Untitled");
+    filename
+        .strip_suffix(".dbtable.json")
+        .or_else(|| filename.strip_suffix(".DBTABLE.JSON"))
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("Untitled")
+                .to_string()
+        })
+}
+
+fn is_multidimensional_table_file(path: &Path) -> bool {
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(snapshot) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return false;
+    };
+    snapshot
+        .get("kind")
+        .and_then(|value| value.as_str())
+        .is_some_and(|kind| kind == "multidimensional-table")
 }
 
 fn is_univer_workbook_snapshot_file(path: &Path) -> bool {

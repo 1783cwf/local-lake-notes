@@ -1,5 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import ExcelJS from "exceljs";
+import { CellValueType } from "@univerjs/core";
 import { forwardRef, useEffect, useImperativeHandle, type Ref } from "react";
 
 import type {
@@ -11,7 +13,9 @@ import { AppController } from "./AppController";
 
 const createLakeDocument = vi.fn<(title: string, parentPath?: string) => Promise<CreateDocumentPayload>>();
 const createSpreadsheetDocument = vi.fn<(title: string, parentPath?: string) => Promise<CreateDocumentPayload>>();
+const createMultidimensionalTableDocument = vi.fn<(title: string, parentPath?: string) => Promise<CreateDocumentPayload>>();
 const chooseExcelImportFile = vi.fn<() => Promise<{ path: string; name: string; bytes: Uint8Array } | null>>();
+const createLakeDirectory = vi.fn<(parentPath: string, name: string) => Promise<WorkspacePayload>>();
 const createBackup = vi.fn<(input: { forceFull: boolean }) => Promise<{
   record: {
     id: string;
@@ -53,6 +57,7 @@ const listBackups = vi.fn(async () => [] as Array<{
 const moveWorkspaceItem = vi.fn<(input: MoveWorkspaceItemInput) => Promise<WorkspacePayload>>();
 const readLakeDocument = vi.fn<(path: string) => Promise<string>>(async () => "<p>hello</p>");
 const readSpreadsheetDocument = vi.fn<(path: string) => Promise<string>>(async () => "{\"sheetOrder\":[\"sheet-0001\"],\"sheets\":{\"sheet-0001\":{\"id\":\"sheet-0001\",\"name\":\"Sheet1\"}}}");
+const readMultidimensionalTableDocument = vi.fn<(path: string) => Promise<string>>(async () => "{\"kind\":\"multidimensional-table\",\"version\":1,\"fields\":[],\"records\":[],\"views\":[],\"activeViewId\":\"view-table\"}");
 const restoreBackup = vi.fn<(input: { backupId: string; allowKeyMismatch?: boolean }) => Promise<{
   restoredBackupId: string;
   restoredAt: string;
@@ -65,24 +70,31 @@ const saveTextExport = vi.fn<(defaultPath: string, content: string, filters: Arr
 const setWorkspaceRoot = vi.fn<(path: string) => Promise<WorkspacePayload>>();
 const writeLakeDocument = vi.fn<(path: string, content: string) => Promise<void>>();
 const writeSpreadsheetDocument = vi.fn<(path: string, content: string) => Promise<void>>();
+const writeMultidimensionalTableDocument = vi.fn<(path: string, content: string) => Promise<void>>();
 
 vi.mock("../components/DocumentSidebar", () => ({
   DocumentSidebar: ({
     workspaceRoot,
+    directories,
     documents,
     currentPath,
+    onCreateDirectory,
     onCreateDocument,
     onCreateSpreadsheet,
+    onCreateMultidimensionalTable,
     onExportWorkspaceMarkdown,
     onOpenDocument,
     onDeleteDocument,
     onMoveNode,
   }: {
     workspaceRoot: string | null;
+    directories: Array<{ path: string; name: string; parentPath: string }>;
     documents: Array<{ path: string; name: string; parentPath: string; size: number }>;
     currentPath: string | null;
+    onCreateDirectory: (parentPath: string) => void;
     onCreateDocument: (parentPath: string) => void;
     onCreateSpreadsheet: (parentPath: string) => void;
+    onCreateMultidimensionalTable: (parentPath: string) => void;
     onExportWorkspaceMarkdown: () => void;
     onOpenDocument: (document: { path: string; name: string; parentPath: string; size: number }) => void;
     onDeleteDocument: (document: { path: string; name: string; parentPath: string; size: number }) => void;
@@ -97,9 +109,26 @@ vi.mock("../components/DocumentSidebar", () => ({
       <button type="button" onClick={() => onCreateSpreadsheet("")}>
         侧栏新建表格
       </button>
-      <button type="button" onClick={onExportWorkspaceMarkdown}>
-        导出知识库 Markdown ZIP
+      <button type="button" onClick={() => onCreateMultidimensionalTable("")}>
+        侧栏新建多维表格
       </button>
+      <button type="button" onClick={onExportWorkspaceMarkdown}>
+        导出知识库 ZIP
+      </button>
+      <button type="button" onClick={() => onCreateDirectory("")}>
+        根目录新建目录
+      </button>
+      {directories.map((directory) => (
+        <div key={directory.path}>
+          <span>{directory.name}</span>
+          <button type="button" onClick={() => onCreateDirectory(directory.path)}>
+            在 {directory.name} 下新建目录
+          </button>
+          <button type="button" onClick={() => onCreateDocument(directory.path)}>
+            在 {directory.name} 下新建文档
+          </button>
+        </div>
+      ))}
       {documents.map((document) => (
         <div key={document.path}>
           <button
@@ -178,13 +207,58 @@ vi.mock("../features/spreadsheet/SpreadsheetEditor", () => ({
   }),
 }));
 
+vi.mock("../features/multidimensional-table/MultidimensionalTableEditor", () => ({
+  MultidimensionalTableEditor: forwardRef(({
+    document,
+    content,
+    manualSaveRequest,
+    onSave,
+    onSaveStatusChange,
+    onRegisterSaveNow,
+  }: {
+    document: { path: string; name: string } | null;
+    content: string;
+    manualSaveRequest: number;
+    onSave: (relativePath: string, content: string) => Promise<void>;
+    onSaveStatusChange: (status: { state: "clean" | "saved" }) => void;
+    onRegisterSaveNow?: (saveNow: (() => Promise<void>) | null) => void;
+  }, ref: Ref<{ saveNow: () => Promise<void> }>) => {
+    useEffect(() => {
+      onSaveStatusChange({ state: "clean" });
+    }, [onSaveStatusChange]);
+    useImperativeHandle(ref, () => ({
+      saveNow: async () => {
+        if (document) {
+          await onSave(document.path, content);
+        }
+      },
+    }), [content, document, onSave]);
+    useEffect(() => {
+      const saveNow = async () => {
+        if (document) {
+          await onSave(document.path, content);
+        }
+      };
+      onRegisterSaveNow?.(saveNow);
+      return () => onRegisterSaveNow?.(null);
+    }, [content, document, onRegisterSaveNow, onSave]);
+    useEffect(() => {
+      if (manualSaveRequest > 0 && document) {
+        void onSave(document.path, content);
+      }
+    }, [content, document, manualSaveRequest, onSave]);
+    return <div data-testid="multitable-editor">多维表格编辑器 {document?.name}</div>;
+  }),
+}));
+
 vi.mock("../lib/tauri", () => ({
   chooseExcelImportFile: () => chooseExcelImportFile(),
   chooseDatabaseDirectory: vi.fn(async () => "/tmp/selected-db"),
   chooseWorkspaceDirectory: vi.fn(async () => "/tmp/kb"),
-  createLakeDirectory: vi.fn(),
+  createLakeDirectory: (parentPath: string, name: string) => createLakeDirectory(parentPath, name),
   createBackup: (input: { forceFull: boolean }) => createBackup(input),
   createLakeDocument: (title: string, parentPath?: string) => createLakeDocument(title, parentPath),
+  createMultidimensionalTableDocument: (title: string, parentPath?: string) => createMultidimensionalTableDocument(title, parentPath),
   createSpreadsheetDocument: (title: string, parentPath?: string) => createSpreadsheetDocument(title, parentPath),
   createTemporaryResourceUrl: (resourceRef: string, ttlSeconds: number, filename?: string) => (
     createTemporaryResourceUrl(resourceRef, ttlSeconds, filename)
@@ -192,6 +266,7 @@ vi.mock("../lib/tauri", () => ({
   deleteLakeDirectory: vi.fn(),
   deleteBackup: (input: { backupId: string }) => deleteBackup(input),
   deleteLakeDocument: (path: string) => deleteLakeDocument(path),
+  deleteMultidimensionalTableDocument: vi.fn(),
   deleteSpreadsheetDocument: (path: string) => deleteSpreadsheetDocument(path),
   downloadResourceFile: (input: { url: string; filename: string; resourceRef?: string }) => downloadResourceFile(input),
   getDatabaseLocation: () => getDatabaseLocation(),
@@ -206,9 +281,11 @@ vi.mock("../lib/tauri", () => ({
   openExternalUrl: vi.fn(),
   prepareResourcePreview: vi.fn(async (resourceRef: string) => resourceRef),
   readLakeDocument: (path: string) => readLakeDocument(path),
+  readMultidimensionalTableDocument: (path: string) => readMultidimensionalTableDocument(path),
   readSpreadsheetDocument: (path: string) => readSpreadsheetDocument(path),
   renameLakeDirectory: vi.fn(),
   renameLakeDocument: vi.fn(),
+  renameMultidimensionalTableDocument: vi.fn(),
   renameSpreadsheetDocument: vi.fn(),
   renameWorkspace: vi.fn(),
   saveOssSettings: vi.fn(),
@@ -231,6 +308,7 @@ vi.mock("../lib/tauri", () => ({
   uploadFile: vi.fn(),
   uploadImage: vi.fn(),
   writeLakeDocument: (path: string, content: string) => writeLakeDocument(path, content),
+  writeMultidimensionalTableDocument: (path: string, content: string) => writeMultidimensionalTableDocument(path, content),
   writeSpreadsheetDocument: (path: string, content: string) => writeSpreadsheetDocument(path, content),
 }));
 
@@ -238,6 +316,7 @@ beforeEach(() => {
   chooseExcelImportFile.mockReset();
   chooseExcelImportFile.mockResolvedValue(null);
   createSpreadsheetDocument.mockReset();
+  createMultidimensionalTableDocument.mockReset();
   createBackup.mockReset();
   createBackup.mockResolvedValue({
     record: {
@@ -254,6 +333,7 @@ beforeEach(() => {
   });
   deleteBackup.mockReset();
   deleteBackup.mockResolvedValue({ deletedBackupIds: ["backup"] });
+  createLakeDirectory.mockReset();
   createLakeDocument.mockReset();
   createTemporaryResourceUrl.mockReset();
   createTemporaryResourceUrl.mockImplementation(async (resourceRef, ttlSeconds) => `${resourceRef}&ttl=${ttlSeconds}`);
@@ -281,6 +361,8 @@ beforeEach(() => {
   moveWorkspaceItem.mockReset();
   readLakeDocument.mockReset();
   readLakeDocument.mockResolvedValue("<p>hello</p>");
+  readMultidimensionalTableDocument.mockReset();
+  readMultidimensionalTableDocument.mockResolvedValue("{\"kind\":\"multidimensional-table\",\"version\":1,\"fields\":[],\"records\":[],\"views\":[],\"activeViewId\":\"view-table\"}");
   readSpreadsheetDocument.mockReset();
   readSpreadsheetDocument.mockResolvedValue("{\"sheetOrder\":[\"sheet-0001\"],\"sheets\":{\"sheet-0001\":{\"id\":\"sheet-0001\",\"name\":\"Sheet1\"}}}");
   restoreBackup.mockReset();
@@ -298,6 +380,8 @@ beforeEach(() => {
   saveTextExport.mockResolvedValue("/tmp/export.md");
   setWorkspaceRoot.mockReset();
   writeLakeDocument.mockResolvedValue(undefined);
+  writeMultidimensionalTableDocument.mockReset();
+  writeMultidimensionalTableDocument.mockResolvedValue(undefined);
   writeSpreadsheetDocument.mockReset();
   writeSpreadsheetDocument.mockResolvedValue(undefined);
 });
@@ -440,6 +524,64 @@ test("删除当前新建文档后仍可打开已有文档", async () => {
   });
 });
 
+test("连续创建嵌套目录后可以在子目录中新建并打开 Lake 文档", async () => {
+  const user = userEvent.setup();
+  const initialWorkspace: WorkspacePayload = {
+    root: "/tmp/kb",
+    directories: [],
+    documents: [],
+    order: [],
+  };
+  const rootDirectoryWorkspace: WorkspacePayload = {
+    ...initialWorkspace,
+    directories: [{ id: "工作", path: "工作", name: "工作", parentPath: "" }],
+    order: ["folder:工作"],
+  };
+  const childDirectoryWorkspace: WorkspacePayload = {
+    ...initialWorkspace,
+    directories: [
+      { id: "工作", path: "工作", name: "工作", parentPath: "" },
+      { id: "工作/摩卡", path: "工作/摩卡", name: "摩卡", parentPath: "工作" },
+    ],
+    order: ["folder:工作", "folder:工作/摩卡"],
+  };
+  const createdWorkspace: CreateDocumentPayload = {
+    ...childDirectoryWorkspace,
+    documents: [{ id: "工作/摩卡/未命名文档.lake", path: "工作/摩卡/未命名文档.lake", name: "未命名文档", parentPath: "工作/摩卡", size: 1, kind: "lake" }],
+    order: ["folder:工作", "folder:工作/摩卡", "document:工作/摩卡/未命名文档.lake"],
+    createdDocument: { id: "工作/摩卡/未命名文档.lake", path: "工作/摩卡/未命名文档.lake", name: "未命名文档", parentPath: "工作/摩卡", size: 1, kind: "lake" },
+  };
+  getRecentWorkspace.mockResolvedValue(initialWorkspace);
+  createLakeDirectory
+    .mockResolvedValueOnce(rootDirectoryWorkspace)
+    .mockResolvedValueOnce(childDirectoryWorkspace);
+  createLakeDocument.mockResolvedValue(createdWorkspace);
+  readLakeDocument.mockResolvedValue("<p>新建内容</p>");
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("button", { name: "根目录新建目录" }));
+  await user.clear(await screen.findByLabelText("目录名称"));
+  await user.type(screen.getByLabelText("目录名称"), "工作");
+  await user.click(screen.getByRole("button", { name: "创建" }));
+  await waitFor(() => expect(createLakeDirectory).toHaveBeenCalledWith("", "工作"));
+
+  await user.click(await screen.findByRole("button", { name: "在 工作 下新建目录" }));
+  await user.clear(screen.getByLabelText("目录名称"));
+  await user.type(screen.getByLabelText("目录名称"), "摩卡");
+  await user.click(screen.getByRole("button", { name: "创建" }));
+  await waitFor(() => expect(createLakeDirectory).toHaveBeenCalledWith("工作", "摩卡"));
+
+  await user.click(await screen.findByRole("button", { name: "在 摩卡 下新建文档" }));
+
+  await waitFor(() => {
+    expect(createLakeDocument).toHaveBeenCalledWith("未命名文档", "工作/摩卡");
+    expect(readLakeDocument).toHaveBeenCalledWith("工作/摩卡/未命名文档.lake");
+    expect(screen.getByTestId("current-path")).toHaveTextContent("工作/摩卡/未命名文档.lake");
+    expect(screen.getByRole("heading", { name: "未命名文档" })).toBeInTheDocument();
+  });
+});
+
 test("可以新建表格并打开表格编辑器", async () => {
   const user = userEvent.setup();
   const payload: CreateDocumentPayload = {
@@ -462,6 +604,74 @@ test("可以新建表格并打开表格编辑器", async () => {
     expect(readSpreadsheetDocument).toHaveBeenCalledWith("未命名表格.json");
     expect(screen.getByTestId("current-path")).toHaveTextContent("未命名表格.json");
     expect(screen.getByTestId("spreadsheet-editor")).toHaveTextContent("表格编辑器 未命名表格");
+  });
+});
+
+test("可以新建多维表格并打开多维表格编辑器", async () => {
+  const user = userEvent.setup();
+  const content = "{\"kind\":\"multidimensional-table\",\"version\":1,\"fields\":[],\"records\":[],\"views\":[],\"activeViewId\":\"view-table\"}";
+  const payload: CreateDocumentPayload = {
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "未命名多维表格.dbtable.json", path: "未命名多维表格.dbtable.json", name: "未命名多维表格", parentPath: "", size: 1, kind: "multidimensional-table" }],
+    order: ["document:未命名多维表格.dbtable.json"],
+    createdDocument: { id: "未命名多维表格.dbtable.json", path: "未命名多维表格.dbtable.json", name: "未命名多维表格", parentPath: "", size: 1, kind: "multidimensional-table" },
+  };
+  getRecentWorkspace.mockResolvedValue({ root: "/tmp/kb", directories: [], documents: [], order: [] });
+  createMultidimensionalTableDocument.mockResolvedValue(payload);
+  readMultidimensionalTableDocument.mockResolvedValue(content);
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("button", { name: "侧栏新建多维表格" }));
+
+  await waitFor(() => {
+    expect(createMultidimensionalTableDocument).toHaveBeenCalledWith("未命名多维表格", "");
+    expect(readMultidimensionalTableDocument).toHaveBeenCalledWith("未命名多维表格.dbtable.json");
+    expect(screen.getByTestId("current-path")).toHaveTextContent("未命名多维表格.dbtable.json");
+    expect(screen.getByTestId("multitable-editor")).toHaveTextContent("多维表格编辑器 未命名多维表格");
+  });
+});
+
+test("打开多维表格时读取 JSON 且不展示导出菜单", async () => {
+  const user = userEvent.setup();
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "project.dbtable.json", path: "project.dbtable.json", name: "project", parentPath: "", size: 1, kind: "multidimensional-table" }],
+    order: ["document:project.dbtable.json"],
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "project" }));
+
+  await waitFor(() => {
+    expect(readMultidimensionalTableDocument).toHaveBeenCalledWith("project.dbtable.json");
+    expect(screen.getByTestId("multitable-editor")).toHaveTextContent("多维表格编辑器 project");
+    expect(screen.queryByRole("button", { name: "导出文档" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Excel 导入导出" })).not.toBeInTheDocument();
+  });
+});
+
+test("保存多维表格时写入当前 JSON 内容", async () => {
+  const user = userEvent.setup();
+  const content = "{\"kind\":\"multidimensional-table\",\"version\":1,\"fields\":[],\"records\":[],\"views\":[],\"activeViewId\":\"view-table\"}";
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "project.dbtable.json", path: "project.dbtable.json", name: "project", parentPath: "", size: 1, kind: "multidimensional-table" }],
+    order: ["document:project.dbtable.json"],
+  });
+  readMultidimensionalTableDocument.mockResolvedValue(content);
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "project" }));
+  await user.click(await screen.findByRole("button", { name: "保存" }));
+
+  await waitFor(() => {
+    expect(writeMultidimensionalTableDocument).toHaveBeenCalledWith("project.dbtable.json", content);
   });
 });
 
@@ -576,7 +786,7 @@ test("可以收起并展开目录侧栏", async () => {
   expect(screen.getByRole("button", { name: "收起目录侧栏" })).toBeInTheDocument();
 });
 
-test("可以导出整个知识库 Markdown ZIP", async () => {
+test("可以导出整个知识库 ZIP，表格文档会转换为 Excel，多维表格保留 JSON", async () => {
   const user = userEvent.setup();
   const editor = {
     setDocument: vi.fn(),
@@ -593,15 +803,35 @@ test("可以导出整个知识库 Markdown ZIP", async () => {
     documents: [
       { id: "notes/a.lake", path: "notes/a.lake", name: "a", parentPath: "notes", size: 1, kind: "lake" },
       { id: "notes/budget.json", path: "notes/budget.json", name: "budget", parentPath: "notes", size: 1, kind: "spreadsheet" },
+      { id: "notes/project.dbtable.json", path: "notes/project.dbtable.json", name: "project", parentPath: "notes", size: 1, kind: "multidimensional-table" },
     ],
-    order: ["folder:notes", "document:notes/a.lake", "document:notes/budget.json"],
+    order: ["folder:notes", "document:notes/a.lake", "document:notes/budget.json", "document:notes/project.dbtable.json"],
   });
+  readMultidimensionalTableDocument.mockResolvedValue("{\"kind\":\"multidimensional-table\",\"version\":1,\"fields\":[],\"records\":[],\"views\":[],\"activeViewId\":\"view-table\"}");
   readLakeDocument.mockResolvedValue("<h1>hello</h1><p>world</p>");
+  readSpreadsheetDocument.mockResolvedValue(JSON.stringify({
+    name: "budget",
+    sheetOrder: ["sheet-0001"],
+    styles: {},
+    sheets: {
+      "sheet-0001": {
+        id: "sheet-0001",
+        name: "预算",
+        cellData: {
+          0: {
+            0: { v: "收入", t: CellValueType.STRING },
+            1: { v: 100, t: CellValueType.NUMBER },
+          },
+        },
+      },
+    },
+  }));
 
   render(<AppController />);
 
-  await user.click(await screen.findByRole("button", { name: "导出知识库 Markdown ZIP" }));
+  await user.click(await screen.findByRole("button", { name: "导出知识库 ZIP" }));
 
+  let zipEntries: Array<{ path: string; bytes: Uint8Array; content: string }> = [];
   await waitFor(() => {
     expect(saveBinaryExport).toHaveBeenCalledWith(
       "kb.zip",
@@ -612,8 +842,23 @@ test("可以导出整个知识库 Markdown ZIP", async () => {
     expect(editor.getDocument).toHaveBeenCalledWith("text/markdown");
     expect(editor.destroy).toHaveBeenCalled();
     expect(readLakeDocument).toHaveBeenCalledTimes(1);
-    expect(readSpreadsheetDocument).not.toHaveBeenCalled();
+    expect(readSpreadsheetDocument).toHaveBeenCalledWith("notes/budget.json");
+    expect(readMultidimensionalTableDocument).toHaveBeenCalledWith("notes/project.dbtable.json");
   });
+  zipEntries = readStoredZipEntries(saveBinaryExport.mock.calls[0][1]);
+  const workbook = new ExcelJS.Workbook();
+  const spreadsheetEntry = zipEntries.find((entry) => entry.path === "notes/budget.xlsx");
+  expect(spreadsheetEntry).toBeTruthy();
+  await workbook.xlsx.load(spreadsheetEntry?.bytes.buffer.slice(
+    spreadsheetEntry.bytes.byteOffset,
+    spreadsheetEntry.bytes.byteOffset + spreadsheetEntry.bytes.byteLength,
+  ) as ArrayBuffer);
+
+  expect(zipEntries.map((entry) => entry.path)).toEqual(["notes/", "notes/a.md", "notes/budget.xlsx", "notes/project.dbtable.json"]);
+  expect(zipEntries.find((entry) => entry.path === "notes/a.md")?.content).toContain("![图片](file:///tmp/a.png)");
+  expect(zipEntries.find((entry) => entry.path === "notes/project.dbtable.json")?.content).toContain("\"kind\":\"multidimensional-table\"");
+  expect(workbook.getWorksheet("预算")?.getCell("A1").value).toBe("收入");
+  expect(workbook.getWorksheet("预算")?.getCell("B1").value).toBe(100);
 });
 
 test("创建备份前先保存当前打开文档的最新内容", async () => {
@@ -733,3 +978,33 @@ test("可以删除备份并刷新备份列表", async () => {
     expect(screen.getByText("暂无备份")).toBeInTheDocument();
   });
 });
+
+function readStoredZipEntries(bytes: Uint8Array): Array<{ path: string; bytes: Uint8Array; content: string }> {
+  const decoder = new TextDecoder();
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const entries: Array<{ path: string; bytes: Uint8Array; content: string }> = [];
+  let offset = 0;
+
+  while (offset < bytes.length) {
+    const signature = view.getUint32(offset, true);
+    if (signature !== 0x04034b50) {
+      break;
+    }
+
+    const compressedSize = view.getUint32(offset + 18, true);
+    const pathLength = view.getUint16(offset + 26, true);
+    const extraLength = view.getUint16(offset + 28, true);
+    const pathStart = offset + 30;
+    const contentStart = pathStart + pathLength + extraLength;
+    const contentEnd = contentStart + compressedSize;
+    const contentBytes = bytes.slice(contentStart, contentEnd);
+    entries.push({
+      path: decoder.decode(bytes.slice(pathStart, pathStart + pathLength)),
+      bytes: contentBytes,
+      content: decoder.decode(contentBytes),
+    });
+    offset = contentEnd;
+  }
+
+  return entries;
+}

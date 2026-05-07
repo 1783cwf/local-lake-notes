@@ -147,7 +147,7 @@ export function TopBar({
               </div>
             ) : null}
           </div>
-        ) : (
+        ) : document?.kind === "multidimensional-table" ? null : (
           <div className="export-menu">
             <button
               type="button"

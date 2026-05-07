@@ -59,6 +59,11 @@ interface ResourceRewriteResult {
   resources: ZipEntryInput[];
 }
 
+export interface WorkspaceZipEntryInput {
+  path: string;
+  content: string | Uint8Array;
+}
+
 export function lakeDocumentToMarkdown(title: string, content: string): string {
   return normalizeMarkdown(`# ${title}\n\n${lakeContentToMarkdown(content)}`);
 }
@@ -435,6 +440,17 @@ export async function lakeWorkspaceToMarkdownZipWithResources(
     lakeDocumentToMarkdown(documentTitleFromPath(document.path), content)
   ),
 ): Promise<Uint8Array> {
+  return createZip(await lakeWorkspaceMarkdownEntriesWithResources(workspace, readDocument, options, convertDocument));
+}
+
+export async function lakeWorkspaceMarkdownEntriesWithResources(
+  workspace: WorkspacePayload,
+  readDocument: (path: string) => Promise<string>,
+  options: LakeDocumentResourceExportOptions,
+  convertDocument: LakeWorkspaceMarkdownConverter = (document, content) => (
+    lakeDocumentToMarkdown(documentTitleFromPath(document.path), content)
+  ),
+): Promise<WorkspaceZipEntryInput[]> {
   const tree = buildDocumentTree(workspace.documents, workspace.directories, workspace.order);
   const nodes = flattenDocumentTree(tree);
   const entries: ZipEntryInput[] = [];
@@ -462,6 +478,10 @@ export async function lakeWorkspaceToMarkdownZipWithResources(
     }
   }
 
+  return entries;
+}
+
+export function workspaceEntriesToZip(entries: WorkspaceZipEntryInput[]): Uint8Array {
   return createZip(entries);
 }
 

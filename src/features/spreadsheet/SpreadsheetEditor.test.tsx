@@ -462,6 +462,25 @@ test("切换文档时销毁上一个 Univer 实例", async () => {
   await waitFor(() => expect(univerMocks.disposeUniver).toHaveBeenCalled());
 });
 
+test("卸载表格时延后销毁 Univer，避免 React 渲染期间同步卸载内部 root", async () => {
+  const { unmount } = render(
+    <SpreadsheetEditor
+      document={spreadsheetDocument}
+      content={serializeSpreadsheetSnapshot(createEmptySpreadsheetWorkbookData("延迟销毁"))}
+      manualSaveRequest={0}
+      onSave={vi.fn()}
+      onSaveStatusChange={vi.fn()}
+    />,
+  );
+  await waitFor(() => expect(createWorkbook).toHaveBeenCalled());
+
+  univerMocks.disposeUniver.mockClear();
+  unmount();
+  expect(univerMocks.disposeUniver).not.toHaveBeenCalled();
+
+  await waitFor(() => expect(univerMocks.disposeUniver).toHaveBeenCalled());
+});
+
 test("Univer 快照解析失败时显示错误且不写入文件", async () => {
   const onSave = vi.fn();
   render(

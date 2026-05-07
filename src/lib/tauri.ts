@@ -26,6 +26,11 @@ import type {
 } from "../features/workspace/workspaceStore";
 import { createEmptySpreadsheetWorkbookData } from "../features/spreadsheet/spreadsheetDocument";
 import { serializeSpreadsheetSnapshot } from "../features/spreadsheet/spreadsheetSnapshot";
+import {
+  createDefaultMultidimensionalTableDocument,
+  MULTIDIMENSIONAL_TABLE_EXTENSION,
+  serializeMultidimensionalTableDocument,
+} from "../features/multidimensional-table/multidimensionalTableDocument";
 
 const browserWorkspaceKey = "yuque-lake-notes.browser-workspace";
 const browserSettingsKey = "yuque-lake-notes.browser-oss-settings";
@@ -316,6 +321,34 @@ export async function createSpreadsheetDocument(title: string, parentPath = ""):
   return invoke<CreateDocumentPayload>("create_spreadsheet_document", { title, parentPath });
 }
 
+export async function createMultidimensionalTableDocument(title: string, parentPath = ""): Promise<CreateDocumentPayload> {
+  if (!isTauriRuntime()) {
+    const workspace = await listLakeDocuments();
+    const path = nextBrowserDocumentPath(title, parentPath, workspace.documents.map((document) => document.path), "multidimensional-table");
+    const content = serializeMultidimensionalTableDocument(createDefaultMultidimensionalTableDocument());
+    const createdDocument = {
+      id: path,
+      path,
+      name: pathBasename(path).replace(/\.dbtable\.json$/i, ""),
+      parentPath,
+      kind: "multidimensional-table" as const,
+      size: new Blob([content]).size,
+    };
+    const payload: CreateDocumentPayload = {
+      root: workspace.root,
+      directories: workspace.directories,
+      documents: [...workspace.documents, createdDocument],
+      order: [...workspace.order, `document:${path}`],
+      createdDocument,
+    };
+    saveBrowserWorkspace(payload);
+    window.localStorage.setItem(browserDocumentKey(createdDocument.path), content);
+    return payload;
+  }
+
+  return invoke<CreateDocumentPayload>("create_multidimensional_table_document", { title, parentPath });
+}
+
 export async function renameLakeDocument(relativePath: string, title: string): Promise<WorkspacePayload> {
   if (!isTauriRuntime()) {
     return renameBrowserDocument(relativePath, title, "lake");
@@ -330,6 +363,14 @@ export async function renameSpreadsheetDocument(relativePath: string, title: str
   }
 
   return invoke<WorkspacePayload>("rename_spreadsheet_document", { relativePath, title });
+}
+
+export async function renameMultidimensionalTableDocument(relativePath: string, title: string): Promise<WorkspacePayload> {
+  if (!isTauriRuntime()) {
+    return renameBrowserDocument(relativePath, title, "multidimensional-table");
+  }
+
+  return invoke<WorkspacePayload>("rename_multidimensional_table_document", { relativePath, title });
 }
 
 export async function deleteLakeDocument(relativePath: string): Promise<WorkspacePayload> {
@@ -348,6 +389,14 @@ export async function deleteSpreadsheetDocument(relativePath: string): Promise<W
   return invoke<WorkspacePayload>("delete_spreadsheet_document", { relativePath });
 }
 
+export async function deleteMultidimensionalTableDocument(relativePath: string): Promise<WorkspacePayload> {
+  if (!isTauriRuntime()) {
+    return deleteBrowserDocument(relativePath);
+  }
+
+  return invoke<WorkspacePayload>("delete_multidimensional_table_document", { relativePath });
+}
+
 function nextBrowserDocumentPath(
   title: string,
   parentPath: string,
@@ -355,13 +404,13 @@ function nextBrowserDocumentPath(
   kind: WorkspaceDocumentKind,
 ): string {
   const takenPaths = new Set(existingPaths);
-  const baseName = safeBrowserName(title || (kind === "spreadsheet" ? "未命名表格" : "未命名文档"));
-  const extension = kind === "spreadsheet" ? "json" : "lake";
-  let candidate = parentPath ? `${parentPath}/${baseName}.${extension}` : `${baseName}.${extension}`;
+  const baseName = safeBrowserName(title || defaultBrowserTitle(kind));
+  const extension = browserDocumentExtension(kind);
+  let candidate = parentPath ? `${parentPath}/${baseName}${extension}` : `${baseName}${extension}`;
   let counter = 2;
 
   while (takenPaths.has(candidate)) {
-    candidate = parentPath ? `${parentPath}/${baseName}-${counter}.${extension}` : `${baseName}-${counter}.${extension}`;
+    candidate = parentPath ? `${parentPath}/${baseName}-${counter}${extension}` : `${baseName}-${counter}${extension}`;
     counter += 1;
   }
 
@@ -393,6 +442,15 @@ export async function readSpreadsheetDocument(relativePath: string): Promise<str
   return invoke<string>("read_spreadsheet_document", { relativePath });
 }
 
+export async function readMultidimensionalTableDocument(relativePath: string): Promise<string> {
+  if (!isTauriRuntime()) {
+    return window.localStorage.getItem(browserDocumentKey(relativePath)) ??
+      serializeMultidimensionalTableDocument(createDefaultMultidimensionalTableDocument());
+  }
+
+  return invoke<string>("read_multidimensional_table_document", { relativePath });
+}
+
 export async function writeSpreadsheetDocument(relativePath: string, content: string): Promise<void> {
   if (!isTauriRuntime()) {
     window.localStorage.setItem(browserDocumentKey(relativePath), content);
@@ -400,6 +458,15 @@ export async function writeSpreadsheetDocument(relativePath: string, content: st
   }
 
   await invoke("write_spreadsheet_document", { relativePath, content });
+}
+
+export async function writeMultidimensionalTableDocument(relativePath: string, content: string): Promise<void> {
+  if (!isTauriRuntime()) {
+    window.localStorage.setItem(browserDocumentKey(relativePath), content);
+    return;
+  }
+
+  await invoke("write_multidimensional_table_document", { relativePath, content });
 }
 
 export interface SelectedExcelFile {
@@ -912,8 +979,8 @@ async function renameBrowserDocument(
     return workspace;
   }
   const safeTitle = safeBrowserName(title);
-  const extension = kind === "spreadsheet" ? "json" : "lake";
-  const nextPath = document.parentPath ? `${document.parentPath}/${safeTitle}.${extension}` : `${safeTitle}.${extension}`;
+  const extension = browserDocumentExtension(kind);
+  const nextPath = document.parentPath ? `${document.parentPath}/${safeTitle}${extension}` : `${safeTitle}${extension}`;
   moveBrowserDocument(relativePath, nextPath);
   const payload = {
     ...workspace,
@@ -1007,10 +1074,38 @@ function normalizeBrowserWorkspace(workspace: Partial<WorkspacePayload>): Worksp
     directories: workspace.directories ?? [],
     documents: (workspace.documents ?? []).map((document) => ({
       ...document,
-      kind: document.kind ?? (document.path.toLowerCase().endsWith(".json") ? "spreadsheet" : "lake"),
+      kind: document.kind ?? browserDocumentKindFromPath(document.path),
     })),
     order: workspace.order ?? [],
   };
+}
+
+function defaultBrowserTitle(kind: WorkspaceDocumentKind): string {
+  if (kind === "spreadsheet") {
+    return "未命名表格";
+  }
+  if (kind === "multidimensional-table") {
+    return "未命名多维表格";
+  }
+  return "未命名文档";
+}
+
+function browserDocumentExtension(kind: WorkspaceDocumentKind): string {
+  if (kind === "spreadsheet") {
+    return ".json";
+  }
+  if (kind === "multidimensional-table") {
+    return MULTIDIMENSIONAL_TABLE_EXTENSION;
+  }
+  return ".lake";
+}
+
+function browserDocumentKindFromPath(path: string): WorkspaceDocumentKind {
+  const lowerPath = path.toLowerCase();
+  if (lowerPath.endsWith(MULTIDIMENSIONAL_TABLE_EXTENSION)) {
+    return "multidimensional-table";
+  }
+  return lowerPath.endsWith(".json") ? "spreadsheet" : "lake";
 }
 
 function resolveBrowserMovedItem(

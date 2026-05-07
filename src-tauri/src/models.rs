@@ -17,6 +17,7 @@ pub struct WorkspaceDocument {
 pub enum WorkspaceDocumentKind {
     Lake,
     Spreadsheet,
+    MultidimensionalTable,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

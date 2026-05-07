@@ -91,3 +91,26 @@ test("表格文档显示 Excel 导入导出菜单", async () => {
   await user.click(screen.getByRole("menuitem", { name: "导出 Excel" }));
   expect(onExportSpreadsheetExcel).toHaveBeenCalledTimes(1);
 });
+
+test("多维表格只显示保存和分享，不显示文档或 Excel 导出菜单", () => {
+  render(
+    <TopBar
+      document={{
+        id: "上线记录.dbtable.json",
+        path: "上线记录.dbtable.json",
+        name: "上线记录",
+        parentPath: "",
+        size: 1,
+        kind: "multidimensional-table",
+      }}
+      saveStatus={{ state: "clean" }}
+      onManualSave={vi.fn()}
+      onExportDocument={vi.fn()}
+    />,
+  );
+
+  expect(screen.getByRole("heading", { name: "上线记录" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "保存" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "导出文档" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Excel 导入导出" })).not.toBeInTheDocument();
+});
