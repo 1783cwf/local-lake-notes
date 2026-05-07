@@ -264,6 +264,22 @@ macOS `.dmg`：
 npm run tauri -- build --bundles dmg --ci --no-sign
 ```
 
+macOS 提示“已损坏，无法打开”的处理方式：
+
+当前 Release 的 macOS `.dmg` 使用 `--no-sign` 构建，没有做 Developer ID 签名和 Apple 公证。从浏览器下载后，macOS Gatekeeper 可能会把应用标记为“已损坏”。如果确认安装包来自本项目 GitHub Release，可以先把应用拖到 `/Applications`，再执行：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Local Lake Notes.app"
+```
+
+如果应用还在下载目录，需要把路径替换为实际 `.app` 路径，例如：
+
+```bash
+xattr -dr com.apple.quarantine "$HOME/Downloads/Local Lake Notes.app"
+```
+
+根本解决方式是为 macOS Release 配置 Developer ID 签名和 Apple 公证，正式对外分发时不应继续使用 `--no-sign`。
+
 Windows NSIS `.exe`：
 
 ```bash
