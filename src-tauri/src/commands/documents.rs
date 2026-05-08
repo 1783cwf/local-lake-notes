@@ -5,8 +5,8 @@ use std::process::Command;
 use tauri::{AppHandle, State};
 
 use crate::commands::workspace::{
-    resolve_existing_directory_path, resolve_existing_lake_path, resolve_writable_lake_path,
-    workspace_payload_for_app,
+    document_child_container_path, mark_document_child_container, resolve_existing_directory_path,
+    resolve_existing_lake_path, resolve_writable_lake_path, workspace_payload_for_app,
 };
 use crate::error::{AppError, AppResult};
 use crate::models::{CreateDocumentPayload, WorkspacePayload};
@@ -17,6 +17,15 @@ use crate::storage::app_database::{
 
 const EMPTY_LAKE_DOCUMENT: &str = "<p><span class=\"ne-text\"> </span></p>";
 const MULTIDIMENSIONAL_TABLE_KIND: &str = "multidimensional-table";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentRename {
+    pub source_path: String,
+    pub target_path: String,
+    pub source_child_container_path: String,
+    pub target_child_container_path: String,
+    pub moved_child_container: bool,
+}
 
 #[tauri::command]
 pub fn create_lake_document(
@@ -111,19 +120,9 @@ pub fn rename_lake_document(
 ) -> AppResult<WorkspacePayload> {
     let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
     let current_path = resolve_existing_lake_path(&root, &relative_path)?;
-    let parent = current_path.parent().ok_or(AppError::InvalidLakePath)?;
     let filename = format!("{}.lake", safe_file_stem(&title)?);
-    let target = parent.join(&filename);
-    if target.exists() {
-        return Err(AppError::InvalidFilename);
-    }
-    fs::rename(current_path, target)?;
-    rewrite_workspace_order_path(
-        &app,
-        &root,
-        &relative_path,
-        &replace_file_name(&relative_path, &filename),
-    )?;
+    let renamed = rename_document_on_disk(&root, current_path, &relative_path, &filename)?;
+    rewrite_renamed_document_order(&app, &root, &renamed)?;
     workspace_payload_for_app(&app, &root)
 }
 
@@ -136,21 +135,9 @@ pub fn rename_spreadsheet_document(
 ) -> AppResult<WorkspacePayload> {
     let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
     let current_path = resolve_existing_spreadsheet_path(&root, &relative_path)?;
-    let parent = current_path
-        .parent()
-        .ok_or(AppError::InvalidSpreadsheetPath)?;
     let filename = format!("{}.json", safe_file_stem(&title)?);
-    let target = parent.join(&filename);
-    if target.exists() {
-        return Err(AppError::InvalidFilename);
-    }
-    fs::rename(current_path, target)?;
-    rewrite_workspace_order_path(
-        &app,
-        &root,
-        &relative_path,
-        &replace_file_name(&relative_path, &filename),
-    )?;
+    let renamed = rename_document_on_disk(&root, current_path, &relative_path, &filename)?;
+    rewrite_renamed_document_order(&app, &root, &renamed)?;
     workspace_payload_for_app(&app, &root)
 }
 
@@ -163,21 +150,9 @@ pub fn rename_multidimensional_table_document(
 ) -> AppResult<WorkspacePayload> {
     let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
     let current_path = resolve_existing_multidimensional_table_path(&root, &relative_path)?;
-    let parent = current_path
-        .parent()
-        .ok_or(AppError::InvalidMultidimensionalTablePath)?;
     let filename = format!("{}.dbtable.json", safe_file_stem(&title)?);
-    let target = parent.join(&filename);
-    if target.exists() {
-        return Err(AppError::InvalidFilename);
-    }
-    fs::rename(current_path, target)?;
-    rewrite_workspace_order_path(
-        &app,
-        &root,
-        &relative_path,
-        &replace_file_name(&relative_path, &filename),
-    )?;
+    let renamed = rename_document_on_disk(&root, current_path, &relative_path, &filename)?;
+    rewrite_renamed_document_order(&app, &root, &renamed)?;
     workspace_payload_for_app(&app, &root)
 }
 
@@ -489,27 +464,15 @@ fn empty_multidimensional_table_document() -> AppResult<String> {
             { "id": "title", "name": "标题", "type": "text", "primary": true },
             {
                 "id": "status",
-                "name": "上线状态",
+                "name": "状态",
                 "type": "singleSelect",
                 "options": [
-                    { "id": "status-pending", "label": "待上线", "color": "green" },
-                    { "id": "status-progress", "label": "进行中", "color": "blue" },
-                    { "id": "status-paused", "label": "搁置", "color": "yellow" },
-                    { "id": "status-done", "label": "已上线", "color": "gray" }
+                    { "id": "status-single-1", "label": "单选1", "color": "blue" },
+                    { "id": "status-single-2", "label": "单选2", "color": "green" }
                 ]
             },
-            {
-                "id": "type",
-                "name": "类型",
-                "type": "multiSelect",
-                "options": [
-                    { "id": "type-dual-center", "label": "双中心", "color": "cyan" },
-                    { "id": "type-gateway", "label": "流量网关", "color": "green" },
-                    { "id": "type-automation", "label": "智能批文", "color": "orange" }
-                ]
-            },
-            { "id": "description", "name": "主要内容", "type": "longText" },
-            { "id": "launchDate", "name": "上线日期", "type": "date" },
+            { "id": "description", "name": "主要内容", "type": "text" },
+            { "id": "date", "name": "日期", "type": "time", "timeFormat": "yyyy/mm/dd hh:mm" },
             { "id": "attachment", "name": "附件", "type": "attachment" }
         ],
         "records": [],
@@ -520,7 +483,7 @@ fn empty_multidimensional_table_document() -> AppResult<String> {
                 "name": "看板",
                 "type": "board",
                 "groupByFieldId": "status",
-                "cardFieldIds": ["type", "description", "launchDate", "attachment"]
+                "cardFieldIds": ["description", "date", "attachment"]
             }
         ],
         "activeViewId": "view-board"
@@ -559,6 +522,68 @@ pub fn safe_file_stem(title: &str) -> AppResult<String> {
     } else {
         Ok(output)
     }
+}
+
+pub fn rename_document_on_disk(
+    root: &Path,
+    current_path: PathBuf,
+    relative_path: &str,
+    filename: &str,
+) -> AppResult<DocumentRename> {
+    let parent = current_path.parent().ok_or(AppError::InvalidFilename)?;
+    let target_path = replace_file_name(relative_path, filename);
+    let target = parent.join(filename);
+    if target.exists() {
+        return Err(AppError::InvalidFilename);
+    }
+
+    let source_child_container_path = document_child_container_path(relative_path);
+    let target_child_container_path = document_child_container_path(&target_path);
+    let source_child_container = root.join(&source_child_container_path);
+    let target_child_container = root.join(&target_child_container_path);
+    let moved_child_container = source_child_container_path != target_child_container_path
+        && source_child_container.is_dir();
+
+    if moved_child_container && target_child_container.exists() {
+        return Err(AppError::WorkspaceItemConflict(
+            target_child_container_path.to_string(),
+        ));
+    }
+
+    fs::rename(&current_path, &target)?;
+    if moved_child_container {
+        // 文档允许承载子级；物理层使用同名目录保存子级，改名时必须同步迁移，避免目录树暴露隐藏容器。
+        if let Err(error) = fs::rename(&source_child_container, &target_child_container) {
+            let _ = fs::rename(&target, &current_path);
+            return Err(error.into());
+        }
+        mark_document_child_container(&target_child_container)?;
+    }
+
+    Ok(DocumentRename {
+        source_path: relative_path.to_string(),
+        target_path,
+        source_child_container_path,
+        target_child_container_path,
+        moved_child_container,
+    })
+}
+
+fn rewrite_renamed_document_order(
+    app: &AppHandle,
+    root: &Path,
+    renamed: &DocumentRename,
+) -> AppResult<()> {
+    rewrite_workspace_order_path(app, root, &renamed.source_path, &renamed.target_path)?;
+    if renamed.moved_child_container {
+        rewrite_workspace_order_path(
+            app,
+            root,
+            &renamed.source_child_container_path,
+            &renamed.target_child_container_path,
+        )?;
+    }
+    Ok(())
 }
 
 pub fn atomic_write(path: &Path, content: &str) -> AppResult<()> {

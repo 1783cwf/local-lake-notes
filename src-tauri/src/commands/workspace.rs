@@ -19,6 +19,8 @@ use crate::storage::app_database::{
     save_recent_workspace_root, set_workspace_order,
 };
 
+pub const DOCUMENT_CHILD_CONTAINER_MARKER: &str = ".yuque-document-children";
+
 #[tauri::command]
 pub fn get_recent_workspace(
     app: AppHandle,
@@ -322,6 +324,7 @@ pub fn move_workspace_item_on_disk(
 
     if target_parent.create_missing {
         fs::create_dir(&target_parent.path)?;
+        mark_document_child_container(&target_parent.path)?;
     }
     if target_path != source_path {
         fs::rename(current_path, target_parent.path.join(source_name))?;
@@ -436,6 +439,7 @@ pub fn list_directories(root: &Path) -> AppResult<Vec<WorkspaceDirectory>> {
             name,
             parent_path,
             modified_at,
+            is_document_child_container: is_document_child_container_dir(entry.path()),
         });
     }
 
@@ -768,7 +772,7 @@ fn child_relative_path(parent_path: &str, child_name: &str) -> String {
     }
 }
 
-fn document_child_container_path(path: &str) -> String {
+pub fn document_child_container_path(path: &str) -> String {
     path.strip_suffix(".dbtable.json")
         .or_else(|| path.strip_suffix(".DBTABLE.JSON"))
         .or_else(|| path.strip_suffix(".lake"))
@@ -777,6 +781,15 @@ fn document_child_container_path(path: &str) -> String {
         .or_else(|| path.strip_suffix(".JSON"))
         .unwrap_or(path)
         .to_string()
+}
+
+pub fn mark_document_child_container(path: &Path) -> AppResult<()> {
+    fs::write(path.join(DOCUMENT_CHILD_CONTAINER_MARKER), b"")?;
+    Ok(())
+}
+
+pub fn is_document_child_container_dir(path: &Path) -> bool {
+    path.join(DOCUMENT_CHILD_CONTAINER_MARKER).is_file()
 }
 
 fn document_child_container_exists(root: &Path, relative_path: &str) -> AppResult<bool> {

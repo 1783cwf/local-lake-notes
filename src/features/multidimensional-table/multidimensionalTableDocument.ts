@@ -18,6 +18,7 @@ export type MultidimensionalTableTimeFormat =
   | "yyyy/mm/dd"
   | "yyyy-mm-dd hh:mm"
   | "yyyy/mm/dd hh:mm"
+  | "hh:mm"
   | "yyyy年m月d日"
   | "yyyy年m月d日 hh:mm";
 export type MultidimensionalTableFilterOperator =
@@ -120,21 +121,14 @@ export const multidimensionalTableTimeFormatOptions: Array<{
   { format: "yyyy/mm/dd", label: "2026/05/07", placeholder: "2026/05/07" },
   { format: "yyyy-mm-dd hh:mm", label: "2026-05-07 12:30", placeholder: "2026-05-07 12:30" },
   { format: "yyyy/mm/dd hh:mm", label: "2026/05/07 12:30", placeholder: "2026/05/07 12:30" },
+  { format: "hh:mm", label: "12:30", placeholder: "12:30" },
   { format: "yyyy年m月d日", label: "2026年5月7日", placeholder: "2026年5月7日" },
   { format: "yyyy年m月d日 hh:mm", label: "2026年5月7日 12:30", placeholder: "2026年5月7日 12:30" },
 ];
 
 const defaultStatusOptions: MultidimensionalTableOption[] = [
-  { id: "status-pending", label: "待上线", color: "green" },
-  { id: "status-progress", label: "进行中", color: "blue" },
-  { id: "status-paused", label: "搁置", color: "yellow" },
-  { id: "status-done", label: "已上线", color: "gray" },
-];
-
-const defaultTypeOptions: MultidimensionalTableOption[] = [
-  { id: "type-dual-center", label: "双中心", color: "cyan" },
-  { id: "type-gateway", label: "流量网关", color: "green" },
-  { id: "type-automation", label: "智能批文", color: "orange" },
+  { id: "status-single-1", label: "单选1", color: "blue" },
+  { id: "status-single-2", label: "单选2", color: "green" },
 ];
 
 export function createDefaultMultidimensionalTableDocument(): MultidimensionalTableDocument {
@@ -143,13 +137,9 @@ export function createDefaultMultidimensionalTableDocument(): MultidimensionalTa
     version: 1,
     fields: [
       { id: "title", name: "标题", type: "text", primary: true },
-      { id: "status", name: "上线状态", type: "singleSelect", options: defaultStatusOptions },
-      { id: "type", name: "类型", type: "multiSelect", options: defaultTypeOptions },
+      { id: "status", name: "状态", type: "singleSelect", options: defaultStatusOptions },
       { id: "description", name: "主要内容", type: "text" },
-      { id: "estimate", name: "预估工时", type: "number" },
-      { id: "progress", name: "进度", type: "progress" },
-      { id: "launchTime", name: "上线时间", type: "time", timeFormat: defaultTimeFormat },
-      { id: "url", name: "链接", type: "url" },
+      { id: "date", name: "日期", type: "time", timeFormat: defaultTimeFormat },
       { id: "attachment", name: "附件", type: "attachment" },
     ],
     records: [],
@@ -160,7 +150,7 @@ export function createDefaultMultidimensionalTableDocument(): MultidimensionalTa
         name: "看板",
         type: "board",
         groupByFieldId: "status",
-        cardFieldIds: ["type", "description", "estimate", "progress", "launchTime", "url", "attachment"],
+        cardFieldIds: ["description", "date", "attachment"],
       },
     ],
     activeViewId: "view-board",
@@ -238,8 +228,11 @@ export function createField(
     type,
   };
 
-  if (type === "singleSelect" || type === "multiSelect") {
-    field.options = [createSelectOption("选项 1"), createSelectOption("选项 2")];
+  if (type === "singleSelect") {
+    field.options = [createSelectOption("单选1"), createSelectOption("单选2")];
+  }
+  if (type === "multiSelect") {
+    field.options = [createSelectOption("多选1"), createSelectOption("多选2")];
   }
   if (type === "time") {
     field.timeFormat = defaultTimeFormat;
@@ -349,7 +342,7 @@ export function changeMultidimensionalFieldType(
     return {
       ...field,
       type,
-      options: isSelectType ? (field.options?.length ? field.options : [createSelectOption("选项 1"), createSelectOption("选项 2")]) : undefined,
+      options: isSelectType ? (field.options?.length ? field.options : createEmptySelectOptions(type)) : undefined,
       timeFormat: type === "time" ? (field.timeFormat ?? defaultTimeFormat) : undefined,
     };
   });
@@ -480,11 +473,13 @@ function normalizeFieldType(value: unknown): MultidimensionalTableFieldType {
 }
 
 function createEmptySelectOptions(type: MultidimensionalTableFieldType): MultidimensionalTableOption[] | undefined {
-  if (type !== "singleSelect" && type !== "multiSelect") {
-    return undefined;
+  if (type === "singleSelect") {
+    return [createSelectOption("单选1"), createSelectOption("单选2")];
   }
-
-  return [createSelectOption("选项 1"), createSelectOption("选项 2")];
+  if (type === "multiSelect") {
+    return [createSelectOption("多选1"), createSelectOption("多选2")];
+  }
+  return undefined;
 }
 
 function createLocalId(prefix: string): string {
@@ -719,6 +714,23 @@ function parseTimeParts(value: string): {
   hour?: number;
   minute?: number;
 } | null {
+  const timeOnlyMatch = value.match(/^(\d{1,2}):(\d{1,2})$/);
+  if (timeOnlyMatch) {
+    const now = new Date();
+    const [, hourText, minuteText] = timeOnlyMatch;
+    const hour = Number(hourText);
+    const minute = Number(minuteText);
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    const day = now.getDate();
+
+    if (!validDateParts(year, month, day, hour, minute)) {
+      return null;
+    }
+
+    return { year, month, day, hour, minute };
+  }
+
   const match = value.match(/^(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})(?:日)?(?:[T\s]+(\d{1,2}):(\d{1,2}))?/);
   if (!match) {
     return null;
@@ -750,6 +762,9 @@ function formatTimeParts(
 ): string {
   const hour = parts.hour ?? 0;
   const minute = parts.minute ?? 0;
+  if (format === "hh:mm") {
+    return `${pad2(hour)}:${pad2(minute)}`;
+  }
   if (format === "yyyy-mm-dd") {
     return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`;
   }

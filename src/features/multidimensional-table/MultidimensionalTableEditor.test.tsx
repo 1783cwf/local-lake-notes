@@ -5,6 +5,8 @@ import { MultidimensionalTableEditor } from "./MultidimensionalTableEditor";
 import {
   createDefaultMultidimensionalTableDocument,
   createEmptyMultidimensionalTableRecord,
+  type MultidimensionalTableDocument,
+  type MultidimensionalTableField,
   serializeMultidimensionalTableDocument,
 } from "./multidimensionalTableDocument";
 
@@ -16,6 +18,27 @@ const documentEntry = {
   size: 1,
   kind: "multidimensional-table" as const,
 };
+
+const categoryField: MultidimensionalTableField = {
+  id: "category",
+  name: "分类",
+  type: "multiSelect",
+  options: [
+    { id: "multi-1", label: "多选1", color: "cyan" },
+    { id: "multi-2", label: "多选2", color: "green" },
+  ],
+};
+
+function tableWithCategory(): MultidimensionalTableDocument {
+  const table = createDefaultMultidimensionalTableDocument();
+  return {
+    ...table,
+    fields: [...table.fields, categoryField],
+    views: table.views.map((view) => view.type === "board"
+      ? { ...view, cardFieldIds: [...(view.cardFieldIds ?? []), categoryField.id] }
+      : view),
+  };
+}
 
 test("默认打开看板视图并能切换到表格视图", async () => {
   const user = userEvent.setup();
@@ -96,17 +119,17 @@ test("唯一表格视图不允许删除", async () => {
 
 test("工具栏已移除生成表单并支持搜索筛选排序", async () => {
   const user = userEvent.setup();
-  const table = createDefaultMultidimensionalTableDocument();
+  const table = tableWithCategory();
   const firstRecord = createEmptyMultidimensionalTableRecord(table.fields, {
     title: "B 任务",
-    status: "status-pending",
-    type: ["type-dual-center"],
+    status: "status-single-1",
+    category: ["multi-1"],
     description: "湘潭项目",
   });
   const secondRecord = createEmptyMultidimensionalTableRecord(table.fields, {
     title: "A 任务",
-    status: "status-progress",
-    type: ["type-gateway"],
+    status: "status-single-2",
+    category: ["multi-2"],
     description: "株洲项目",
   });
 
@@ -125,7 +148,7 @@ test("工具栏已移除生成表单并支持搜索筛选排序", async () => {
   await user.click(screen.getByRole("button", { name: "筛选" }));
   await user.click(screen.getByRole("button", { name: "添加筛选规则" }));
   await user.selectOptions(screen.getByLabelText("筛选字段 1"), "status");
-  await user.selectOptions(screen.getByLabelText("筛选值 1"), "status-progress");
+  await user.selectOptions(screen.getByLabelText("筛选值 1"), "status-single-2");
   expect(screen.queryByDisplayValue("B 任务")).not.toBeInTheDocument();
   expect(screen.getByDisplayValue("A 任务")).toBeInTheDocument();
 
@@ -146,17 +169,17 @@ test("筛选支持多规则并保存到当前视图", async () => {
   const table = createDefaultMultidimensionalTableDocument();
   const firstRecord = createEmptyMultidimensionalTableRecord(table.fields, {
     title: "待办任务",
-    status: "status-pending",
+    status: "status-single-1",
     description: "湘潭项目",
   });
   const secondRecord = createEmptyMultidimensionalTableRecord(table.fields, {
     title: "株洲任务",
-    status: "status-progress",
+    status: "status-single-2",
     description: "株洲项目",
   });
   const thirdRecord = createEmptyMultidimensionalTableRecord(table.fields, {
     title: "湘潭任务",
-    status: "status-progress",
+    status: "status-single-2",
     description: "湘潭项目",
   });
   const content = serializeMultidimensionalTableDocument({
@@ -169,7 +192,7 @@ test("筛选支持多规则并保存到当前视图", async () => {
   await user.click(screen.getByRole("button", { name: "筛选" }));
   await user.click(screen.getByRole("button", { name: "添加筛选规则" }));
   await user.selectOptions(screen.getByLabelText("筛选字段 1"), "status");
-  await user.selectOptions(screen.getByLabelText("筛选值 1"), "status-progress");
+  await user.selectOptions(screen.getByLabelText("筛选值 1"), "status-single-2");
   await user.click(screen.getByRole("button", { name: "添加筛选规则" }));
   await user.selectOptions(screen.getByLabelText("筛选字段 2"), "description");
   await user.selectOptions(screen.getByLabelText("筛选条件 2"), "contains");
@@ -181,7 +204,7 @@ test("筛选支持多规则并保存到当前视图", async () => {
 
   await waitFor(() => {
     expect(savedContent).toContain("\"filterRules\"");
-    expect(savedContent).toContain("\"status-progress\"");
+    expect(savedContent).toContain("\"status-single-2\"");
     expect(savedContent).toContain("湘潭");
   }, { timeout: 1400 });
 
@@ -208,7 +231,7 @@ test("表格视图编辑文本字段后会防抖保存", async () => {
   }, { timeout: 1400 });
 });
 
-test("表格视图可以新增字段并修改字段类型", async () => {
+test("表格视图可以新增字段并修改字段分类", async () => {
   const user = userEvent.setup();
   const onSave = vi.fn(async () => undefined);
   renderEditor({ onSave });
@@ -234,22 +257,22 @@ test("字段配置可以修改时间格式并删除字段", async () => {
   renderEditor({ onSave });
 
   await user.click(screen.getByRole("tab", { name: /表格/ }));
-  await user.click(screen.getByRole("button", { name: "上线时间字段设置" }));
-  await user.selectOptions(screen.getByLabelText("上线时间时间格式"), "yyyy-mm-dd");
+  await user.click(screen.getByRole("button", { name: "日期字段设置" }));
+  await user.selectOptions(screen.getByLabelText("日期时间格式"), "yyyy-mm-dd");
   await user.click(screen.getByRole("button", { name: "确定" }));
 
   await waitFor(() => {
     expect(onSave).toHaveBeenCalledWith("project.dbtable.json", expect.stringContaining("\"timeFormat\": \"yyyy-mm-dd\""));
   }, { timeout: 1400 });
 
-  await user.click(screen.getByRole("button", { name: "预估工时字段设置" }));
+  await user.click(screen.getByRole("button", { name: "日期字段设置" }));
   await user.click(screen.getByRole("button", { name: /删除字段/ }));
 
   await waitFor(() => {
-    expect(onSave).toHaveBeenCalledWith("project.dbtable.json", expect.not.stringContaining("\"id\": \"estimate\""));
+    expect(onSave).toHaveBeenCalledWith("project.dbtable.json", expect.not.stringContaining("\"id\": \"date\""));
   }, { timeout: 1400 });
-  expect(document.querySelectorAll(".multitable-grid__header .multitable-grid__cell--header")).toHaveLength(8);
-  expect(document.querySelectorAll(".multitable-grid__row:first-child .multitable-grid__cell")).toHaveLength(9);
+  expect(document.querySelectorAll(".multitable-grid__header .multitable-grid__cell--header")).toHaveLength(5);
+  expect(document.querySelectorAll(".multitable-grid__row:first-child .multitable-grid__cell")).toHaveLength(6);
   expect(document.querySelector(".multitable-grid__row:first-child .multitable-grid__cell--row-spacer")).toBeInTheDocument();
 });
 
@@ -259,16 +282,16 @@ test("单选和多选字段可以用选项面板选择并新增选项", async ()
   renderEditor({ onSave });
 
   await user.click(screen.getByRole("tab", { name: /表格/ }));
-  await user.click(screen.getByLabelText("上线状态"));
-  await user.click(screen.getByRole("option", { name: /进行中/ }));
-  await user.click(screen.getByLabelText("类型"));
-  await user.click(screen.getByRole("option", { name: /流量网关/ }));
-  await user.type(screen.getByLabelText("类型新增选项"), "新类型");
-  await user.click(screen.getByLabelText("类型确认新增选项"));
+  await user.click(screen.getByLabelText("状态"));
+  await user.click(screen.getByRole("option", { name: /单选2/ }));
+  await user.click(screen.getByLabelText("分类"));
+  await user.click(screen.getByRole("option", { name: /多选2/ }));
+  await user.type(screen.getByLabelText("分类新增选项"), "新分类");
+  await user.click(screen.getByLabelText("分类确认新增选项"));
 
   await waitFor(() => {
-    expect(onSave).toHaveBeenCalledWith("project.dbtable.json", expect.stringContaining("status-progress"));
-    expect(onSave).toHaveBeenCalledWith("project.dbtable.json", expect.stringContaining("新类型"));
+    expect(onSave).toHaveBeenCalledWith("project.dbtable.json", expect.stringContaining("status-single-2"));
+    expect(onSave).toHaveBeenCalledWith("project.dbtable.json", expect.stringContaining("新分类"));
   }, { timeout: 1400 });
 });
 
@@ -281,30 +304,30 @@ test("单选和多选下拉选项支持编辑和删除", async () => {
   renderEditor({ onSave });
 
   await user.click(screen.getByRole("tab", { name: /表格/ }));
-  await user.click(screen.getByLabelText("上线状态"));
-  await user.click(screen.getByRole("button", { name: "编辑选项 待上线" }));
-  await user.clear(screen.getByLabelText("上线状态编辑选项 待上线"));
-  await user.type(screen.getByLabelText("上线状态编辑选项 待上线"), "待处理");
+  await user.click(screen.getByLabelText("状态"));
+  await user.click(screen.getByRole("button", { name: "编辑选项 单选1" }));
+  await user.clear(screen.getByLabelText("状态编辑选项 单选1"));
+  await user.type(screen.getByLabelText("状态编辑选项 单选1"), "待处理");
   await user.keyboard("{Enter}");
 
   expect(screen.getByRole("option", { name: /待处理/ })).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "删除选项 待处理" }));
   await waitFor(() => {
-    expect(savedContent).not.toContain("status-pending");
+    expect(savedContent).not.toContain("status-single-1");
   }, { timeout: 1400 });
 
-  await user.click(screen.getByLabelText("类型"));
-  await user.click(screen.getByRole("button", { name: "编辑选项 双中心" }));
-  await user.clear(screen.getByLabelText("类型编辑选项 双中心"));
-  await user.type(screen.getByLabelText("类型编辑选项 双中心"), "双活中心");
+  await user.click(screen.getByLabelText("分类"));
+  await user.click(screen.getByRole("button", { name: "编辑选项 多选1" }));
+  await user.clear(screen.getByLabelText("分类编辑选项 多选1"));
+  await user.type(screen.getByLabelText("分类编辑选项 多选1"), "多选编辑");
   await user.keyboard("{Enter}");
 
-  expect(screen.getByRole("option", { name: /双活中心/ })).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "删除选项 流量网关" }));
+  expect(screen.getByRole("option", { name: /多选编辑/ })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "删除选项 多选2" }));
   await waitFor(() => {
-    expect(savedContent).toContain("双活中心");
-    expect(savedContent).not.toContain("type-gateway");
-    expect(savedContent).toContain("type-dual-center");
+    expect(savedContent).toContain("多选编辑");
+    expect(savedContent).not.toContain("multi-2");
+    expect(savedContent).toContain("multi-1");
   }, { timeout: 1400 });
 });
 
@@ -316,7 +339,7 @@ test("看板新增记录会写入当前分组状态", async () => {
   await user.click(screen.getAllByRole("button", { name: "新增记录" })[0]);
 
   await waitFor(() => {
-    expect(onSave).toHaveBeenCalledWith("project.dbtable.json", expect.stringContaining("status-pending"));
+    expect(onSave).toHaveBeenCalledWith("project.dbtable.json", expect.stringContaining("status-single-1"));
   }, { timeout: 1400 });
 });
 
@@ -329,7 +352,7 @@ test("看板配置可以控制卡片字段显示隐藏", async () => {
 
   await user.click(screen.getByRole("button", { name: "看板配置" }));
   expect(screen.getByLabelText(/标题/)).toBeInTheDocument();
-  expect(screen.getByLabelText(/上线状态/)).toBeInTheDocument();
+  expect(screen.getByLabelText(/状态/)).toBeInTheDocument();
   await user.click(screen.getByLabelText(/主要内容/));
 
   expect(screen.queryByText("将访问共性公文的流量指向湘潭pod4")).not.toBeInTheDocument();
@@ -373,13 +396,12 @@ test("看板可以切换分组字段并直接调整卡片记录", async () => {
   };
   const record = createEmptyMultidimensionalTableRecord([...table.fields, priorityField], {
     title: "共性公文迁移到湘潭",
-    status: "status-pending",
-    type: ["type-dual-center", "type-gateway"],
+    status: "status-single-1",
+    category: ["multi-1", "multi-2"],
     description: "将访问共性公文的流量指向湘潭pod4",
-    progress: "20",
-    launchTime: "2026-04-13T09:00",
+    date: "2026-04-13T09:00",
     priority: "priority-high",
-    attachment: "-",
+    attachment: [],
   });
 
   renderEditor({
@@ -395,8 +417,8 @@ test("看板可以切换分组字段并直接调整卡片记录", async () => {
   await user.click(screen.getByRole("button", { name: /共性公文迁移到湘潭/ }));
   await user.clear(screen.getByLabelText("看板标题"));
   await user.type(screen.getByLabelText("看板标题"), "新的看板任务");
-  await user.click(screen.getByRole("button", { name: "编辑字段 上线时间" }));
-  await user.selectOptions(screen.getByLabelText("上线时间时间格式"), "yyyy年m月d日");
+  await user.click(screen.getByRole("button", { name: "编辑字段 日期" }));
+  await user.selectOptions(screen.getByLabelText("日期时间格式"), "yyyy年m月d日");
   await user.click(screen.getByRole("button", { name: "确定" }));
 
   await waitFor(() => {
@@ -489,17 +511,14 @@ function renderEditor({
   onDownloadFile?: (input: { url: string; filename: string; resourceRef?: string }) => Promise<void>;
   content?: string;
 } = {}) {
-  const table = createDefaultMultidimensionalTableDocument();
+  const table = tableWithCategory();
   const record = createEmptyMultidimensionalTableRecord(table.fields, {
     title: "共性公文迁移到湘潭",
-    status: "status-pending",
-    type: ["type-dual-center", "type-gateway"],
+    status: "status-single-1",
+    category: ["multi-1", "multi-2"],
     description: "将访问共性公文的流量指向湘潭pod4",
-    estimate: "3",
-    progress: "20",
-    launchTime: "2026-04-13T09:00",
-    url: "https://example.com",
-    attachment: "-",
+    date: "2026-04-13T09:00",
+    attachment: [],
   });
   return render(
     <MultidimensionalTableEditor

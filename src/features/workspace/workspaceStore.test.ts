@@ -18,11 +18,16 @@ const doc = (path: string, parentPath = ""): WorkspaceDocument => ({
   size: 1,
 });
 
-const dir = (path: string, parentPath = ""): WorkspaceDirectory => ({
+const dir = (
+  path: string,
+  parentPath = "",
+  options: { isDocumentChildContainer?: boolean } = {},
+): WorkspaceDirectory => ({
   id: path,
   path,
   name: path.split("/").pop() ?? path,
   parentPath,
+  ...options,
 });
 
 test("按目录构建文档树并优先显示文件夹", () => {
@@ -66,6 +71,29 @@ test("文档同名目录会合并为文档子级", () => {
     name: "阿里云",
   });
   expect(tree[0].children.map((node) => node.itemId)).toEqual(["document:阿里云/访问密钥.lake"]);
+});
+
+test("带内部标记的空同名目录会作为文档子级容器隐藏", () => {
+  const tree = buildDocumentTree(
+    [doc("阿里云.lake")],
+    [dir("阿里云", "", { isDocumentChildContainer: true })],
+  );
+
+  expect(tree).toHaveLength(1);
+  expect(tree[0]).toMatchObject({
+    itemId: "document:阿里云.lake",
+    type: "document",
+    name: "阿里云",
+  });
+});
+
+test("普通空同名目录不会误合并为文档子级容器", () => {
+  const tree = buildDocumentTree(
+    [doc("阿里云.lake")],
+    [dir("阿里云")],
+  );
+
+  expect(tree.map((node) => node.itemId)).toEqual(["folder:阿里云", "document:阿里云.lake"]);
 });
 
 test("从 .lake 路径提取文档标题", () => {
