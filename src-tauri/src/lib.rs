@@ -29,9 +29,9 @@ use commands::settings::{
 };
 use commands::upload::{upload_file, upload_image};
 use commands::workspace::{
-    create_lake_directory, delete_lake_directory, get_recent_workspace, list_lake_documents,
-    move_workspace_item, rename_lake_directory, rename_workspace, save_workspace_order,
-    set_workspace_root,
+    create_lake_directory, create_workspace_root, delete_lake_directory, forget_workspace_root,
+    get_recent_workspace, list_known_workspaces, list_lake_documents, move_workspace_item,
+    rename_lake_directory, rename_workspace, save_workspace_order, set_workspace_root,
 };
 use state::AppState;
 use storage::app_database::initialize_app_database;
@@ -99,6 +99,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_recent_workspace,
             set_workspace_root,
+            create_workspace_root,
+            list_known_workspaces,
+            forget_workspace_root,
             list_lake_documents,
             rename_workspace,
             create_lake_directory,

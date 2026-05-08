@@ -12,6 +12,6 @@ test("工作台关键区域具备可访问入口", () => {
   );
 
   expect(screen.getByRole("navigation", { name: "应用导航" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "选择目录" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "知识库" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
 });

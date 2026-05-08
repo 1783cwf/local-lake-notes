@@ -74,6 +74,40 @@ test("创建编辑器时配置 Lake 图片、附件上传和大纲能力", () =>
   destroyLakeEditor(created);
 });
 
+test("第三方销毁移除编辑器挂载节点时保留外层容器", () => {
+  let mountElement: HTMLElement | null = null;
+  const shell = document.createElement("div");
+  document.body.append(shell);
+  window.Doc = {
+    createOpenEditor: vi.fn((element) => {
+      mountElement = element;
+      return {
+        setDocument: vi.fn(),
+        getDocument: vi.fn(() => ""),
+        on: vi.fn(),
+        destroy: vi.fn(() => {
+          element.remove();
+        }),
+      };
+    }),
+  };
+
+  const created = createLakeEditor(shell, {
+    onContentChange: vi.fn(),
+    uploadImage: vi.fn(),
+    uploadFile: vi.fn(),
+    downloadFile: vi.fn(),
+  });
+
+  expect(mountElement).not.toBe(shell);
+  expect(mountElement && shell.contains(mountElement)).toBe(true);
+
+  destroyLakeEditor(created);
+
+  expect(shell.isConnected).toBe(true);
+  expect(shell.childElementCount).toBe(0);
+});
+
 test("选中编辑态附件卡片后通过悬浮下载按钮使用 Lake 附件名称下载", () => {
   const value = `data:${encodeURIComponent(JSON.stringify({
     src: "https://oss.example/files/2026/04/test-file.pdf",
@@ -91,7 +125,6 @@ test("选中编辑态附件卡片后通过悬浮下载按钮使用 Lake 附件�
   };
   const downloadFile = vi.fn();
   const root = document.createElement("div");
-  root.innerHTML = `<ne-card data-card-name="file" data-card-type="inline"><span class="ne-card-file" data-testid="ne-card-file">测试资料.pdf</span></ne-card>`;
 
   const created = createLakeEditor(root, {
     onContentChange: vi.fn(),
@@ -99,6 +132,7 @@ test("选中编辑态附件卡片后通过悬浮下载按钮使用 Lake 附件�
     uploadFile: vi.fn(),
     downloadFile,
   });
+  root.querySelector(".lake-editor-mount")!.innerHTML = `<ne-card data-card-name="file" data-card-type="inline"><span class="ne-card-file" data-testid="ne-card-file">测试资料.pdf</span></ne-card>`;
   root.querySelector("ne-card")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
   expect(downloadFile).not.toHaveBeenCalled();
@@ -134,7 +168,6 @@ test("点击附件文字节点时也能显示下载工具条", () => {
     createOpenEditor: vi.fn(() => editor),
   };
   const root = document.createElement("div");
-  root.innerHTML = `<ne-card data-card-name="file" data-card-type="inline"><span class="ne-card-file">text-target.zip</span></ne-card>`;
 
   const created = createLakeEditor(root, {
     onContentChange: vi.fn(),
@@ -142,6 +175,7 @@ test("点击附件文字节点时也能显示下载工具条", () => {
     uploadFile: vi.fn(),
     downloadFile: vi.fn(),
   });
+  root.querySelector(".lake-editor-mount")!.innerHTML = `<ne-card data-card-name="file" data-card-type="inline"><span class="ne-card-file">text-target.zip</span></ne-card>`;
   root.querySelector(".ne-card-file")?.firstChild?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
   expect(document.body.querySelector(".lake-file-floating-toolbar")).not.toHaveAttribute("hidden");

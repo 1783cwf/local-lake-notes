@@ -9,16 +9,16 @@ use yuque_lake_notes_lib::commands::documents::{
     resolve_writable_spreadsheet_path, safe_file_stem,
 };
 use yuque_lake_notes_lib::commands::workspace::{
-    list_directories, list_documents, move_workspace_item_on_disk, resolve_existing_directory_path,
-    resolve_existing_lake_path, resolve_writable_lake_path, safe_directory_name,
+    create_workspace_root_at, list_directories, list_documents, move_workspace_item_on_disk,
+    resolve_existing_directory_path, resolve_existing_lake_path, resolve_writable_lake_path,
+    safe_directory_name,
 };
 use yuque_lake_notes_lib::error::AppError;
 use yuque_lake_notes_lib::models::{MoveWorkspaceItemInput, WorkspaceDocumentKind};
 
 const WORKBOOK_SNAPSHOT: &str =
     r#"{"sheetOrder":["sheet-0001"],"sheets":{"sheet-0001":{"id":"sheet-0001","name":"Sheet1"}}}"#;
-const MULTIDIMENSIONAL_TABLE_SNAPSHOT: &str =
-    r#"{"kind":"multidimensional-table","version":1,"fields":[],"records":[],"views":[],"activeViewId":"view-table"}"#;
+const MULTIDIMENSIONAL_TABLE_SNAPSHOT: &str = r#"{"kind":"multidimensional-table","version":1,"fields":[],"records":[],"views":[],"activeViewId":"view-table"}"#;
 
 #[test]
 fn lists_lake_and_univer_snapshot_documents_in_nested_directories() {
@@ -26,7 +26,11 @@ fn lists_lake_and_univer_snapshot_documents_in_nested_directories() {
     fs::create_dir(dir.path().join("notes")).unwrap();
     fs::write(dir.path().join("a.lake"), "<p>a</p>").unwrap();
     fs::write(dir.path().join("notes").join("b.lake"), "<p>b</p>").unwrap();
-    fs::write(dir.path().join("notes").join("budget.json"), WORKBOOK_SNAPSHOT).unwrap();
+    fs::write(
+        dir.path().join("notes").join("budget.json"),
+        WORKBOOK_SNAPSHOT,
+    )
+    .unwrap();
     fs::write(
         dir.path().join("notes").join("上线记录.dbtable.json"),
         MULTIDIMENSIONAL_TABLE_SNAPSHOT,
@@ -162,7 +166,9 @@ fn rejects_path_traversal_and_non_multidimensional_table_files() {
     assert!(resolve_writable_multidimensional_table_path(dir.path(), "x.json").is_err());
     assert!(resolve_writable_multidimensional_table_path(dir.path(), "x.lake").is_err());
     assert!(resolve_writable_multidimensional_table_path(dir.path(), "./x.dbtable.json").is_err());
-    assert!(resolve_existing_multidimensional_table_path(dir.path(), "missing.dbtable.json").is_err());
+    assert!(
+        resolve_existing_multidimensional_table_path(dir.path(), "missing.dbtable.json").is_err()
+    );
 }
 
 #[test]
@@ -193,6 +199,29 @@ fn sanitizes_file_stems_without_dropping_chinese_text() {
         safe_directory_name(" 个人 学习/前端 ").unwrap(),
         "个人-学习-前端"
     );
+}
+
+#[test]
+fn creates_workspace_directory_inside_selected_parent() {
+    let dir = tempdir().unwrap();
+
+    let workspace = create_workspace_root_at(dir.path(), " 工作 知识库 ").unwrap();
+
+    assert_eq!(
+        workspace,
+        dir.path().join("工作-知识库").canonicalize().unwrap()
+    );
+    assert!(workspace.is_dir());
+}
+
+#[test]
+fn rejects_invalid_or_conflicting_workspace_directory_names() {
+    let dir = tempdir().unwrap();
+    fs::create_dir(dir.path().join("work")).unwrap();
+
+    assert!(create_workspace_root_at(dir.path(), "  ").is_err());
+    assert!(create_workspace_root_at(dir.path(), "../outside").is_err());
+    assert!(create_workspace_root_at(dir.path(), "work").is_err());
 }
 
 #[test]
@@ -271,6 +300,60 @@ fn same_parent_move_only_reports_paths_for_order_update() {
     assert_eq!(moved.source_path, "a.lake");
     assert_eq!(moved.target_path, "a.lake");
     assert!(dir.path().join("a.lake").exists());
+}
+
+#[test]
+fn moves_document_into_document_child_container() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("阿里云.lake"), "<p>a</p>").unwrap();
+    fs::write(dir.path().join("各种代理.lake"), "<p>proxy</p>").unwrap();
+
+    let moved = move_workspace_item_on_disk(
+        dir.path(),
+        &MoveWorkspaceItemInput {
+            source_id: "document:各种代理.lake".to_string(),
+            target_parent_path: "阿里云".to_string(),
+            order: vec![],
+        },
+    )
+    .unwrap();
+
+    assert_eq!(moved.source_path, "各种代理.lake");
+    assert_eq!(moved.target_path, "阿里云/各种代理.lake");
+    assert!(dir.path().join("阿里云").join("各种代理.lake").exists());
+}
+
+#[test]
+fn moves_document_child_container_with_document() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("阿里云")).unwrap();
+    fs::write(dir.path().join("常用配置.lake"), "<p>config</p>").unwrap();
+    fs::write(dir.path().join("阿里云.lake"), "<p>a</p>").unwrap();
+    fs::write(
+        dir.path().join("阿里云").join("访问密钥.lake"),
+        "<p>key</p>",
+    )
+    .unwrap();
+
+    let moved = move_workspace_item_on_disk(
+        dir.path(),
+        &MoveWorkspaceItemInput {
+            source_id: "document:阿里云.lake".to_string(),
+            target_parent_path: "常用配置".to_string(),
+            order: vec![],
+        },
+    )
+    .unwrap();
+
+    assert_eq!(moved.target_path, "常用配置/阿里云.lake");
+    assert!(dir.path().join("常用配置").join("阿里云.lake").exists());
+    assert!(dir
+        .path()
+        .join("常用配置")
+        .join("阿里云")
+        .join("访问密钥.lake")
+        .exists());
+    assert!(!dir.path().join("阿里云").exists());
 }
 
 #[test]

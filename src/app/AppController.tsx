@@ -31,6 +31,7 @@ import type {
   WorkspaceDropIntent,
   WorkspaceMoveResolution,
   WorkspacePayload,
+  KnownWorkspace,
 } from "../features/workspace/workspaceStore";
 import {
   applyWorkspaceMove,
@@ -43,6 +44,7 @@ import {
   chooseWorkspaceDirectory,
   chooseExcelImportFile,
   chooseDatabaseDirectory,
+  createWorkspaceRoot,
   createLakeDirectory,
   createLakeDocument,
   createMultidimensionalTableDocument,
@@ -59,6 +61,8 @@ import {
   readResourceBytes,
   getOssSettings,
   getRecentWorkspace,
+  listKnownWorkspaces,
+  forgetWorkspaceRoot,
   getBackupKeyStatus,
   getDatabaseLocation,
   getResourceKeyStatus,
@@ -130,6 +134,7 @@ interface AppOperationState {
 
 export function AppController() {
   const [workspace, setWorkspace] = useState<WorkspacePayload | null>(null);
+  const [knownWorkspaces, setKnownWorkspaces] = useState<KnownWorkspace[]>([]);
   const [currentDocument, setCurrentDocument] = useState<CurrentDocumentState | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>(emptySaveStatus);
   const [manualSaveRequest, setManualSaveRequest] = useState(0);
@@ -175,14 +180,16 @@ export function AppController() {
 
   const boot = async () => {
     try {
-      const [recentWorkspace, settings, keyStatus, resourceStatus, database] = await Promise.all([
+      const [recentWorkspace, knownWorkspaceList, settings, keyStatus, resourceStatus, database] = await Promise.all([
         getRecentWorkspace(),
+        listKnownWorkspaces(),
         getOssSettings(),
         getBackupKeyStatus(),
         getResourceKeyStatus(),
         getDatabaseLocation(),
       ]);
       setWorkspace(recentWorkspace);
+      setKnownWorkspaces(knownWorkspaceList);
       setOssSettings(settings);
       setBackupKeyStatus(keyStatus);
       setResourceKeyStatus(resourceStatus);
@@ -200,6 +207,10 @@ export function AppController() {
       setBackupRecords([]);
     }
   };
+
+  const refreshKnownWorkspaces = useCallback(async () => {
+    setKnownWorkspaces(await listKnownWorkspaces());
+  }, []);
 
   const refreshCurrentDocumentFromDisk = useCallback(async () => {
     if (!currentDocument) {
@@ -254,13 +265,77 @@ export function AppController() {
     try {
       const payload = await setWorkspaceRoot(selected);
       setWorkspace(payload);
+      await refreshKnownWorkspaces();
       setCurrentDocument(null);
       setSaveStatus(emptySaveStatus);
       setAppError(null);
     } catch (error) {
       setAppError(toMessage(error));
     }
-  }, []);
+  }, [refreshKnownWorkspaces]);
+
+  const createWorkspace = useCallback(() => {
+    setTextDialog({
+      title: "新建知识库",
+      label: "知识库名称",
+      initialValue: "新知识库",
+      submitLabel: "创建",
+      onSubmit: async (name) => {
+        const selectedParent = await chooseWorkspaceDirectory();
+        if (!selectedParent) {
+          return;
+        }
+
+        try {
+          const payload = await createWorkspaceRoot(selectedParent, name);
+          setWorkspace(payload);
+          await refreshKnownWorkspaces();
+          setCurrentDocument(null);
+          setSaveStatus(emptySaveStatus);
+          setAppError(null);
+        } catch (error) {
+          setAppError(toMessage(error));
+        }
+      },
+    });
+  }, [refreshKnownWorkspaces]);
+
+  const switchWorkspace = useCallback(async (root: string) => {
+    if (workspace?.root === root) {
+      return;
+    }
+    if (saveStatus.state === "error") {
+      setAppError("当前文档保存失败，请先处理后再切换知识库");
+      return;
+    }
+
+    try {
+      await saveCurrentEditorNowRef.current?.();
+      const payload = await setWorkspaceRoot(root);
+      setWorkspace(payload);
+      await refreshKnownWorkspaces();
+      setCurrentDocument(null);
+      setSaveStatus(emptySaveStatus);
+      setAppError(null);
+    } catch (error) {
+      setAppError(toMessage(error));
+    }
+  }, [refreshKnownWorkspaces, saveStatus.state, workspace?.root]);
+
+  const forgetWorkspace = useCallback(async (root: string) => {
+    try {
+      const nextWorkspaces = await forgetWorkspaceRoot(root);
+      setKnownWorkspaces(nextWorkspaces);
+      if (workspace?.root === root) {
+        setWorkspace(null);
+        setCurrentDocument(null);
+        setSaveStatus(emptySaveStatus);
+      }
+      setAppError(null);
+    } catch (error) {
+      setAppError(toMessage(error));
+    }
+  }, [workspace?.root]);
 
   const createDocument = useCallback(async (parentPath = "") => {
     try {
@@ -902,7 +977,12 @@ export function AppController() {
       }}
     >
       <AppRail
+        activeWorkspaceRoot={workspace?.root ?? null}
+        knownWorkspaces={knownWorkspaces}
         onChooseWorkspace={chooseWorkspace}
+        onCreateWorkspace={createWorkspace}
+        onSwitchWorkspace={switchWorkspace}
+        onForgetWorkspace={forgetWorkspace}
         onCreateDocument={() => createDocument("")}
         onOpenSettings={() => setSettingsOpen(true)}
       />
@@ -1159,7 +1239,7 @@ function rebindCurrentDocument(
     return { document: currentDocument, missing: false };
   }
 
-  if (!isSameOrChildPath(currentDocument.entry.path, move.sourcePath)) {
+  if (!pathMovesWithResolution(currentDocument.entry.path, move)) {
     const refreshedEntry = workspace.documents.find((entry) => entry.path === currentDocument.entry.path);
     return {
       document: refreshedEntry ? rebindDocumentEntry(currentDocument, refreshedEntry) : currentDocument,
@@ -1167,7 +1247,7 @@ function rebindCurrentDocument(
     };
   }
 
-  const nextPath = replacePathPrefix(currentDocument.entry.path, move.sourcePath, move.targetPath);
+  const nextPath = rewriteMovedPath(currentDocument.entry.path, move);
   const nextEntry = workspace.documents.find((entry) => entry.path === nextPath);
   return nextEntry
     ? { document: rebindDocumentEntry(currentDocument, nextEntry), missing: false }
@@ -1199,6 +1279,24 @@ function documentExtension(document: WorkspaceDocument): string {
 
 function replacePathPrefix(path: string, fromPath: string, toPath: string): string {
   return isSameOrChildPath(path, fromPath) ? `${toPath}${path.slice(fromPath.length)}` : path;
+}
+
+function pathMovesWithResolution(path: string, move: WorkspaceMoveResolution): boolean {
+  return move.ok && (
+    isSameOrChildPath(path, move.sourcePath) ||
+    Boolean(move.sourceChildContainerPath && isSameOrChildPath(path, move.sourceChildContainerPath))
+  );
+}
+
+function rewriteMovedPath(path: string, move: Extract<WorkspaceMoveResolution, { ok: true }>): string {
+  if (
+    move.sourceChildContainerPath &&
+    move.targetChildContainerPath &&
+    isSameOrChildPath(path, move.sourceChildContainerPath)
+  ) {
+    return replacePathPrefix(path, move.sourceChildContainerPath, move.targetChildContainerPath);
+  }
+  return replacePathPrefix(path, move.sourcePath, move.targetPath);
 }
 
 function isSameOrChildPath(path: string, basePath: string): boolean {

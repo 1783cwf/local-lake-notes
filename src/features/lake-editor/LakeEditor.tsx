@@ -235,7 +235,7 @@ export function LakeEditor({
     );
   }
 
-  return <div ref={containerRef} className="lake-editor-root ne-doc-major-editor" />;
+  return <div ref={containerRef} className="lake-editor-root" />;
 }
 
 function rememberPreviewInList(previews: ResourcePreview[], resourceRef: string, previewUrl: string): ResourcePreview[] {

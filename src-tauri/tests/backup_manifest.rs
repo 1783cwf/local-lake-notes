@@ -64,3 +64,53 @@ fn builds_full_and_incremental_manifests() {
         .iter()
         .any(|file| file.entry.logical_path.ends_with("b.lake")));
 }
+
+#[test]
+fn full_manifest_includes_multiple_known_workspaces() {
+    let dir = tempdir().unwrap();
+    let work = dir.path().join("work");
+    let common = dir.path().join("common");
+    fs::create_dir_all(&work).unwrap();
+    fs::create_dir_all(common.join("nested")).unwrap();
+    fs::write(work.join("a.lake"), "<p>work</p>").unwrap();
+    fs::write(common.join("nested/a.lake"), "<p>common</p>").unwrap();
+    let database = dir.path().join("db.sqlite3");
+    fs::write(&database, "db-v1").unwrap();
+    let known = vec![
+        KnownWorkspace {
+            root: work.to_string_lossy().to_string(),
+            name: "work".to_string(),
+            last_opened_at: Utc::now().to_rfc3339(),
+        },
+        KnownWorkspace {
+            root: common.to_string_lossy().to_string(),
+            name: "common".to_string(),
+            last_opened_at: Utc::now().to_rfc3339(),
+        },
+    ];
+
+    let (manifest, files) = build_full_manifest(
+        "0.1.0",
+        "full-id".to_string(),
+        Utc::now(),
+        "fingerprint".to_string(),
+        &database,
+        &known,
+    )
+    .unwrap();
+
+    assert_eq!(manifest.workspaces.len(), 2);
+    assert_eq!(manifest.workspaces[0].id, "workspace-0");
+    assert_eq!(manifest.workspaces[1].id, "workspace-1");
+    assert!(manifest
+        .files
+        .iter()
+        .any(|entry| entry.logical_path == "workspaces/workspace-0/a.lake"));
+    assert!(manifest
+        .files
+        .iter()
+        .any(|entry| entry.logical_path == "workspaces/workspace-1/nested/a.lake"));
+    assert!(files
+        .iter()
+        .any(|file| file.entry.logical_path == "workspaces/workspace-1/nested/a.lake"));
+}

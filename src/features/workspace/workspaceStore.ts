@@ -25,6 +25,12 @@ export interface WorkspacePayload {
   order: string[];
 }
 
+export interface KnownWorkspace {
+  root: string;
+  name: string;
+  lastOpenedAt: string;
+}
+
 export interface CreateDocumentPayload extends WorkspacePayload {
   createdDocument: WorkspaceDocument;
 }
@@ -75,8 +81,10 @@ export type WorkspaceMoveResolution =
     sourceId: string;
     sourcePath: string;
     sourceType: "folder" | "document";
+    sourceChildContainerPath?: string;
     targetParentPath: string;
     targetPath: string;
+    targetChildContainerPath?: string;
     order: string[];
   }
   | {
@@ -146,18 +154,36 @@ export function buildDocumentTree(
       children: [],
       document,
     };
+    const childContainerPath = documentChildContainerPath(document.path);
+    const existingChildContainer = folders.get(childContainerPath);
+
+    if (existingChildContainer?.type === "folder") {
+      // 文档允许承载子级：把同名目录作为文档的子级容器隐藏到文档节点下。
+      existingChildContainer.id = node.id;
+      existingChildContainer.name = node.name;
+      existingChildContainer.path = node.path;
+      existingChildContainer.parentPath = node.parentPath;
+      existingChildContainer.type = "document";
+      existingChildContainer.itemId = node.itemId;
+      existingChildContainer.document = document;
+      continue;
+    }
+
     const parent = ensureFolder(document.parentPath);
     if (parent) {
       parent.children.push(node);
     } else {
       roots.push(node);
     }
+    if (!folders.has(childContainerPath)) {
+      folders.set(childContainerPath, node);
+    }
   }
 
   const sortTree = (nodes: DocumentTreeNode[]) => {
     nodes.sort((a, b) => {
-      const rankA = orderRank.get(a.itemId);
-      const rankB = orderRank.get(b.itemId);
+      const rankA = orderRank.get(a.itemId) ?? documentChildContainerRank(a, orderRank);
+      const rankB = orderRank.get(b.itemId) ?? documentChildContainerRank(b, orderRank);
       if (rankA !== undefined || rankB !== undefined) {
         return (rankA ?? Number.MAX_SAFE_INTEGER) - (rankB ?? Number.MAX_SAFE_INTEGER);
       }
@@ -234,11 +260,9 @@ export function resolveWorkspaceMove(
     return invalidMove(sourceId, targetParentPath.reason);
   }
 
-  if (
-    source.type === "folder" &&
-    (targetParentPath.value === source.path || isChildPath(targetParentPath.value, source.path))
-  ) {
-    return invalidMove(sourceId, "不能把目录移动到自身或子目录内");
+  const sourceChildContainerPath = source.type === "document" ? documentChildContainerPath(source.path) : undefined;
+  if (sourceBlocksTargetParentPath(source, targetParentPath.value, sourceChildContainerPath)) {
+    return invalidMove(sourceId, "不能把项目移动到自身或子级内");
   }
 
   const movedIds = movedItemIds(flatNodes, source);
@@ -254,6 +278,7 @@ export function resolveWorkspaceMove(
     ...remainingOrder.slice(insertIndex.value),
   ];
   const targetPath = joinRelativePath(targetParentPath.value, pathBasename(source.path));
+  const targetChildContainerPath = source.type === "document" ? documentChildContainerPath(targetPath) : undefined;
 
   return {
     ok: true,
@@ -261,8 +286,10 @@ export function resolveWorkspaceMove(
     sourceId,
     sourcePath: source.path,
     sourceType: source.type,
+    sourceChildContainerPath,
     targetParentPath: targetParentPath.value,
     targetPath,
+    targetChildContainerPath,
     order: nextOrder,
   };
 }
@@ -275,7 +302,17 @@ export function applyWorkspaceMove(
     return workspace;
   }
 
-  const rewritePath = (path: string) => replacePathPrefix(path, move.sourcePath, move.targetPath);
+  const rewritePath = (path: string) => {
+    if (
+      move.sourceType === "document" &&
+      move.sourceChildContainerPath &&
+      move.targetChildContainerPath &&
+      isSameOrChildPath(path, move.sourceChildContainerPath)
+    ) {
+      return replacePathPrefix(path, move.sourceChildContainerPath, move.targetChildContainerPath);
+    }
+    return replacePathPrefix(path, move.sourcePath, move.targetPath);
+  };
   const rewriteParentPath = (parentPath: string) => {
     if (parentPath === move.sourcePath) {
       return move.targetPath;
@@ -286,7 +323,7 @@ export function applyWorkspaceMove(
   return {
     ...workspace,
     directories: workspace.directories.map((directory) => {
-      if (!isSameOrChildPath(directory.path, move.sourcePath)) {
+      if (!pathMovesWithResolution(directory.path, move)) {
         return directory;
       }
 
@@ -295,11 +332,13 @@ export function applyWorkspaceMove(
         ...directory,
         id: path,
         path,
-        parentPath: directory.path === move.sourcePath ? move.targetParentPath : rewriteParentPath(directory.parentPath),
+        parentPath: directory.path === move.sourcePath || directory.path === move.sourceChildContainerPath
+          ? move.targetParentPath
+          : rewriteParentPath(directory.parentPath),
       };
     }),
     documents: workspace.documents.map((document) => {
-      if (!isSameOrChildPath(document.path, move.sourcePath)) {
+      if (!pathMovesWithResolution(document.path, move)) {
         return document;
       }
 
@@ -311,7 +350,7 @@ export function applyWorkspaceMove(
         parentPath: document.path === move.sourcePath ? move.targetParentPath : rewriteParentPath(document.parentPath),
       };
     }),
-    order: move.order.map((itemId) => replaceOrderedItemPath(itemId, move.sourcePath, move.targetPath)),
+    order: move.order.map((itemId) => replaceMovedOrderedItemPath(itemId, move)),
   };
 }
 
@@ -336,15 +375,15 @@ function resolveTargetParentPath(
 
   if (target.itemId === source.itemId) {
     return intent.placement === "inside"
-      ? { ok: false, reason: "不能把目录移动到自身内" }
+      ? { ok: false, reason: "不能把项目移动到自身内" }
       : { ok: true, value: source.parentPath };
   }
 
   if (intent.placement === "inside") {
-    if (target.type !== "folder") {
-      return { ok: false, reason: "只能拖入目录" };
-    }
-    return { ok: true, value: target.path };
+    return {
+      ok: true,
+      value: target.type === "document" ? documentChildContainerPath(target.path) : target.path,
+    };
   }
 
   return { ok: true, value: target.parentPath };
@@ -390,6 +429,7 @@ function movedItemIds(flatNodes: FlatDocumentTreeNode[], source: FlatDocumentTre
     flatNodes
       .filter((node) => (
         node.itemId === source.itemId ||
+        node.ancestorIds.includes(source.itemId) ||
         (source.type === "folder" && isSameOrChildPath(node.path, source.path))
       ))
       .map((node) => node.itemId),
@@ -404,11 +444,36 @@ function pathBasename(path: string): string {
   return path.split("/").filter(Boolean).pop() ?? path;
 }
 
+export function documentChildContainerPath(path: string): string {
+  return path
+    .replace(/\.dbtable\.json$/i, "")
+    .replace(/\.(lake|json)$/i, "");
+}
+
+function documentChildContainerRank(
+  node: DocumentTreeNode,
+  orderRank: Map<string, number>,
+): number | undefined {
+  if (!node.document) {
+    return undefined;
+  }
+  return orderRank.get(`folder:${documentChildContainerPath(node.document.path)}`);
+}
+
 function joinRelativePath(parentPath: string, basename: string): string {
   return parentPath ? `${parentPath}/${basename}` : basename;
 }
 
-function replaceOrderedItemPath(itemId: string, fromPath: string, toPath: string): string {
+function sourceBlocksTargetParentPath(
+  source: FlatDocumentTreeNode,
+  targetParentPath: string,
+  sourceChildContainerPath: string | undefined,
+): boolean {
+  const blockedPath = source.type === "folder" ? source.path : sourceChildContainerPath;
+  return Boolean(blockedPath && (targetParentPath === blockedPath || isChildPath(targetParentPath, blockedPath)));
+}
+
+function replaceMovedOrderedItemPath(itemId: string, move: Extract<WorkspaceMoveResolution, { ok: true }>): string {
   const separatorIndex = itemId.indexOf(":");
   if (separatorIndex < 0) {
     return itemId;
@@ -416,7 +481,20 @@ function replaceOrderedItemPath(itemId: string, fromPath: string, toPath: string
 
   const kind = itemId.slice(0, separatorIndex);
   const path = itemId.slice(separatorIndex + 1);
-  return isSameOrChildPath(path, fromPath) ? `${kind}:${replacePathPrefix(path, fromPath, toPath)}` : itemId;
+  if (
+    move.sourceType === "document" &&
+    move.sourceChildContainerPath &&
+    move.targetChildContainerPath &&
+    isSameOrChildPath(path, move.sourceChildContainerPath)
+  ) {
+    return `${kind}:${replacePathPrefix(path, move.sourceChildContainerPath, move.targetChildContainerPath)}`;
+  }
+  return isSameOrChildPath(path, move.sourcePath) ? `${kind}:${replacePathPrefix(path, move.sourcePath, move.targetPath)}` : itemId;
+}
+
+function pathMovesWithResolution(path: string, move: Extract<WorkspaceMoveResolution, { ok: true }>): boolean {
+  return isSameOrChildPath(path, move.sourcePath) ||
+    Boolean(move.sourceChildContainerPath && isSameOrChildPath(path, move.sourceChildContainerPath));
 }
 
 function replacePathPrefix(path: string, fromPath: string, toPath: string): string {
