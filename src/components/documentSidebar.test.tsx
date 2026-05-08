@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 
 import { buildDocumentTree, flattenDocumentTree } from "../features/workspace/workspaceStore";
-import { DocumentSidebar, resolvePointerIntent } from "./DocumentSidebar";
+import { DocumentSidebar, resolvePointerIntent, staticTreeSortingStrategy } from "./DocumentSidebar";
 
 function renderSidebar(overrides: Partial<ComponentProps<typeof DocumentSidebar>> = {}) {
   const props: ComponentProps<typeof DocumentSidebar> = {
@@ -63,6 +63,16 @@ test("目录树拖拽不再依赖原生 draggable 属性", () => {
   expect(screen.getByRole("button", { name: "拖拽a" })).toBeInTheDocument();
 });
 
+test("拖拽期间树节点保持静止，不自动挤开目标行", () => {
+  expect(staticTreeSortingStrategy({
+    activeIndex: 0,
+    index: 1,
+    overIndex: 1,
+    activeNodeRect: null,
+    rects: [],
+  })).toBeNull();
+});
+
 test("目录支持展开和收起", () => {
   renderSidebar();
 
@@ -75,6 +85,47 @@ test("目录支持展开和收起", () => {
 
   expect(screen.getByRole("treeitem", { name: /a/ })).toBeInTheDocument();
   expect(screen.getByRole("treeitem", { name: /notes/ })).toHaveAttribute("aria-expanded", "true");
+});
+
+test("有子级的文档支持展开和收起", () => {
+  renderSidebar({
+    currentPath: "a/child.lake",
+    directories: [
+      {
+        id: "a",
+        path: "a",
+        name: "a",
+        parentPath: "",
+      },
+    ],
+    documents: [
+      {
+        id: "a.lake",
+        path: "a.lake",
+        name: "a",
+        parentPath: "",
+        size: 1,
+        kind: "lake",
+      },
+      {
+        id: "a/child.lake",
+        path: "a/child.lake",
+        name: "child",
+        parentPath: "a",
+        size: 1,
+        kind: "lake",
+      },
+    ],
+    order: ["document:a.lake", "document:a/child.lake"],
+  });
+
+  expect(screen.getByRole("treeitem", { name: /a/ })).toHaveAttribute("aria-expanded", "true");
+  expect(screen.getByRole("treeitem", { name: /child/ })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "收起子文档 a" }));
+
+  expect(screen.queryByRole("treeitem", { name: /child/ })).not.toBeInTheDocument();
+  expect(screen.getByRole("treeitem", { name: /a/ })).toHaveAttribute("aria-expanded", "false");
 });
 
 test("可以按文档名称搜索文档", async () => {
@@ -180,7 +231,7 @@ test("多维表格文档可以搜索并通过目录入口创建", async () => {
   expect(onCreateMultidimensionalTable).toHaveBeenCalledWith("notes");
 });
 
-test("按指针位置计算 after 和 inside 落点意图", () => {
+test("按指针位置计算 before、inside 和 after 落点意图", () => {
   renderSidebar({
     currentPath: "a.lake",
     documents: [{ id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" }],
@@ -204,17 +255,73 @@ test("按指针位置计算 after 和 inside 落点意图", () => {
     toJSON: () => undefined,
   });
 
-  expect(resolvePointerIntent(flatNodes, "folder:notes", 136)).toEqual({
-    placement: "after",
+  expect(resolvePointerIntent(flatNodes, "folder:notes", 104)).toEqual({
+    placement: "before",
     targetId: "folder:notes",
   });
-  expect(resolvePointerIntent(flatNodes, "folder:notes", 118)).toEqual({
+  expect(resolvePointerIntent(flatNodes, "folder:notes", 108)).toEqual({
     placement: "inside",
+    targetId: "folder:notes",
+  });
+  expect(resolvePointerIntent(flatNodes, "folder:notes", 120)).toEqual({
+    placement: "inside",
+    targetId: "folder:notes",
+  });
+  expect(resolvePointerIntent(flatNodes, "folder:notes", 132)).toEqual({
+    placement: "inside",
+    targetId: "folder:notes",
+  });
+  expect(resolvePointerIntent(flatNodes, "folder:notes", 136)).toEqual({
+    placement: "after",
     targetId: "folder:notes",
   });
   expect(resolvePointerIntent(flatNodes, "folder:notes", null)).toEqual({
     placement: "inside",
     targetId: "folder:notes",
+  });
+});
+
+test("文档行中部也可作为拖入子级落点", () => {
+  renderSidebar({
+    currentPath: "a.lake",
+    documents: [{ id: "a.lake", path: "a.lake", name: "阿里云", parentPath: "", size: 1, kind: "lake" }],
+  });
+  const flatNodes = flattenDocumentTree(buildDocumentTree(
+    [{ id: "a.lake", path: "a.lake", name: "阿里云", parentPath: "", size: 1, kind: "lake" }],
+    [],
+  ));
+  const documentRow = screen.getByTestId("tree-row-document:a.lake");
+  vi.spyOn(documentRow, "getBoundingClientRect").mockReturnValue({
+    top: 100,
+    bottom: 140,
+    height: 40,
+    left: 0,
+    right: 300,
+    width: 300,
+    x: 0,
+    y: 100,
+    toJSON: () => undefined,
+  });
+
+  expect(resolvePointerIntent(flatNodes, "document:a.lake", 104)).toEqual({
+    placement: "before",
+    targetId: "document:a.lake",
+  });
+  expect(resolvePointerIntent(flatNodes, "document:a.lake", 108)).toEqual({
+    placement: "inside",
+    targetId: "document:a.lake",
+  });
+  expect(resolvePointerIntent(flatNodes, "document:a.lake", 120)).toEqual({
+    placement: "inside",
+    targetId: "document:a.lake",
+  });
+  expect(resolvePointerIntent(flatNodes, "document:a.lake", 132)).toEqual({
+    placement: "inside",
+    targetId: "document:a.lake",
+  });
+  expect(resolvePointerIntent(flatNodes, "document:a.lake", 136)).toEqual({
+    placement: "after",
+    targetId: "document:a.lake",
   });
 });
 

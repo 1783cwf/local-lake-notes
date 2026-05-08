@@ -3,10 +3,12 @@ import {
   DndContext,
   DragOverlay,
   KeyboardSensor,
+  pointerWithin,
   PointerSensor,
   useDroppable,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
   type DragMoveEvent,
   type DragOverEvent,
@@ -15,8 +17,8 @@ import {
 import {
   SortableContext,
   sortableKeyboardCoordinates,
+  type SortingStrategy,
   useSortable,
-  verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
@@ -83,6 +85,12 @@ interface DocumentSidebarProps {
 }
 
 const rootDropId = "__workspace-root-end__";
+
+const pointerFirstCollisionDetection: CollisionDetection = (args) => {
+  const pointerCollisions = pointerWithin(args);
+  return pointerCollisions.length > 0 ? pointerCollisions : closestCenter(args);
+};
+export const staticTreeSortingStrategy: SortingStrategy = () => null;
 
 type SidebarContextMenu =
   | { kind: "root"; x: number; y: number; parentPath: string }
@@ -290,14 +298,14 @@ export function DocumentSidebar({
         {visibleNodes.length > 0 ? (
           <DndContext
             sensors={sensors}
-            collisionDetection={closestCenter}
+            collisionDetection={pointerFirstCollisionDetection}
             onDragStart={onDragStart}
             onDragMove={onDragMove}
             onDragOver={onDragOver}
             onDragEnd={onDragEnd}
             onDragCancel={onDragCancel}
           >
-            <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
+            <SortableContext items={itemIds} strategy={staticTreeSortingStrategy}>
               <div className="document-tree" role="tree">
                 {visibleNodes.map((node) => (
                   <SortableTreeRow
@@ -443,7 +451,7 @@ function SortableTreeRow({
       onClick={onRowClick}
       role="treeitem"
       aria-level={node.depth + 1}
-      aria-expanded={node.type === "folder" && node.hasChildren ? expanded : undefined}
+      aria-expanded={node.hasChildren ? expanded : undefined}
       tabIndex={0}
       onKeyDown={onKeyDown}
       onContextMenu={(event) => onOpenContextMenu(event, node)}
@@ -460,20 +468,12 @@ function SortableTreeRow({
       </button>
       {node.type === "folder" ? (
         <>
-          <button
-            type="button"
-            className="tree-toggle-button"
-            aria-label={node.hasChildren ? `${expanded ? "收起" : "展开"}目录 ${node.name}` : `空目录 ${node.name}`}
+          <TreeToggleButton
+            expanded={expanded}
             disabled={!node.hasChildren}
-            onClick={(event) => {
-              event.stopPropagation();
-              if (node.hasChildren) {
-                onToggleFolder(node.itemId);
-              }
-            }}
-          >
-            {node.hasChildren && expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          </button>
+            label={node.hasChildren ? `${expanded ? "收起" : "展开"}目录 ${node.name}` : `空目录 ${node.name}`}
+            onToggle={() => onToggleFolder(node.itemId)}
+          />
           <Folder size={15} />
           <span>{node.name}</span>
           {node.directory ? (
@@ -489,6 +489,13 @@ function SortableTreeRow({
         </>
       ) : (
         <>
+          {node.hasChildren ? (
+            <TreeToggleButton
+              expanded={expanded}
+              label={`${expanded ? "收起" : "展开"}子文档 ${node.name}`}
+              onToggle={() => onToggleFolder(node.itemId)}
+            />
+          ) : null}
           {documentIcon(node.document)}
           <span>{node.name}</span>
           {node.document ? (
@@ -500,6 +507,35 @@ function SortableTreeRow({
         </>
       )}
     </div>
+  );
+}
+
+function TreeToggleButton({
+  expanded,
+  disabled = false,
+  label,
+  onToggle,
+}: {
+  expanded: boolean;
+  disabled?: boolean;
+  label: string;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="tree-toggle-button"
+      aria-label={label}
+      disabled={disabled}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (!disabled) {
+          onToggle();
+        }
+      }}
+    >
+      {!disabled && expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+    </button>
   );
 }
 
@@ -674,21 +710,18 @@ export function resolvePointerIntent(
   const targetElement = document.querySelector<HTMLElement>(`[data-tree-item-id="${escapeAttributeValue(overId)}"]`);
   const rect = targetElement?.getBoundingClientRect();
   if (!rect || clientY === null) {
-    return { placement: target.type === "folder" ? "inside" : "after", targetId: overId };
-  }
-
-  const ratio = rect.height > 0 ? (clientY - rect.top) / rect.height : 0.5;
-  if (target.type === "folder") {
-    if (ratio < 0.16) {
-      return { placement: "before", targetId: overId };
-    }
-    if (ratio > 0.84) {
-      return { placement: "after", targetId: overId };
-    }
     return { placement: "inside", targetId: overId };
   }
 
-  return { placement: ratio > 0.5 ? "after" : "before", targetId: overId };
+  const ratio = rect.height > 0 ? (clientY - rect.top) / rect.height : 0.5;
+  // 上下边缘只保留较窄排序区，目标行大部分区域用于拖入子级。
+  if (ratio < 0.18) {
+    return { placement: "before", targetId: overId };
+  }
+  if (ratio > 0.82) {
+    return { placement: "after", targetId: overId };
+  }
+  return { placement: "inside", targetId: overId };
 }
 
 function pointerY(event: DragMoveEvent | DragOverEvent | DragEndEvent): number | null {

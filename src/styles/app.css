@@ -12,6 +12,9 @@
   --line: #eceef0;
   --line-strong: #dfe3e6;
   --muted: #747b83;
+  --drop-blue: #2477ff;
+  --drop-blue-soft: rgba(36, 119, 255, 0.1);
+  --drop-blue-line: rgba(36, 119, 255, 0.35);
   --soft: #f6f8f7;
   --sidebar: #f9faf9;
   --rail-width: 68px;
@@ -300,13 +303,30 @@ button {
 .tree-row.is-drop-before::before,
 .tree-row.is-drop-after::after {
   opacity: 1;
+  height: 3px;
+  background: var(--drop-blue);
 }
 
 .tree-row.is-drop-inside {
-  background: #def4e9;
-  box-shadow:
-    inset 0 0 0 1px #9fdfbf,
-    inset 3px 0 0 var(--green);
+  background: var(--drop-blue-soft);
+  box-shadow: inset 0 0 0 2px var(--drop-blue);
+}
+
+.tree-row.is-drop-inside::before,
+.tree-row.is-drop-inside::after {
+  right: 10px;
+  left: 10px;
+  height: 2px;
+  background: var(--drop-blue-line);
+  opacity: 1;
+}
+
+.tree-row.is-drop-inside::before {
+  top: 6px;
+}
+
+.tree-row.is-drop-inside::after {
+  bottom: 6px;
 }
 
 .tree-row.is-drop-forbidden {

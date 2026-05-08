@@ -222,42 +222,39 @@ export async function moveWorkspaceItem(input: MoveWorkspaceItemInput): Promise<
   if (!isTauriRuntime()) {
     const workspace = await listLakeDocuments();
     const movedItem = resolveBrowserMovedItem(workspace, input);
+    const nextDirectories = ensureBrowserMoveTargetDirectory(workspace, workspace.directories, movedItem);
     const payload: WorkspacePayload = {
       ...workspace,
-      directories: workspace.directories.map((directory) => {
-        if (!isSameOrChildPath(directory.path, movedItem.sourcePath)) {
+      directories: nextDirectories.map((directory) => {
+        if (!pathMovesWithBrowserItem(directory.path, movedItem)) {
           return directory;
         }
-        const path = replacePathPrefix(directory.path, movedItem.sourcePath, movedItem.targetPath);
+        const path = rewriteBrowserMovedPath(directory.path, movedItem);
         return {
           ...directory,
           id: path,
           path,
-          parentPath: directory.path === movedItem.sourcePath
+          parentPath: directory.path === movedItem.sourcePath || directory.path === movedItem.sourceChildContainerPath
             ? movedItem.targetParentPath
-            : replacePathPrefix(directory.parentPath, movedItem.sourcePath, movedItem.targetPath),
+            : rewriteBrowserMovedPath(directory.parentPath, movedItem),
         };
       }),
       documents: workspace.documents.map((document) => {
-        if (!isSameOrChildPath(document.path, movedItem.sourcePath)) {
+        if (!pathMovesWithBrowserItem(document.path, movedItem)) {
           return document;
         }
-        const path = replacePathPrefix(document.path, movedItem.sourcePath, movedItem.targetPath);
-        if (document.path === movedItem.sourcePath) {
-          moveBrowserDocument(document.path, path);
-        } else if (movedItem.kind === "folder") {
-          moveBrowserDocument(document.path, path);
-        }
+        const path = rewriteBrowserMovedPath(document.path, movedItem);
+        moveBrowserDocument(document.path, path);
         return {
           ...document,
           id: path,
           path,
           parentPath: document.path === movedItem.sourcePath
             ? movedItem.targetParentPath
-            : replacePathPrefix(document.parentPath, movedItem.sourcePath, movedItem.targetPath),
+            : rewriteBrowserMovedPath(document.parentPath, movedItem),
         };
       }),
-      order: input.order.map((itemId) => replaceOrderedItemPath(itemId, movedItem.sourcePath, movedItem.targetPath)),
+      order: input.order.map((itemId) => replaceMovedOrderedItemPath(itemId, movedItem)),
     };
     saveBrowserWorkspace(payload);
     return payload;
@@ -1114,13 +1111,17 @@ function resolveBrowserMovedItem(
 ): {
   kind: "folder" | "document";
   sourcePath: string;
+  sourceChildContainerPath?: string;
   targetParentPath: string;
   targetPath: string;
+  targetChildContainerPath?: string;
 } {
   const [kind, sourcePath] = parseBrowserItemId(input.sourceId);
   const targetParentPath = input.targetParentPath.trim().replace(/^\/+|\/+$/g, "");
-  if (kind === "folder" && isSameOrChildPath(targetParentPath, sourcePath)) {
-    throw new Error("不能把目录移动到自身或子目录内");
+  const sourceChildContainerPath = kind === "document" ? documentChildContainerPath(sourcePath) : undefined;
+  const blockedPath = kind === "folder" ? sourcePath : sourceChildContainerPath;
+  if (blockedPath && isSameOrChildPath(targetParentPath, blockedPath)) {
+    throw new Error("不能把项目移动到自身或子级内");
   }
 
   const sourceExists = kind === "folder"
@@ -1131,15 +1132,18 @@ function resolveBrowserMovedItem(
   }
 
   const targetParentExists = !targetParentPath ||
-    workspace.directories.some((directory) => directory.path === targetParentPath);
+    workspace.directories.some((directory) => directory.path === targetParentPath) ||
+    workspace.documents.some((document) => documentChildContainerPath(document.path) === targetParentPath);
   if (!targetParentExists) {
     throw new Error(`拖拽目标不存在：${targetParentPath}`);
   }
 
   const targetPath = targetParentPath ? `${targetParentPath}/${pathBasename(sourcePath)}` : pathBasename(sourcePath);
+  const targetChildContainerPath = kind === "document" ? documentChildContainerPath(targetPath) : undefined;
   if (targetPath !== sourcePath) {
     const targetExists = kind === "folder"
-      ? workspace.directories.some((directory) => directory.path === targetPath)
+      ? workspace.directories.some((directory) => directory.path === targetPath) ||
+        workspace.documents.some((document) => documentChildContainerPath(document.path) === targetPath)
       : workspace.documents.some((document) => document.path === targetPath);
     if (targetExists) {
       throw new Error(`目标位置已存在同名项目：${targetPath}`);
@@ -1149,8 +1153,10 @@ function resolveBrowserMovedItem(
   return {
     kind,
     sourcePath,
+    sourceChildContainerPath,
     targetParentPath,
     targetPath,
+    targetChildContainerPath,
   };
 }
 
@@ -1190,6 +1196,12 @@ function pathBasename(path: string): string {
   return path.split("/").filter(Boolean).pop() ?? path;
 }
 
+function documentChildContainerPath(path: string): string {
+  return path
+    .replace(/\.dbtable\.json$/i, "")
+    .replace(/\.(lake|json)$/i, "");
+}
+
 function replaceOrderedItemPath(itemId: string, fromPath: string, toPath: string): string {
   const separatorIndex = itemId.indexOf(":");
   if (separatorIndex < 0) {
@@ -1199,6 +1211,89 @@ function replaceOrderedItemPath(itemId: string, fromPath: string, toPath: string
   const kind = itemId.slice(0, separatorIndex);
   const path = itemId.slice(separatorIndex + 1);
   return isSameOrChildPath(path, fromPath) ? `${kind}:${replacePathPrefix(path, fromPath, toPath)}` : itemId;
+}
+
+function replaceMovedOrderedItemPath(
+  itemId: string,
+  movedItem: {
+    sourcePath: string;
+    sourceChildContainerPath?: string;
+    targetPath: string;
+    targetChildContainerPath?: string;
+  },
+): string {
+  const separatorIndex = itemId.indexOf(":");
+  if (separatorIndex < 0) {
+    return itemId;
+  }
+
+  const kind = itemId.slice(0, separatorIndex);
+  const path = itemId.slice(separatorIndex + 1);
+  if (
+    movedItem.sourceChildContainerPath &&
+    movedItem.targetChildContainerPath &&
+    isSameOrChildPath(path, movedItem.sourceChildContainerPath)
+  ) {
+    return `${kind}:${replacePathPrefix(path, movedItem.sourceChildContainerPath, movedItem.targetChildContainerPath)}`;
+  }
+  return isSameOrChildPath(path, movedItem.sourcePath)
+    ? `${kind}:${replacePathPrefix(path, movedItem.sourcePath, movedItem.targetPath)}`
+    : itemId;
+}
+
+function ensureBrowserMoveTargetDirectory(
+  workspace: WorkspacePayload,
+  directories: WorkspaceDirectory[],
+  movedItem: {
+    targetParentPath: string;
+  },
+): WorkspaceDirectory[] {
+  if (!movedItem.targetParentPath || directories.some((directory) => directory.path === movedItem.targetParentPath)) {
+    return directories;
+  }
+  if (!workspace.documents.some((document) => documentChildContainerPath(document.path) === movedItem.targetParentPath)) {
+    throw new Error(`拖拽目标不存在：${movedItem.targetParentPath}`);
+  }
+
+  return [
+    ...directories,
+    {
+      id: movedItem.targetParentPath,
+      path: movedItem.targetParentPath,
+      name: pathBasename(movedItem.targetParentPath),
+      parentPath: movedItem.targetParentPath.split("/").slice(0, -1).join("/"),
+    },
+  ];
+}
+
+function pathMovesWithBrowserItem(
+  path: string,
+  movedItem: {
+    sourcePath: string;
+    sourceChildContainerPath?: string;
+  },
+): boolean {
+  return isSameOrChildPath(path, movedItem.sourcePath) ||
+    Boolean(movedItem.sourceChildContainerPath && isSameOrChildPath(path, movedItem.sourceChildContainerPath));
+}
+
+function rewriteBrowserMovedPath(
+  path: string,
+  movedItem: {
+    sourcePath: string;
+    sourceChildContainerPath?: string;
+    targetPath: string;
+    targetChildContainerPath?: string;
+  },
+): string {
+  if (
+    movedItem.sourceChildContainerPath &&
+    movedItem.targetChildContainerPath &&
+    isSameOrChildPath(path, movedItem.sourceChildContainerPath)
+  ) {
+    return replacePathPrefix(path, movedItem.sourceChildContainerPath, movedItem.targetChildContainerPath);
+  }
+  return replacePathPrefix(path, movedItem.sourcePath, movedItem.targetPath);
 }
 
 function orderedItemMatchesPath(itemId: string, basePath: string): boolean {

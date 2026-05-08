@@ -1159,7 +1159,7 @@ function rebindCurrentDocument(
     return { document: currentDocument, missing: false };
   }
 
-  if (!isSameOrChildPath(currentDocument.entry.path, move.sourcePath)) {
+  if (!pathMovesWithResolution(currentDocument.entry.path, move)) {
     const refreshedEntry = workspace.documents.find((entry) => entry.path === currentDocument.entry.path);
     return {
       document: refreshedEntry ? rebindDocumentEntry(currentDocument, refreshedEntry) : currentDocument,
@@ -1167,7 +1167,7 @@ function rebindCurrentDocument(
     };
   }
 
-  const nextPath = replacePathPrefix(currentDocument.entry.path, move.sourcePath, move.targetPath);
+  const nextPath = rewriteMovedPath(currentDocument.entry.path, move);
   const nextEntry = workspace.documents.find((entry) => entry.path === nextPath);
   return nextEntry
     ? { document: rebindDocumentEntry(currentDocument, nextEntry), missing: false }
@@ -1199,6 +1199,24 @@ function documentExtension(document: WorkspaceDocument): string {
 
 function replacePathPrefix(path: string, fromPath: string, toPath: string): string {
   return isSameOrChildPath(path, fromPath) ? `${toPath}${path.slice(fromPath.length)}` : path;
+}
+
+function pathMovesWithResolution(path: string, move: WorkspaceMoveResolution): boolean {
+  return move.ok && (
+    isSameOrChildPath(path, move.sourcePath) ||
+    Boolean(move.sourceChildContainerPath && isSameOrChildPath(path, move.sourceChildContainerPath))
+  );
+}
+
+function rewriteMovedPath(path: string, move: Extract<WorkspaceMoveResolution, { ok: true }>): string {
+  if (
+    move.sourceChildContainerPath &&
+    move.targetChildContainerPath &&
+    isSameOrChildPath(path, move.sourceChildContainerPath)
+  ) {
+    return replacePathPrefix(path, move.sourceChildContainerPath, move.targetChildContainerPath);
+  }
+  return replacePathPrefix(path, move.sourcePath, move.targetPath);
 }
 
 function isSameOrChildPath(path: string, basePath: string): boolean {

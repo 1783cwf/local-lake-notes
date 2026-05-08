@@ -162,11 +162,21 @@ pub fn move_workspace_item(
 ) -> AppResult<WorkspacePayload> {
     let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
     let moved_item = move_workspace_item_on_disk(&root, &input)?;
-    let order = rewrite_workspace_order_items(
+    let mut order = rewrite_workspace_order_items(
         &input.order,
         &moved_item.source_path,
         &moved_item.target_path,
     );
+    if let (Some(source_child_container_path), Some(target_child_container_path)) = (
+        moved_item.source_child_container_path.as_ref(),
+        moved_item.target_child_container_path.as_ref(),
+    ) {
+        order = rewrite_workspace_order_items(
+            &order,
+            source_child_container_path,
+            target_child_container_path,
+        );
+    }
 
     if let Err(error) = set_workspace_order(&app, &root, &order) {
         if moved_item.source_path != moved_item.target_path {
@@ -174,6 +184,17 @@ pub fn move_workspace_item(
                 root.join(&moved_item.target_path),
                 root.join(&moved_item.source_path),
             );
+        }
+        if let (Some(source_child_container_path), Some(target_child_container_path)) = (
+            moved_item.source_child_container_path.as_ref(),
+            moved_item.target_child_container_path.as_ref(),
+        ) {
+            if source_child_container_path != target_child_container_path {
+                let _ = fs::rename(
+                    root.join(target_child_container_path),
+                    root.join(source_child_container_path),
+                );
+            }
         }
         return Err(error);
     }
@@ -184,7 +205,9 @@ pub fn move_workspace_item(
 #[derive(Debug, PartialEq, Eq)]
 pub struct WorkspaceItemMove {
     pub source_path: String,
+    pub source_child_container_path: Option<String>,
     pub target_path: String,
+    pub target_child_container_path: Option<String>,
 }
 
 pub fn move_workspace_item_on_disk(
@@ -193,10 +216,15 @@ pub fn move_workspace_item_on_disk(
 ) -> AppResult<WorkspaceItemMove> {
     let (kind, source_path) = parse_workspace_item_id(&input.source_id)?;
     let target_parent_path = input.target_parent_path.trim_matches('/').to_string();
-    if kind == WorkspaceItemKind::Folder && is_same_or_child_path(&target_parent_path, &source_path)
-    {
+    let source_child_container_path =
+        (kind == WorkspaceItemKind::Document).then(|| document_child_container_path(&source_path));
+    let blocked_path = match kind {
+        WorkspaceItemKind::Folder => Some(source_path.as_str()),
+        WorkspaceItemKind::Document => source_child_container_path.as_deref(),
+    };
+    if blocked_path.is_some_and(|path| is_same_or_child_path(&target_parent_path, path)) {
         return Err(AppError::InvalidWorkspaceMove(
-            "不能把目录移动到自身或子目录内".to_string(),
+            "不能把项目移动到自身或子级内".to_string(),
         ));
     }
 
@@ -205,24 +233,67 @@ pub fn move_workspace_item_on_disk(
         WorkspaceItemKind::Folder => resolve_existing_directory_path(root, &source_path),
     }
     .map_err(|_| AppError::WorkspaceItemNotFound(input.source_id.clone()))?;
-    let target_parent = resolve_existing_directory_path(root, &target_parent_path)?;
+    let target_parent = resolve_move_target_parent(root, &target_parent_path)?;
     let source_name = Path::new(&source_path)
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or(AppError::InvalidFilename)?;
     let target_path = child_relative_path(&target_parent_path, source_name);
+    let target_child_container_path =
+        (kind == WorkspaceItemKind::Document).then(|| document_child_container_path(&target_path));
 
     if target_path != source_path {
-        let full_target_path = target_parent.join(source_name);
+        let full_target_path = target_parent.path.join(source_name);
         if full_target_path.exists() {
             return Err(AppError::WorkspaceItemConflict(target_path));
         }
-        fs::rename(current_path, full_target_path)?;
+    }
+
+    // 文档的子级实际存放在同名目录中，移动文档时必须提前校验该目录的目标冲突。
+    if let (Some(source_child_container_path), Some(target_child_container_path)) = (
+        source_child_container_path.as_ref(),
+        target_child_container_path.as_ref(),
+    ) {
+        let source_child_container = root.join(source_child_container_path);
+        if source_child_container.exists()
+            && source_child_container_path != target_child_container_path
+        {
+            let target_child_container = root.join(target_child_container_path);
+            if target_child_container.exists() {
+                return Err(AppError::WorkspaceItemConflict(
+                    target_child_container_path.clone(),
+                ));
+            }
+        }
+    }
+
+    if target_parent.create_missing {
+        fs::create_dir(&target_parent.path)?;
+    }
+    if target_path != source_path {
+        fs::rename(current_path, target_parent.path.join(source_name))?;
+    }
+    // 文档本体和子级容器分两次移动，保持文件路径和树形展示一致。
+    if let (Some(source_child_container_path), Some(target_child_container_path)) = (
+        source_child_container_path.as_ref(),
+        target_child_container_path.as_ref(),
+    ) {
+        let source_child_container = root.join(source_child_container_path);
+        if source_child_container.exists()
+            && source_child_container_path != target_child_container_path
+        {
+            fs::rename(
+                source_child_container,
+                root.join(target_child_container_path),
+            )?;
+        }
     }
 
     Ok(WorkspaceItemMove {
         source_path,
+        source_child_container_path,
         target_path,
+        target_child_container_path,
     })
 }
 
@@ -371,9 +442,7 @@ pub fn document_kind_from_path(path: &Path) -> Option<WorkspaceDocumentKind> {
     if filename.starts_with("~$") {
         return None;
     }
-    if filename
-        .to_ascii_lowercase()
-        .ends_with(".dbtable.json")
+    if filename.to_ascii_lowercase().ends_with(".dbtable.json")
         && is_multidimensional_table_file(path)
     {
         return Some(WorkspaceDocumentKind::MultidimensionalTable);
@@ -483,6 +552,49 @@ pub fn resolve_existing_directory_path(root: &Path, relative_path: &str) -> AppR
         return Err(AppError::PathOutsideWorkspace);
     }
     Ok(full_path)
+}
+
+struct MoveTargetParent {
+    path: PathBuf,
+    create_missing: bool,
+}
+
+fn resolve_move_target_parent(root: &Path, relative_path: &str) -> AppResult<MoveTargetParent> {
+    let root = root.canonicalize()?;
+    if relative_path.trim().is_empty() {
+        return Ok(MoveTargetParent {
+            path: root,
+            create_missing: false,
+        });
+    }
+
+    validate_relative_directory_path(relative_path)?;
+    let full_path = root.join(relative_path);
+    if full_path.exists() {
+        let full_path = full_path.canonicalize()?;
+        if !full_path.starts_with(&root) || !full_path.is_dir() {
+            return Err(AppError::PathOutsideWorkspace);
+        }
+        return Ok(MoveTargetParent {
+            path: full_path,
+            create_missing: false,
+        });
+    }
+
+    let parent = full_path.parent().ok_or(AppError::InvalidFilename)?;
+    let parent = parent.canonicalize()?;
+    if !parent.starts_with(&root) {
+        return Err(AppError::PathOutsideWorkspace);
+    }
+    if !document_child_container_exists(&root, relative_path)? {
+        return Err(AppError::InvalidWorkspaceMove(format!(
+            "拖拽目标不存在：{relative_path}"
+        )));
+    }
+    Ok(MoveTargetParent {
+        path: full_path,
+        create_missing: true,
+    })
 }
 
 fn validate_relative_lake_path(relative_path: &str) -> AppResult<()> {
@@ -601,6 +713,23 @@ fn child_relative_path(parent_path: &str, child_name: &str) -> String {
     } else {
         format!("{parent_path}/{child_name}")
     }
+}
+
+fn document_child_container_path(path: &str) -> String {
+    path.strip_suffix(".dbtable.json")
+        .or_else(|| path.strip_suffix(".DBTABLE.JSON"))
+        .or_else(|| path.strip_suffix(".lake"))
+        .or_else(|| path.strip_suffix(".LAKE"))
+        .or_else(|| path.strip_suffix(".json"))
+        .or_else(|| path.strip_suffix(".JSON"))
+        .unwrap_or(path)
+        .to_string()
+}
+
+fn document_child_container_exists(root: &Path, relative_path: &str) -> AppResult<bool> {
+    Ok(list_documents(root)?
+        .iter()
+        .any(|document| document_child_container_path(&document.path) == relative_path))
 }
 
 fn replace_directory_name(relative_path: &str, directory_name: &str) -> String {
