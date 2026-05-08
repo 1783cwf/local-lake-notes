@@ -1,7 +1,6 @@
 import {
   closestCenter,
   DndContext,
-  DragOverlay,
   KeyboardSensor,
   pointerWithin,
   PointerSensor,
@@ -138,7 +137,6 @@ export function DocumentSidebar({
   } | null>(null);
   const [contextMenu, setContextMenu] = useState<SidebarContextMenu | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
-  const activeNode = activeId ? flatNodes.find((node) => node.itemId === activeId) ?? null : null;
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 4 },
@@ -331,9 +329,6 @@ export function DocumentSidebar({
                 <RootDropZone active={Boolean(activeId)} dropState={dropState} />
               </div>
             </SortableContext>
-            <DragOverlay>
-              {activeNode ? <TreeRowOverlay node={activeNode} /> : null}
-            </DragOverlay>
           </DndContext>
         ) : (
           <div className="empty-sidebar-state">
@@ -554,16 +549,6 @@ function RootDropZone({
   ].filter(Boolean).join(" ");
 
   return <div ref={setNodeRef} className={className} data-testid="tree-root-dropzone" />;
-}
-
-function TreeRowOverlay({ node }: { node: FlatDocumentTreeNode }) {
-  return (
-    <div className="tree-row tree-row--overlay">
-      <GripVertical size={13} className="drag-handle" />
-      {node.type === "folder" ? <Folder size={15} /> : documentIcon(node.document)}
-      <span>{node.name}</span>
-    </div>
-  );
 }
 
 function documentIcon(document: WorkspaceDocument | undefined) {
