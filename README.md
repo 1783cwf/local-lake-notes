@@ -238,18 +238,41 @@ npm run build
 
 本项目使用 GitHub Actions 原生 runner 分别构建 macOS、Windows 和 Linux 安装包。不要在 macOS 本机直接交叉编译所有系统的安装包，Tauri 的安装包生成依赖各平台原生工具链。
 
-手动触发完整发布构建：
+固定发版流程：
 
-1. 打开 GitHub 仓库的 Actions 页面。
-2. 选择 `Release` workflow。
-3. 点击 `Run workflow`。
-4. 构建完成后在 workflow artifacts 中下载各平台安装包。
+1. 在功能分支完成版本号、README 和代码修改，至少执行 `npm run build`、`npm run test:run`、`cd src-tauri && cargo test`。
+2. 提交功能分支并推送远程，创建 PR 合并到 `main`。
+3. 合并后切换到最新 `main`，确认 `HEAD` 等于 `origin/main`。
+4. 只在 `main` 的合并提交上创建版本 tag，禁止直接在功能分支 tag 发布。
+5. 推送 tag 后等待 `Release` workflow 完成，确认 GitHub Release 指向 `main` 的合并提交。
+6. Release notes 只描述当前版本相对上一版本的变化，不要把上一版本完整说明复制到本次 Release 中。
+7. 发布完成后确认 Release assets 已上传，Release notes、版本号和 tag 都一致。
 
-打 tag 时也会触发发布构建：
+示例：
 
 ```bash
+git switch main
+git pull --ff-only origin main
 git tag v1.4.0
 git push origin v1.4.0
+```
+
+Release notes 格式：
+
+```text
+v1.4.0
+
+从 v1.3.0 到 v1.4.0 的主要变化：
+
+- 新增或优化的能力。
+- 修复的问题。
+- 文档、版本号和构建配置更新。
+
+验证：
+
+- npm run build
+- npm run test:run
+- cd src-tauri && cargo test
 ```
 
 当前 GitHub Actions 会构建：
