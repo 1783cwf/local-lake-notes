@@ -245,8 +245,9 @@ npm run build
 3. 合并后切换到最新 `main`，确认 `HEAD` 等于 `origin/main`。
 4. 只在 `main` 的合并提交上创建版本 tag，禁止直接在功能分支 tag 发布。
 5. 推送 tag 后等待 `Release` workflow 完成，确认 GitHub Release 指向 `main` 的合并提交。
-6. Release notes 只描述当前版本相对上一版本的变化，不要把上一版本完整说明复制到本次 Release 中。
-7. 发布完成后确认 Release assets 已上传，Release notes、版本号和 tag 都一致。
+6. Release 名称只使用版本号，例如 `v1.4.0`，不要使用应用名加版本号。
+7. Release notes 只描述当前版本相对上一版本的变化，不要把上一版本完整说明复制到本次 Release 中。
+8. 发布完成后确认 Release assets 已上传，Release 名称、Release notes、版本号和 tag 都一致。
 
 示例：
 
