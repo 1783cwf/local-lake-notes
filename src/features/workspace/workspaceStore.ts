@@ -25,6 +25,12 @@ export interface WorkspacePayload {
   order: string[];
 }
 
+export interface KnownWorkspace {
+  root: string;
+  name: string;
+  lastOpenedAt: string;
+}
+
 export interface CreateDocumentPayload extends WorkspacePayload {
   createdDocument: WorkspaceDocument;
 }

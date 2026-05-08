@@ -11,6 +11,10 @@ impl AppState {
         *self.workspace_root.lock().expect("workspace lock poisoned") = Some(root);
     }
 
+    pub fn clear_workspace_root(&self) {
+        *self.workspace_root.lock().expect("workspace lock poisoned") = None;
+    }
+
     pub fn workspace_root(&self) -> Option<PathBuf> {
         self.workspace_root
             .lock()

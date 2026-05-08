@@ -9,8 +9,9 @@ use yuque_lake_notes_lib::commands::documents::{
     resolve_writable_spreadsheet_path, safe_file_stem,
 };
 use yuque_lake_notes_lib::commands::workspace::{
-    list_directories, list_documents, move_workspace_item_on_disk, resolve_existing_directory_path,
-    resolve_existing_lake_path, resolve_writable_lake_path, safe_directory_name,
+    create_workspace_root_at, list_directories, list_documents, move_workspace_item_on_disk,
+    resolve_existing_directory_path, resolve_existing_lake_path, resolve_writable_lake_path,
+    safe_directory_name,
 };
 use yuque_lake_notes_lib::error::AppError;
 use yuque_lake_notes_lib::models::{MoveWorkspaceItemInput, WorkspaceDocumentKind};
@@ -198,6 +199,29 @@ fn sanitizes_file_stems_without_dropping_chinese_text() {
         safe_directory_name(" 个人 学习/前端 ").unwrap(),
         "个人-学习-前端"
     );
+}
+
+#[test]
+fn creates_workspace_directory_inside_selected_parent() {
+    let dir = tempdir().unwrap();
+
+    let workspace = create_workspace_root_at(dir.path(), " 工作 知识库 ").unwrap();
+
+    assert_eq!(
+        workspace,
+        dir.path().join("工作-知识库").canonicalize().unwrap()
+    );
+    assert!(workspace.is_dir());
+}
+
+#[test]
+fn rejects_invalid_or_conflicting_workspace_directory_names() {
+    let dir = tempdir().unwrap();
+    fs::create_dir(dir.path().join("work")).unwrap();
+
+    assert!(create_workspace_root_at(dir.path(), "  ").is_err());
+    assert!(create_workspace_root_at(dir.path(), "../outside").is_err());
+    assert!(create_workspace_root_at(dir.path(), "work").is_err());
 }
 
 #[test]

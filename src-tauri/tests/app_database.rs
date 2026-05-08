@@ -1,10 +1,11 @@
 use tempfile::tempdir;
 use yuque_lake_notes_lib::models::OssSettings;
 use yuque_lake_notes_lib::storage::app_database::{
-    clone_database_to_directory_at, list_known_workspaces_at, load_oss_settings_at,
-    load_recent_workspace_root_at, prune_workspace_order_path_at, read_workspace_order_at,
-    rewrite_workspace_order_items, rewrite_workspace_order_path_at, save_oss_settings_at,
-    set_recent_workspace_root_at, set_workspace_order_at,
+    clear_recent_workspace_root_at, clone_database_to_directory_at, forget_known_workspace_at,
+    list_known_workspaces_at, load_oss_settings_at, load_recent_workspace_root_at,
+    prune_workspace_order_path_at, read_workspace_order_at, rewrite_workspace_order_items,
+    rewrite_workspace_order_path_at, save_oss_settings_at, set_recent_workspace_root_at,
+    set_workspace_order_at,
 };
 
 fn valid_settings() -> OssSettings {
@@ -60,6 +61,33 @@ fn tracks_known_workspaces_from_recent_workspace() {
 }
 
 #[test]
+fn lists_known_workspaces_by_latest_opened_and_forgets_without_deleting_files() {
+    let dir = tempdir().unwrap();
+    let database = dir.path().join("app.sqlite3");
+    let first = dir.path().join("first");
+    let second = dir.path().join("second");
+    std::fs::create_dir_all(&first).unwrap();
+    std::fs::create_dir_all(&second).unwrap();
+
+    set_recent_workspace_root_at(&database, &first).unwrap();
+    set_recent_workspace_root_at(&database, &second).unwrap();
+
+    let workspaces = list_known_workspaces_at(&database).unwrap();
+    assert_eq!(workspaces.len(), 2);
+    assert_eq!(workspaces[0].root, second.to_string_lossy());
+    assert_eq!(workspaces[1].root, first.to_string_lossy());
+
+    forget_known_workspace_at(&database, &second).unwrap();
+    clear_recent_workspace_root_at(&database).unwrap();
+
+    let workspaces = list_known_workspaces_at(&database).unwrap();
+    assert_eq!(workspaces.len(), 1);
+    assert_eq!(workspaces[0].root, first.to_string_lossy());
+    assert!(second.exists());
+    assert_eq!(load_recent_workspace_root_at(&database).unwrap(), None);
+}
+
+#[test]
 fn stores_and_rewrites_workspace_order_in_sqlite() {
     let dir = tempdir().unwrap();
     let database = dir.path().join("app.sqlite3");
@@ -81,6 +109,44 @@ fn stores_and_rewrites_workspace_order_in_sqlite() {
     assert!(read_workspace_order_at(&database, &workspace)
         .unwrap()
         .is_empty());
+}
+
+#[test]
+fn keeps_workspace_order_isolated_by_workspace_root() {
+    let dir = tempdir().unwrap();
+    let database = dir.path().join("app.sqlite3");
+    let first = dir.path().join("first");
+    let second = dir.path().join("second");
+
+    set_workspace_order_at(
+        &database,
+        &first,
+        &[
+            "folder:notes".to_string(),
+            "document:notes/a.lake".to_string(),
+        ],
+    )
+    .unwrap();
+    set_workspace_order_at(
+        &database,
+        &second,
+        &[
+            "folder:notes".to_string(),
+            "document:notes/b.lake".to_string(),
+        ],
+    )
+    .unwrap();
+
+    rewrite_workspace_order_path_at(&database, &first, "notes", "archive").unwrap();
+
+    assert_eq!(
+        read_workspace_order_at(&database, &first).unwrap(),
+        vec!["folder:archive", "document:archive/a.lake"]
+    );
+    assert_eq!(
+        read_workspace_order_at(&database, &second).unwrap(),
+        vec!["folder:notes", "document:notes/b.lake"]
+    );
 }
 
 #[test]

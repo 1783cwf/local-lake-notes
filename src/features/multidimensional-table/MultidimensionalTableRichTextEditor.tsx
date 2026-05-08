@@ -163,7 +163,7 @@ export function MultidimensionalTableRichTextEditor({
     );
   }
 
-  return <div ref={containerRef} className="multitable-record-body-editor lake-editor-root ne-doc-major-editor" aria-label={ariaLabel} />;
+  return <div ref={containerRef} className="multitable-record-body-editor lake-editor-root" aria-label={ariaLabel} />;
 }
 
 async function rejectUpload(): Promise<UploadImageOutput> {

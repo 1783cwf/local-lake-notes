@@ -7,14 +7,16 @@ use walkdir::WalkDir;
 
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    MoveWorkspaceItemInput, WorkspaceDirectory, WorkspaceDocument, WorkspaceDocumentKind,
-    WorkspacePayload,
+    KnownWorkspace, MoveWorkspaceItemInput, WorkspaceDirectory, WorkspaceDocument,
+    WorkspaceDocumentKind, WorkspacePayload,
 };
 use crate::state::AppState;
 use crate::storage::app_database::{
-    load_recent_workspace_root, move_workspace_order, prune_workspace_order_path,
-    push_workspace_order_item, read_workspace_order, rewrite_workspace_order_items,
-    rewrite_workspace_order_path, save_recent_workspace_root, set_workspace_order,
+    clear_recent_workspace_root, forget_known_workspace,
+    list_known_workspaces as load_known_workspaces, load_recent_workspace_root,
+    move_workspace_order, prune_workspace_order_path, push_workspace_order_item,
+    read_workspace_order, rewrite_workspace_order_items, rewrite_workspace_order_path,
+    save_recent_workspace_root, set_workspace_order,
 };
 
 #[tauri::command]
@@ -40,6 +42,57 @@ pub fn set_workspace_root(
     save_recent_workspace_root(&app, &root)?;
     state.set_workspace_root(root.clone());
     workspace_payload_for_app(&app, &root)
+}
+
+#[tauri::command]
+pub fn create_workspace_root(
+    parent_path: String,
+    name: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<WorkspacePayload> {
+    let root = create_workspace_root_at(parent_path, &name)?;
+    save_recent_workspace_root(&app, &root)?;
+    state.set_workspace_root(root.clone());
+    workspace_payload_for_app(&app, &root)
+}
+
+#[tauri::command]
+pub fn list_known_workspaces(app: AppHandle) -> AppResult<Vec<KnownWorkspace>> {
+    load_known_workspaces(&app)
+}
+
+#[tauri::command]
+pub fn forget_workspace_root(
+    path: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<KnownWorkspace>> {
+    let raw_root = PathBuf::from(path);
+    let root = raw_root.canonicalize().unwrap_or(raw_root);
+    forget_known_workspace(&app, &root)?;
+
+    if state
+        .workspace_root()
+        .is_some_and(|current| current == root)
+    {
+        state.clear_workspace_root();
+        clear_recent_workspace_root(&app)?;
+    }
+
+    load_known_workspaces(&app)
+}
+
+pub fn create_workspace_root_at(parent_path: impl AsRef<Path>, name: &str) -> AppResult<PathBuf> {
+    let parent = normalize_workspace_root(parent_path)?;
+    let directory_name = safe_directory_name(name)?;
+    let root = parent.join(directory_name);
+    if root.exists() {
+        return Err(AppError::InvalidFilename);
+    }
+    // 新建知识库只在用户选择的父目录下创建一层目录，避免误创建多级路径。
+    fs::create_dir(&root)?;
+    normalize_workspace_root(&root)
 }
 
 #[tauri::command]

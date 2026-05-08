@@ -138,6 +138,10 @@ pub fn save_recent_workspace_root(app: &AppHandle, root: &Path) -> AppResult<()>
     set_recent_workspace_root_at(&path, root)
 }
 
+pub fn clear_recent_workspace_root(app: &AppHandle) -> AppResult<()> {
+    delete_setting_at(&database_path(app)?, RECENT_WORKSPACE_KEY)
+}
+
 pub fn load_oss_settings(app: &AppHandle) -> AppResult<Option<OssSettings>> {
     let path = database_path(app)?;
     migrate_legacy_app_settings(app, &path)?;
@@ -219,6 +223,10 @@ pub fn list_known_workspaces(app: &AppHandle) -> AppResult<Vec<KnownWorkspace>> 
     let path = database_path(app)?;
     migrate_legacy_app_settings(app, &path)?;
     list_known_workspaces_at(&path)
+}
+
+pub fn forget_known_workspace(app: &AppHandle, root: &Path) -> AppResult<()> {
+    forget_known_workspace_at(&database_path(app)?, root)
 }
 
 pub fn load_backup_key_metadata(app: &AppHandle) -> AppResult<Option<String>> {
@@ -354,6 +362,10 @@ pub fn load_recent_workspace_root_at(database_path: &Path) -> AppResult<Option<S
     get_setting_at(database_path, RECENT_WORKSPACE_KEY)
 }
 
+pub fn clear_recent_workspace_root_at(database_path: &Path) -> AppResult<()> {
+    delete_setting_at(database_path, RECENT_WORKSPACE_KEY)
+}
+
 pub fn upsert_known_workspace_at(database_path: &Path, root: &Path) -> AppResult<()> {
     let name = root
         .file_name()
@@ -363,10 +375,10 @@ pub fn upsert_known_workspace_at(database_path: &Path, root: &Path) -> AppResult
     connect_at(database_path)?.execute(
         "
         INSERT INTO known_workspaces (workspace_root, name, last_opened_at)
-        VALUES (?1, ?2, CURRENT_TIMESTAMP)
+        VALUES (?1, ?2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
         ON CONFLICT(workspace_root) DO UPDATE SET
             name = excluded.name,
-            last_opened_at = CURRENT_TIMESTAMP
+            last_opened_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         ",
         params![workspace_key(root), name],
     )?;
@@ -386,7 +398,7 @@ pub fn move_known_workspace_at(
     connect_at(database_path)?.execute(
         "
         UPDATE known_workspaces
-        SET workspace_root = ?1, name = ?2, last_opened_at = CURRENT_TIMESTAMP
+        SET workspace_root = ?1, name = ?2, last_opened_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         WHERE workspace_root = ?3
         ",
         params![workspace_key(to_root), name, workspace_key(from_root)],
@@ -416,6 +428,14 @@ pub fn list_known_workspaces_at(database_path: &Path) -> AppResult<Vec<KnownWork
         workspaces.push(row?);
     }
     Ok(workspaces)
+}
+
+pub fn forget_known_workspace_at(database_path: &Path, root: &Path) -> AppResult<()> {
+    connect_at(database_path)?.execute(
+        "DELETE FROM known_workspaces WHERE workspace_root = ?1",
+        params![workspace_key(root)],
+    )?;
+    Ok(())
 }
 
 fn connect_at(database_path: &Path) -> AppResult<Connection> {

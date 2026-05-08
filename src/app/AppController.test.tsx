@@ -6,6 +6,7 @@ import { forwardRef, useEffect, useImperativeHandle, type Ref } from "react";
 
 import type {
   CreateDocumentPayload,
+  KnownWorkspace,
   MoveWorkspaceItemInput,
   WorkspacePayload,
 } from "../features/workspace/workspaceStore";
@@ -14,6 +15,7 @@ import { AppController } from "./AppController";
 const createLakeDocument = vi.fn<(title: string, parentPath?: string) => Promise<CreateDocumentPayload>>();
 const createSpreadsheetDocument = vi.fn<(title: string, parentPath?: string) => Promise<CreateDocumentPayload>>();
 const createMultidimensionalTableDocument = vi.fn<(title: string, parentPath?: string) => Promise<CreateDocumentPayload>>();
+const createWorkspaceRoot = vi.fn<(parentPath: string, name: string) => Promise<WorkspacePayload>>();
 const chooseExcelImportFile = vi.fn<() => Promise<{ path: string; name: string; bytes: Uint8Array } | null>>();
 const createLakeDirectory = vi.fn<(parentPath: string, name: string) => Promise<WorkspacePayload>>();
 const createBackup = vi.fn<(input: { forceFull: boolean }) => Promise<{
@@ -44,6 +46,8 @@ const getResourceKeyStatus = vi.fn(async () => ({ configured: false, needsKey: f
 const verifyBackupKeyStatus = vi.fn(async () => ({ configured: false, needsKey: false }));
 const verifyResourceKeyStatus = vi.fn(async () => ({ configured: false, needsKey: false, knownFingerprints: [] }));
 const getRecentWorkspace = vi.fn<() => Promise<WorkspacePayload | null>>(async () => null);
+const listKnownWorkspaces = vi.fn<() => Promise<KnownWorkspace[]>>(async () => []);
+const forgetWorkspaceRoot = vi.fn<(path: string) => Promise<KnownWorkspace[]>>(async () => []);
 const listBackups = vi.fn(async () => [] as Array<{
   id: string;
   backupType: "full" | "incremental";
@@ -150,6 +154,46 @@ vi.mock("../components/DocumentSidebar", () => ({
         移入目录
       </button>
     </div>
+  ),
+}));
+
+vi.mock("../components/AppRail", () => ({
+  AppRail: ({
+    knownWorkspaces = [],
+    activeWorkspaceRoot,
+    onChooseWorkspace,
+    onCreateWorkspace,
+    onSwitchWorkspace,
+    onForgetWorkspace,
+    onCreateDocument,
+    onOpenSettings,
+  }: {
+    knownWorkspaces?: KnownWorkspace[];
+    activeWorkspaceRoot?: string | null;
+    onChooseWorkspace: () => void;
+    onCreateWorkspace?: () => void;
+    onSwitchWorkspace?: (root: string) => void;
+    onForgetWorkspace?: (root: string) => void;
+    onCreateDocument: () => void;
+    onOpenSettings: () => void;
+  }) => (
+    <nav aria-label="应用导航">
+      <button type="button" onClick={onChooseWorkspace}>选择目录</button>
+      <button type="button" onClick={onCreateWorkspace}>新建知识库</button>
+      <button type="button" onClick={onCreateDocument}>新建文档</button>
+      <button type="button" onClick={onOpenSettings}>设置</button>
+      <div data-testid="active-workspace-root">{activeWorkspaceRoot ?? ""}</div>
+      {knownWorkspaces.map((workspace) => (
+        <div key={workspace.root}>
+          <button type="button" onClick={() => onSwitchWorkspace?.(workspace.root)}>
+            切换 {workspace.name}
+          </button>
+          <button type="button" onClick={() => onForgetWorkspace?.(workspace.root)}>
+            移除 {workspace.name}
+          </button>
+        </div>
+      ))}
+    </nav>
   ),
 }));
 
@@ -260,6 +304,7 @@ vi.mock("../lib/tauri", () => ({
   createLakeDocument: (title: string, parentPath?: string) => createLakeDocument(title, parentPath),
   createMultidimensionalTableDocument: (title: string, parentPath?: string) => createMultidimensionalTableDocument(title, parentPath),
   createSpreadsheetDocument: (title: string, parentPath?: string) => createSpreadsheetDocument(title, parentPath),
+  createWorkspaceRoot: (parentPath: string, name: string) => createWorkspaceRoot(parentPath, name),
   createTemporaryResourceUrl: (resourceRef: string, ttlSeconds: number, filename?: string) => (
     createTemporaryResourceUrl(resourceRef, ttlSeconds, filename)
   ),
@@ -276,6 +321,8 @@ vi.mock("../lib/tauri", () => ({
   verifyBackupKeyStatus: () => verifyBackupKeyStatus(),
   verifyResourceKeyStatus: () => verifyResourceKeyStatus(),
   getRecentWorkspace: () => getRecentWorkspace(),
+  listKnownWorkspaces: () => listKnownWorkspaces(),
+  forgetWorkspaceRoot: (path: string) => forgetWorkspaceRoot(path),
   listBackups: () => listBackups(),
   moveWorkspaceItem: (input: MoveWorkspaceItemInput) => moveWorkspaceItem(input),
   openExternalUrl: vi.fn(),
@@ -317,6 +364,7 @@ beforeEach(() => {
   chooseExcelImportFile.mockResolvedValue(null);
   createSpreadsheetDocument.mockReset();
   createMultidimensionalTableDocument.mockReset();
+  createWorkspaceRoot.mockReset();
   createBackup.mockReset();
   createBackup.mockResolvedValue({
     record: {
@@ -356,6 +404,10 @@ beforeEach(() => {
   verifyResourceKeyStatus.mockReset();
   verifyResourceKeyStatus.mockResolvedValue({ configured: false, needsKey: false, knownFingerprints: [] });
   getRecentWorkspace.mockResolvedValue(null);
+  listKnownWorkspaces.mockReset();
+  listKnownWorkspaces.mockResolvedValue([]);
+  forgetWorkspaceRoot.mockReset();
+  forgetWorkspaceRoot.mockResolvedValue([]);
   listBackups.mockReset();
   listBackups.mockResolvedValue([]);
   moveWorkspaceItem.mockReset();
@@ -416,6 +468,84 @@ test("选择目录后展示 workspace 文档", async () => {
   await waitFor(() => {
     expect(screen.getByText("kb")).toBeInTheDocument();
     expect(screen.getByRole("treeitem", { name: /a/ })).toBeInTheDocument();
+  });
+});
+
+test("启动时加载已知知识库列表并可切换当前知识库", async () => {
+  const user = userEvent.setup();
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/work",
+    directories: [],
+    documents: [{ id: "work.lake", path: "work.lake", name: "work", parentPath: "", size: 1, kind: "lake" }],
+    order: [],
+  });
+  listKnownWorkspaces.mockResolvedValue([
+    { root: "/tmp/work", name: "work", lastOpenedAt: "2026-05-08T00:00:00Z" },
+    { root: "/tmp/life", name: "life", lastOpenedAt: "2026-05-07T00:00:00Z" },
+  ]);
+  setWorkspaceRoot.mockResolvedValue({
+    root: "/tmp/life",
+    directories: [],
+    documents: [{ id: "life.lake", path: "life.lake", name: "life", parentPath: "", size: 1, kind: "lake" }],
+    order: [],
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("button", { name: "切换 life" }));
+
+  await waitFor(() => {
+    expect(setWorkspaceRoot).toHaveBeenCalledWith("/tmp/life");
+    expect(screen.getByTestId("active-workspace-root")).toHaveTextContent("/tmp/life");
+    expect(screen.getByRole("treeitem", { name: "life" })).toBeInTheDocument();
+  });
+});
+
+test("新建知识库后激活并刷新列表", async () => {
+  const user = userEvent.setup();
+  createWorkspaceRoot.mockResolvedValue({
+    root: "/tmp/kb/新知识库",
+    directories: [],
+    documents: [],
+    order: [],
+  });
+  listKnownWorkspaces
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([{ root: "/tmp/kb/新知识库", name: "新知识库", lastOpenedAt: "2026-05-08T00:00:00Z" }]);
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("button", { name: "新建知识库" }));
+  await user.clear(await screen.findByLabelText("知识库名称"));
+  await user.type(screen.getByLabelText("知识库名称"), "新知识库");
+  await user.click(screen.getByRole("button", { name: "创建" }));
+
+  await waitFor(() => {
+    expect(createWorkspaceRoot).toHaveBeenCalledWith("/tmp/kb", "新知识库");
+    expect(screen.getByText("新知识库")).toBeInTheDocument();
+  });
+});
+
+test("移除当前知识库后回到未选择目录状态", async () => {
+  const user = userEvent.setup();
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/work",
+    directories: [],
+    documents: [{ id: "work.lake", path: "work.lake", name: "work", parentPath: "", size: 1, kind: "lake" }],
+    order: [],
+  });
+  listKnownWorkspaces.mockResolvedValue([
+    { root: "/tmp/work", name: "work", lastOpenedAt: "2026-05-08T00:00:00Z" },
+  ]);
+  forgetWorkspaceRoot.mockResolvedValue([]);
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("button", { name: "移除 work" }));
+
+  await waitFor(() => {
+    expect(forgetWorkspaceRoot).toHaveBeenCalledWith("/tmp/work");
+    expect(screen.getByText("未选择目录")).toBeInTheDocument();
   });
 });
 

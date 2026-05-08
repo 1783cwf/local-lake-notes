@@ -34,7 +34,11 @@ export function createLakeEditor(
     throw new Error("语雀编辑器资源未加载");
   }
 
-  const editor = window.Doc.createOpenEditor(element, {
+  const mountElement = document.createElement("div");
+  mountElement.className = "lake-editor-mount ne-doc-major-editor";
+  element.replaceChildren(mountElement);
+
+  const editor = window.Doc.createOpenEditor(mountElement, {
     input: {},
     defaultFontsize: 19,
     toc: {
@@ -95,6 +99,9 @@ export function createLakeEditor(
     } else {
       destory?.();
     }
+    // Lake destroy 可能会移除自己的挂载节点；这里兜底清理外层壳内残留，
+    // 但外层壳始终交给 React 卸载，避免 React 再 removeChild 一个已被第三方移除的节点。
+    element.replaceChildren();
   };
   editor.destroy = destroyEditor;
   editor.destory = destroyEditor;
