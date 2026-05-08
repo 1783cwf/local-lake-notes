@@ -28,6 +28,7 @@ pub struct WorkspaceDirectory {
     pub name: String,
     pub parent_path: String,
     pub modified_at: Option<String>,
+    pub is_document_child_container: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

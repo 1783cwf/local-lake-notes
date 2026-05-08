@@ -16,6 +16,7 @@ export interface WorkspaceDirectory {
   name: string;
   parentPath: string;
   modifiedAt?: string;
+  isDocumentChildContainer?: boolean;
 }
 
 export interface WorkspacePayload {
@@ -102,6 +103,7 @@ export function buildDocumentTree(
   const roots: DocumentTreeNode[] = [];
   const folders = new Map<string, DocumentTreeNode>();
   const explicitDirectories = new Map(directories.map((directory) => [directory.path, directory]));
+  const populatedDirectoryPaths = populatedDirectoryPathSet(documents, directories);
   const orderRank = new Map(order.map((itemId, index) => [itemId, index]));
 
   const ensureFolder = (folderPath: string): DocumentTreeNode | null => {
@@ -157,8 +159,11 @@ export function buildDocumentTree(
     const childContainerPath = documentChildContainerPath(document.path);
     const existingChildContainer = folders.get(childContainerPath);
 
-    if (existingChildContainer?.type === "folder") {
-      // 文档允许承载子级：把同名目录作为文档的子级容器隐藏到文档节点下。
+    if (
+      existingChildContainer?.type === "folder" &&
+      shouldMergeDocumentChildContainer(document, existingChildContainer, populatedDirectoryPaths)
+    ) {
+      // 文档允许承载子级：优先用内部标记识别子级容器；旧数据中已有子文档的同名目录继续兼容。
       existingChildContainer.id = node.id;
       existingChildContainer.name = node.name;
       existingChildContainer.path = node.path;
@@ -458,6 +463,27 @@ function documentChildContainerRank(
     return undefined;
   }
   return orderRank.get(`folder:${documentChildContainerPath(node.document.path)}`);
+}
+
+function shouldMergeDocumentChildContainer(
+  document: WorkspaceDocument,
+  childContainer: DocumentTreeNode,
+  populatedDirectoryPaths: Set<string>,
+): boolean {
+  return Boolean(
+    childContainer.directory?.isDocumentChildContainer ||
+    populatedDirectoryPaths.has(documentChildContainerPath(document.path)),
+  );
+}
+
+function populatedDirectoryPathSet(
+  documents: WorkspaceDocument[],
+  directories: WorkspaceDirectory[],
+): Set<string> {
+  return new Set([
+    ...documents.map((document) => document.parentPath).filter(Boolean),
+    ...directories.map((directory) => directory.parentPath).filter(Boolean),
+  ]);
 }
 
 function joinRelativePath(parentPath: string, basename: string): string {

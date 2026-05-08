@@ -1,17 +1,19 @@
 use std::fs;
 
+use serde_json::Value;
 use tempfile::tempdir;
 use yuque_lake_notes_lib::commands::documents::{
     create_document, create_document_at, create_multidimensional_table,
     create_multidimensional_table_at, create_spreadsheet, create_spreadsheet_at,
-    read_external_excel_file, resolve_existing_multidimensional_table_path,
-    resolve_existing_spreadsheet_path, resolve_writable_multidimensional_table_path,
-    resolve_writable_spreadsheet_path, safe_file_stem,
+    read_external_excel_file, rename_document_on_disk,
+    resolve_existing_multidimensional_table_path, resolve_existing_spreadsheet_path,
+    resolve_writable_multidimensional_table_path, resolve_writable_spreadsheet_path,
+    safe_file_stem,
 };
 use yuque_lake_notes_lib::commands::workspace::{
     create_workspace_root_at, list_directories, list_documents, move_workspace_item_on_disk,
     resolve_existing_directory_path, resolve_existing_lake_path, resolve_writable_lake_path,
-    safe_directory_name,
+    safe_directory_name, DOCUMENT_CHILD_CONTAINER_MARKER,
 };
 use yuque_lake_notes_lib::error::AppError;
 use yuque_lake_notes_lib::models::{MoveWorkspaceItemInput, WorkspaceDocumentKind};
@@ -93,6 +95,122 @@ fn creates_unique_safe_multidimensional_table_document() {
 
     assert_eq!(path, "上线记录-2.dbtable.json");
     assert!(dir.path().join(path).exists());
+}
+
+#[test]
+fn creates_multidimensional_table_with_neutral_default_fields() {
+    let dir = tempdir().unwrap();
+
+    let path = create_multidimensional_table(dir.path(), "项目表").unwrap();
+    let content = fs::read_to_string(dir.path().join(path)).unwrap();
+    let snapshot = serde_json::from_str::<Value>(&content).unwrap();
+    let field_names = snapshot["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|field| field["name"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    let status_options = snapshot["fields"][1]["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|option| option["label"].as_str().unwrap())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        field_names,
+        vec!["标题", "状态", "主要内容", "日期", "附件"]
+    );
+    assert_eq!(status_options, vec!["单选1", "单选2"]);
+    assert_eq!(
+        snapshot["views"][1]["cardFieldIds"],
+        serde_json::json!(["description", "date", "attachment"])
+    );
+}
+
+#[test]
+fn renames_document_child_container_with_spreadsheet() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("服务部署.json"), WORKBOOK_SNAPSHOT).unwrap();
+    fs::create_dir_all(dir.path().join("服务部署")).unwrap();
+    fs::write(
+        dir.path().join("服务部署").join("接口清单.lake"),
+        "<p>api</p>",
+    )
+    .unwrap();
+
+    let current_path = resolve_existing_spreadsheet_path(dir.path(), "服务部署.json").unwrap();
+    let renamed = rename_document_on_disk(
+        dir.path(),
+        current_path,
+        "服务部署.json",
+        "服务部署规划.json",
+    )
+    .unwrap();
+
+    assert_eq!(renamed.target_path, "服务部署规划.json");
+    assert_eq!(renamed.target_child_container_path, "服务部署规划");
+    assert!(renamed.moved_child_container);
+    assert!(dir.path().join("服务部署规划.json").exists());
+    assert!(dir
+        .path()
+        .join("服务部署规划")
+        .join("接口清单.lake")
+        .exists());
+    assert!(dir
+        .path()
+        .join("服务部署规划")
+        .join(DOCUMENT_CHILD_CONTAINER_MARKER)
+        .exists());
+    assert!(!dir.path().join("服务部署").exists());
+}
+
+#[test]
+fn rejects_renaming_document_when_target_child_container_exists() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("服务部署.json"), WORKBOOK_SNAPSHOT).unwrap();
+    fs::create_dir_all(dir.path().join("服务部署")).unwrap();
+    fs::create_dir_all(dir.path().join("服务部署规划")).unwrap();
+
+    let current_path = resolve_existing_spreadsheet_path(dir.path(), "服务部署.json").unwrap();
+    let error = rename_document_on_disk(
+        dir.path(),
+        current_path,
+        "服务部署.json",
+        "服务部署规划.json",
+    )
+    .unwrap_err();
+
+    assert!(matches!(error, AppError::WorkspaceItemConflict(_)));
+    assert!(dir.path().join("服务部署.json").exists());
+    assert!(dir.path().join("服务部署").exists());
+}
+
+#[test]
+fn marks_created_document_child_container() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("阿里云.lake"), "<p>a</p>").unwrap();
+    fs::write(dir.path().join("访问密钥.lake"), "<p>key</p>").unwrap();
+
+    move_workspace_item_on_disk(
+        dir.path(),
+        &MoveWorkspaceItemInput {
+            source_id: "document:访问密钥.lake".to_string(),
+            target_parent_path: "阿里云".to_string(),
+            order: vec![],
+        },
+    )
+    .unwrap();
+
+    assert!(dir
+        .path()
+        .join("阿里云")
+        .join(DOCUMENT_CHILD_CONTAINER_MARKER)
+        .exists());
+    assert!(list_directories(dir.path())
+        .unwrap()
+        .iter()
+        .any(|directory| directory.path == "阿里云" && directory.is_document_child_container));
 }
 
 #[test]

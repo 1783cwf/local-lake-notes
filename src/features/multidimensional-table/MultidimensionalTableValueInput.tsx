@@ -1,4 +1,21 @@
-import { CalendarDays, Check, ChevronDown, Download, Loader2, Paperclip, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
+import {
+  CalendarDays,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Clock,
+  Download,
+  Loader2,
+  Paperclip,
+  Pencil,
+  Plus,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 
 import type { FileDownloadInput, UploadImageInput, UploadImageOutput } from "../../app/appState";
@@ -10,8 +27,9 @@ import type {
   MultidimensionalTableField,
   MultidimensionalTableFieldValue,
   MultidimensionalTableOption,
+  MultidimensionalTableTimeFormat,
 } from "./multidimensionalTableDocument";
-import { createSelectOption, formatTimeFieldValue, timeFormatPlaceholder } from "./multidimensionalTableDocument";
+import { createSelectOption, defaultTimeFormat, formatTimeFieldValue, timeFormatPlaceholder } from "./multidimensionalTableDocument";
 
 interface MultidimensionalTableValueInputProps {
   field: MultidimensionalTableField;
@@ -113,21 +131,15 @@ export function MultidimensionalTableValueInput({
   }
 
   if (field.type === "time") {
-    const textValue = typeof value === "string" ? value : "";
     return (
-      <div className={`multitable-time-input${compact ? " multitable-time-input--compact" : ""}`}>
-        <CalendarDays size={16} />
-        <input
-          className={className}
-          type="text"
-          inputMode="numeric"
-          value={textValue}
-          aria-label={ariaLabel}
-          placeholder={timeFormatPlaceholder(field.timeFormat)}
-          onChange={(event) => onChange(event.target.value)}
-          onBlur={(event) => onChange(formatTimeFieldValue(event.currentTarget.value, field))}
-        />
-      </div>
+      <TimeValueInput
+        field={field}
+        value={value}
+        ariaLabel={ariaLabel}
+        className={className}
+        compact={compact}
+        onChange={onChange}
+      />
     );
   }
 
@@ -154,6 +166,389 @@ export function MultidimensionalTableValueInput({
       onChange={(event) => onChange(event.target.value)}
     />
   );
+}
+
+type TimePickerMode = "date" | "datetime" | "time";
+
+interface TimePickerParts {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+}
+
+interface TimePickerCalendarCell extends TimePickerParts {
+  currentMonth: boolean;
+  today: boolean;
+}
+
+function TimeValueInput({
+  field,
+  value,
+  ariaLabel,
+  className,
+  compact,
+  onChange,
+}: {
+  field: MultidimensionalTableField;
+  value: MultidimensionalTableFieldValue | undefined;
+  ariaLabel: string;
+  className: string;
+  compact: boolean;
+  onChange: (value: MultidimensionalTableFieldValue) => void;
+}) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const textValue = typeof value === "string" ? value : "";
+  const format = field.timeFormat ?? defaultTimeFormat;
+  const mode = timePickerMode(format);
+  const [open, setOpen] = useState(false);
+  const [draftParts, setDraftParts] = useState<TimePickerParts>(() => parseTimePickerValue(textValue, format) ?? nowTimePickerParts());
+  const [visibleMonth, setVisibleMonth] = useState(() => monthCursorFromParts(draftParts));
+  const showDate = mode !== "time";
+  const showTime = mode !== "date";
+  const calendarCells = showDate ? buildCalendarCells(visibleMonth) : [];
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const nextParts = parseTimePickerValue(textValue, format) ?? nowTimePickerParts();
+    setDraftParts(nextParts);
+    setVisibleMonth(monthCursorFromParts(nextParts));
+  }, [format, open, textValue]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const closeOnOutsidePointerDown = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", closeOnOutsidePointerDown);
+    return () => document.removeEventListener("mousedown", closeOnOutsidePointerDown);
+  }, [open]);
+
+  const normalizeInputValue = () => {
+    onChange(formatTimeFieldValue(inputRef.current?.value ?? textValue, field));
+  };
+  const setDraftDate = (cell: TimePickerCalendarCell) => {
+    setDraftParts((current) => ({
+      ...current,
+      year: cell.year,
+      month: cell.month,
+      day: cell.day,
+    }));
+    setVisibleMonth({ year: cell.year, month: cell.month });
+  };
+  const setNow = () => {
+    const now = nowTimePickerParts();
+    setDraftParts(now);
+    setVisibleMonth(monthCursorFromParts(now));
+  };
+  const commitDraft = () => {
+    onChange(formatTimePickerParts(draftParts, format));
+    setOpen(false);
+  };
+  const clearValue = () => {
+    onChange("");
+    setOpen(false);
+  };
+  const onInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setOpen(true);
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      onChange(formatTimeFieldValue(event.currentTarget.value, field));
+      setOpen(false);
+    }
+    if (event.key === "Escape") {
+      setOpen(false);
+    }
+  };
+
+  return (
+    <div
+      ref={rootRef}
+      className={`multitable-time-input multitable-time-input--${mode}${compact ? " multitable-time-input--compact" : ""}`}
+    >
+      <button
+        type="button"
+        className="multitable-time-input__icon"
+        aria-label={`打开${ariaLabel}选择器`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        {mode === "time" ? <Clock size={16} /> : <CalendarDays size={16} />}
+      </button>
+      <input
+        ref={inputRef}
+        className={className}
+        type="text"
+        inputMode="numeric"
+        value={textValue}
+        aria-label={ariaLabel}
+        placeholder={timeFormatPlaceholder(format)}
+        onFocus={() => setOpen(true)}
+        onChange={(event) => {
+          onChange(event.target.value);
+          setOpen(true);
+        }}
+        onBlur={normalizeInputValue}
+        onKeyDown={onInputKeyDown}
+      />
+      {textValue ? (
+        <button type="button" className="multitable-time-input__clear" aria-label={`清空${ariaLabel}`} onClick={clearValue}>
+          <X size={14} />
+        </button>
+      ) : null}
+      {open ? (
+        <div
+          className={`multitable-time-picker multitable-time-picker--${mode}`}
+          role="dialog"
+          aria-label={`${ariaLabel}选择器`}
+        >
+          {showDate ? (
+            <div className="multitable-time-picker__calendar">
+              <div className="multitable-time-picker__monthbar">
+                <button type="button" aria-label="上一年" onClick={() => setVisibleMonth(shiftMonth(visibleMonth, -12))}>
+                  <ChevronsLeft size={16} />
+                </button>
+                <button type="button" aria-label="上个月" onClick={() => setVisibleMonth(shiftMonth(visibleMonth, -1))}>
+                  <ChevronLeft size={16} />
+                </button>
+                <strong>{visibleMonth.year}年 {visibleMonth.month}月</strong>
+                <button type="button" aria-label="下个月" onClick={() => setVisibleMonth(shiftMonth(visibleMonth, 1))}>
+                  <ChevronRight size={16} />
+                </button>
+                <button type="button" aria-label="下一年" onClick={() => setVisibleMonth(shiftMonth(visibleMonth, 12))}>
+                  <ChevronsRight size={16} />
+                </button>
+              </div>
+              <div className="multitable-time-picker__weekdays" aria-hidden="true">
+                {["一", "二", "三", "四", "五", "六", "日"].map((weekday) => <span key={weekday}>{weekday}</span>)}
+              </div>
+              <div className="multitable-time-picker__days">
+                {calendarCells.map((cell) => {
+                  const selected = sameDateParts(cell, draftParts);
+                  return (
+                    <button
+                      key={`${cell.year}-${cell.month}-${cell.day}`}
+                      type="button"
+                      className={[
+                        "multitable-time-picker__day",
+                        cell.currentMonth ? "" : "is-muted",
+                        cell.today ? "is-today" : "",
+                        selected ? "is-selected" : "",
+                      ].filter(Boolean).join(" ")}
+                      aria-label={`选择日期 ${cell.year}-${pad2(cell.month)}-${pad2(cell.day)}`}
+                      aria-pressed={selected}
+                      onClick={() => setDraftDate(cell)}
+                    >
+                      {cell.day}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+          {showTime ? (
+            <div className="multitable-time-picker__time" aria-label="时间">
+              <strong>{pad2(draftParts.hour)}:{pad2(draftParts.minute)}</strong>
+              <div className="multitable-time-picker__time-columns">
+                <TimePickerColumn
+                  label="小时"
+                  values={Array.from({ length: 24 }, (_, index) => index)}
+                  selectedValue={draftParts.hour}
+                  onSelect={(hour) => setDraftParts((current) => ({ ...current, hour }))}
+                />
+                <TimePickerColumn
+                  label="分钟"
+                  values={Array.from({ length: 60 }, (_, index) => index)}
+                  selectedValue={draftParts.minute}
+                  onSelect={(minute) => setDraftParts((current) => ({ ...current, minute }))}
+                />
+              </div>
+            </div>
+          ) : null}
+          <div className="multitable-time-picker__footer">
+            <button type="button" className="multitable-time-picker__now" onClick={setNow}>
+              {mode === "date" ? "今天" : "此刻"}
+            </button>
+            <button type="button" className="multitable-time-picker__confirm" onClick={commitDraft}>
+              确定
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function TimePickerColumn({
+  label,
+  values,
+  selectedValue,
+  onSelect,
+}: {
+  label: string;
+  values: number[];
+  selectedValue: number;
+  onSelect: (value: number) => void;
+}) {
+  const selectedRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    selectedRef.current?.scrollIntoView?.({ block: "center" });
+  }, [selectedValue]);
+
+  return (
+    <div className="multitable-time-picker__time-column" aria-label={label}>
+      {values.map((value) => {
+        const selected = value === selectedValue;
+        return (
+          <button
+            key={value}
+            ref={selected ? selectedRef : undefined}
+            type="button"
+            className={selected ? "is-selected" : ""}
+            aria-label={`选择${label} ${value}`}
+            aria-pressed={selected}
+            onClick={() => onSelect(value)}
+          >
+            {pad2(value)}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function timePickerMode(format: MultidimensionalTableTimeFormat): TimePickerMode {
+  if (format === "hh:mm") {
+    return "time";
+  }
+  return format.includes("hh:mm") ? "datetime" : "date";
+}
+
+function parseTimePickerValue(value: string, format: MultidimensionalTableTimeFormat): TimePickerParts | null {
+  const text = value.trim();
+  if (!text) {
+    return null;
+  }
+
+  const timeOnlyMatch = text.match(/^(\d{1,2}):(\d{1,2})$/);
+  if (timeOnlyMatch) {
+    const now = nowTimePickerParts();
+    const hour = Number(timeOnlyMatch[1]);
+    const minute = Number(timeOnlyMatch[2]);
+    return validTimePickerParts(now.year, now.month, now.day, hour, minute)
+      ? { ...now, hour, minute }
+      : null;
+  }
+
+  const match = text.match(/^(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})(?:日)?(?:[T\s]+(\d{1,2}):(\d{1,2}))?/);
+  if (!match) {
+    return null;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = match[4] ? Number(match[4]) : 0;
+  const minute = match[5] ? Number(match[5]) : 0;
+
+  return validTimePickerParts(year, month, day, hour, minute)
+    ? { year, month, day, hour, minute }
+    : null;
+}
+
+function formatTimePickerParts(parts: TimePickerParts, format: MultidimensionalTableTimeFormat): string {
+  if (format === "hh:mm") {
+    return `${pad2(parts.hour)}:${pad2(parts.minute)}`;
+  }
+  if (format === "yyyy-mm-dd") {
+    return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`;
+  }
+  if (format === "yyyy/mm/dd") {
+    return `${parts.year}/${pad2(parts.month)}/${pad2(parts.day)}`;
+  }
+  if (format === "yyyy-mm-dd hh:mm") {
+    return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)} ${pad2(parts.hour)}:${pad2(parts.minute)}`;
+  }
+  if (format === "yyyy年m月d日") {
+    return `${parts.year}年${parts.month}月${parts.day}日`;
+  }
+  if (format === "yyyy年m月d日 hh:mm") {
+    return `${parts.year}年${parts.month}月${parts.day}日 ${pad2(parts.hour)}:${pad2(parts.minute)}`;
+  }
+  return `${parts.year}/${pad2(parts.month)}/${pad2(parts.day)} ${pad2(parts.hour)}:${pad2(parts.minute)}`;
+}
+
+function nowTimePickerParts(): TimePickerParts {
+  const now = new Date();
+  return {
+    year: now.getFullYear(),
+    month: now.getMonth() + 1,
+    day: now.getDate(),
+    hour: now.getHours(),
+    minute: now.getMinutes(),
+  };
+}
+
+function monthCursorFromParts(parts: Pick<TimePickerParts, "year" | "month">): { year: number; month: number } {
+  return { year: parts.year, month: parts.month };
+}
+
+function shiftMonth(cursor: { year: number; month: number }, offset: number): { year: number; month: number } {
+  const next = new Date(cursor.year, cursor.month - 1 + offset, 1);
+  return { year: next.getFullYear(), month: next.getMonth() + 1 };
+}
+
+function buildCalendarCells(cursor: { year: number; month: number }): TimePickerCalendarCell[] {
+  const firstDay = new Date(cursor.year, cursor.month - 1, 1);
+  const startOffset = (firstDay.getDay() + 6) % 7;
+  const today = nowTimePickerParts();
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(cursor.year, cursor.month - 1, 1 - startOffset + index);
+    return {
+      year: date.getFullYear(),
+      month: date.getMonth() + 1,
+      day: date.getDate(),
+      hour: 0,
+      minute: 0,
+      currentMonth: date.getMonth() === cursor.month - 1,
+      today: date.getFullYear() === today.year && date.getMonth() + 1 === today.month && date.getDate() === today.day,
+    };
+  });
+}
+
+function sameDateParts(left: Pick<TimePickerParts, "year" | "month" | "day">, right: Pick<TimePickerParts, "year" | "month" | "day">): boolean {
+  return left.year === right.year && left.month === right.month && left.day === right.day;
+}
+
+function validTimePickerParts(year: number, month: number, day: number, hour: number, minute: number): boolean {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return false;
+  }
+  if (month < 1 || month > 12 || day < 1 || day > 31) {
+    return false;
+  }
+  return Number.isInteger(hour) && hour >= 0 && hour <= 23 && Number.isInteger(minute) && minute >= 0 && minute <= 59;
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
 }
 
 function AttachmentValueInput({

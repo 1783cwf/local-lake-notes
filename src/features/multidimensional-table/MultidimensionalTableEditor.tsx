@@ -1126,6 +1126,16 @@ function comparableTimeValue(value: string): number | null {
     return null;
   }
 
+  const timeOnlyMatch = text.match(/^(\d{1,2}):(\d{1,2})$/);
+  if (timeOnlyMatch) {
+    const hour = Number(timeOnlyMatch[1]);
+    const minute = Number(timeOnlyMatch[2]);
+    if (Number.isInteger(hour) && hour >= 0 && hour <= 23 && Number.isInteger(minute) && minute >= 0 && minute <= 59) {
+      return hour * 60 + minute;
+    }
+    return null;
+  }
+
   const normalizedText = text
     .replace(/年|月/g, "-")
     .replace(/日/g, "")
@@ -1161,8 +1171,8 @@ function sortableValue(record: MultidimensionalTableRecord, field: Multidimensio
     return String(Number(typeof value === "string" ? value : "") || 0).padStart(12, "0");
   }
   if (field.type === "time" && typeof value === "string") {
-    const timestamp = Date.parse(value);
-    return Number.isNaN(timestamp) ? value : String(timestamp).padStart(16, "0");
+    const timestamp = comparableTimeValue(value);
+    return timestamp === null ? value : String(timestamp).padStart(16, "0");
   }
   return displayValue(value, field);
 }
