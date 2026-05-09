@@ -114,3 +114,146 @@ test("多维表格只显示保存和分享，不显示文档或 Excel 导出菜�
   expect(screen.queryByRole("button", { name: "导出文档" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Excel 导入导出" })).not.toBeInTheDocument();
 });
+
+test("顶部栏可以渲染多个文档标签并激活非当前标签", async () => {
+  const user = userEvent.setup();
+  const onActivateTab = vi.fn();
+
+  render(
+    <TopBar
+      document={{
+        id: "b.lake",
+        path: "b.lake",
+        name: "b",
+        parentPath: "",
+        size: 1,
+        kind: "lake",
+      }}
+      openTabs={[
+        {
+          id: "a.lake",
+          path: "a.lake",
+          locked: true,
+          document: { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+        },
+        {
+          id: "b.lake",
+          path: "b.lake",
+          locked: false,
+          document: { id: "b.lake", path: "b.lake", name: "b", parentPath: "", size: 1, kind: "lake" },
+        },
+      ]}
+      activeTabId="b.lake"
+      saveStatus={{ state: "clean" }}
+      onManualSave={vi.fn()}
+      onActivateTab={onActivateTab}
+    />,
+  );
+
+  expect(screen.getAllByRole("tab")).toHaveLength(2);
+  expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByLabelText("已锁定")).toBeInTheDocument();
+
+  await user.click(screen.getByRole("tab", { name: "a，已锁定" }));
+
+  expect(onActivateTab).toHaveBeenCalledWith("a.lake");
+});
+
+test("标签右键菜单支持锁定和解除锁定", async () => {
+  const user = userEvent.setup();
+  const onToggleTabLocked = vi.fn();
+
+  const { rerender } = render(
+    <TopBar
+      document={{
+        id: "a.lake",
+        path: "a.lake",
+        name: "a",
+        parentPath: "",
+        size: 1,
+        kind: "lake",
+      }}
+      openTabs={[
+        {
+          id: "a.lake",
+          path: "a.lake",
+          locked: false,
+          document: { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+        },
+      ]}
+      activeTabId="a.lake"
+      saveStatus={{ state: "clean" }}
+      onManualSave={vi.fn()}
+      onToggleTabLocked={onToggleTabLocked}
+    />,
+  );
+
+  await user.pointer({ keys: "[MouseRight]", target: screen.getByRole("tab", { name: "a" }) });
+  await user.click(screen.getByRole("menuitem", { name: "锁定标签" }));
+
+  expect(onToggleTabLocked).toHaveBeenCalledWith("a.lake");
+
+  rerender(
+    <TopBar
+      document={{
+        id: "a.lake",
+        path: "a.lake",
+        name: "a",
+        parentPath: "",
+        size: 1,
+        kind: "lake",
+      }}
+      openTabs={[
+        {
+          id: "a.lake",
+          path: "a.lake",
+          locked: true,
+          document: { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+        },
+      ]}
+      activeTabId="a.lake"
+      saveStatus={{ state: "clean" }}
+      onManualSave={vi.fn()}
+      onToggleTabLocked={onToggleTabLocked}
+    />,
+  );
+
+  await user.pointer({ keys: "[MouseRight]", target: screen.getByRole("tab", { name: "a，已锁定" }) });
+  await user.click(screen.getByRole("menuitem", { name: "解除锁定" }));
+
+  expect(onToggleTabLocked).toHaveBeenCalledTimes(2);
+});
+
+test("未锁定活动标签可以点击关闭按钮", async () => {
+  const user = userEvent.setup();
+  const onCloseTab = vi.fn();
+
+  render(
+    <TopBar
+      document={{
+        id: "a.lake",
+        path: "a.lake",
+        name: "a",
+        parentPath: "",
+        size: 1,
+        kind: "lake",
+      }}
+      openTabs={[
+        {
+          id: "a.lake",
+          path: "a.lake",
+          locked: false,
+          document: { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+        },
+      ]}
+      activeTabId="a.lake"
+      saveStatus={{ state: "clean" }}
+      onManualSave={vi.fn()}
+      onCloseTab={onCloseTab}
+    />,
+  );
+
+  await user.click(screen.getByRole("button", { name: "关闭 a" }));
+
+  expect(onCloseTab).toHaveBeenCalledWith("a.lake");
+});

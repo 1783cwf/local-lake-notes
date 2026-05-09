@@ -770,10 +770,12 @@ button {
   min-height: var(--topbar-height);
   padding: 0 28px;
   border-bottom: 1px solid var(--line);
+  gap: 18px;
 }
 
 .top-bar__title {
   min-width: 0;
+  flex: 1;
 }
 
 .top-bar__title h1 {
@@ -800,9 +802,144 @@ button {
   outline: none;
 }
 
+.title-edit-input--tab {
+  width: min(220px, 34vw);
+  height: 28px;
+  margin: 0;
+  padding: 0 4px;
+  border-color: transparent;
+  background: transparent;
+  font-size: 15px;
+  font-weight: 650;
+}
+
 .title-edit-input:focus {
   border-color: var(--green);
   box-shadow: 0 0 0 3px rgb(31 185 107 / 12%);
+}
+
+.document-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(720px, 100%);
+  min-height: 42px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.document-tab {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 280px;
+  height: 40px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: #5f666d;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease,
+    box-shadow 0.16s ease,
+    color 0.16s ease;
+}
+
+.document-tab:hover,
+.document-tab:focus-visible {
+  color: #30363d;
+  background: #f4f6f5;
+  outline: none;
+}
+
+.document-tab.is-active {
+  border-color: #dde4e0;
+  color: #25292d;
+  background: #ffffff;
+  box-shadow:
+    0 8px 22px rgb(31 38 45 / 9%),
+    inset 0 1px 0 rgb(255 255 255 / 90%);
+}
+
+.document-tab.is-locked:not(.is-active) {
+  color: #9aa1a7;
+}
+
+.document-tab__icon {
+  flex: none;
+}
+
+.document-tab__title {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.document-tab__pin {
+  flex: none;
+  color: #8b5cf6;
+}
+
+.document-tab__close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: #3f454b;
+  background: transparent;
+  cursor: pointer;
+}
+
+.document-tab__close:hover,
+.document-tab__close:focus-visible {
+  color: #1f2329;
+  background: #eef1ef;
+  outline: none;
+}
+
+.document-tab-menu {
+  position: fixed;
+  z-index: 50;
+  display: grid;
+  min-width: 126px;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 14px 34px rgb(31 38 45 / 14%);
+}
+
+.document-tab-menu button {
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  color: #25292d;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.document-tab-menu button:hover,
+.document-tab-menu button:focus-visible {
+  color: var(--green-dark);
+  background: #eef7f2;
+  outline: none;
 }
 
 .save-status {

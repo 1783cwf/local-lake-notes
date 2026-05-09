@@ -437,6 +437,49 @@ test("非 canvas 目标按下后表格内无按钮移动会补发一次释放", 
   });
 });
 
+test("右键打开表格菜单前会补发释放终止残留选区拖拽", async () => {
+  render(
+    <SpreadsheetEditor
+      document={spreadsheetDocument}
+      content={serializeSpreadsheetSnapshot(createEmptySpreadsheetWorkbookData("右键释放补偿"))}
+      manualSaveRequest={0}
+      onSave={vi.fn()}
+      onSaveStatusChange={vi.fn()}
+    />,
+  );
+
+  const container = await screen.findByTestId("spreadsheet-editor-container");
+  const canvas = document.createElement("canvas");
+  container.appendChild(canvas);
+  const pointerUpEvents: PointerEvent[] = [];
+  canvas.addEventListener("pointerup", (event) => pointerUpEvents.push(event));
+
+  canvas.dispatchEvent(new PointerEvent("pointerdown", {
+    bubbles: true,
+    button: 2,
+    buttons: 2,
+    clientX: 80,
+    clientY: 180,
+    pointerId: 11,
+    pointerType: "mouse",
+  }));
+  canvas.dispatchEvent(new MouseEvent("contextmenu", {
+    bubbles: true,
+    button: 2,
+    buttons: 0,
+    clientX: 80,
+    clientY: 180,
+  }));
+
+  expect(pointerUpEvents).toHaveLength(1);
+  expect(pointerUpEvents[0]).toMatchObject({
+    pointerId: 11,
+    pointerType: "mouse",
+    button: 2,
+    buttons: 0,
+  });
+});
+
 test("切换文档时销毁上一个 Univer 实例", async () => {
   const { rerender } = render(
     <SpreadsheetEditor

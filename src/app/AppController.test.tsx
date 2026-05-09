@@ -33,6 +33,7 @@ const createBackup = vi.fn<(input: { forceFull: boolean }) => Promise<{
 }>>();
 const deleteBackup = vi.fn<(input: { backupId: string }) => Promise<{ deletedBackupIds: string[] }>>();
 const deleteLakeDocument = vi.fn<(path: string) => Promise<WorkspacePayload>>();
+const deleteLakeDirectory = vi.fn<(path: string) => Promise<WorkspacePayload>>();
 const deleteSpreadsheetDocument = vi.fn<(path: string) => Promise<WorkspacePayload>>();
 const createTemporaryResourceUrl = vi.fn<(resourceRef: string, ttlSeconds: number, filename?: string) => Promise<string>>();
 const downloadResourceFile = vi.fn<(input: { url: string; filename: string; resourceRef?: string }) => Promise<string | null>>();
@@ -72,6 +73,10 @@ const saveBinaryExport = vi.fn<(defaultPath: string, bytes: Uint8Array, filters:
 const savePdfExport = vi.fn<(defaultPath: string, html: string, filters: Array<{ name: string; extensions: string[] }>) => Promise<string | null>>();
 const saveTextExport = vi.fn<(defaultPath: string, content: string, filters: Array<{ name: string; extensions: string[] }>) => Promise<string | null>>();
 const setWorkspaceRoot = vi.fn<(path: string) => Promise<WorkspacePayload>>();
+const renameLakeDirectory = vi.fn<(path: string, name: string) => Promise<WorkspacePayload>>();
+const renameLakeDocument = vi.fn<(path: string, name: string) => Promise<WorkspacePayload>>();
+const renameMultidimensionalTableDocument = vi.fn<(path: string, name: string) => Promise<WorkspacePayload>>();
+const renameSpreadsheetDocument = vi.fn<(path: string, name: string) => Promise<WorkspacePayload>>();
 const writeLakeDocument = vi.fn<(path: string, content: string) => Promise<void>>();
 const writeSpreadsheetDocument = vi.fn<(path: string, content: string) => Promise<void>>();
 const writeMultidimensionalTableDocument = vi.fn<(path: string, content: string) => Promise<void>>();
@@ -89,6 +94,8 @@ vi.mock("../components/DocumentSidebar", () => ({
     onExportWorkspaceMarkdown,
     onOpenDocument,
     onDeleteDocument,
+    onRenameDocument,
+    onDeleteDirectory,
     onMoveNode,
   }: {
     workspaceRoot: string | null;
@@ -102,6 +109,8 @@ vi.mock("../components/DocumentSidebar", () => ({
     onExportWorkspaceMarkdown: () => void;
     onOpenDocument: (document: { path: string; name: string; parentPath: string; size: number }) => void;
     onDeleteDocument: (document: { path: string; name: string; parentPath: string; size: number }) => void;
+    onRenameDocument: (document: { path: string; name: string; parentPath: string; size: number }) => void;
+    onDeleteDirectory: (directory: { path: string; name: string; parentPath: string }) => void;
     onMoveNode: (sourceId: string, intent: { placement: "inside"; targetId: string }) => void;
   }) => (
     <div>
@@ -131,6 +140,9 @@ vi.mock("../components/DocumentSidebar", () => ({
           <button type="button" onClick={() => onCreateDocument(directory.path)}>
             在 {directory.name} 下新建文档
           </button>
+          <button type="button" onClick={() => onDeleteDirectory(directory)}>
+            删除目录 {directory.name}
+          </button>
         </div>
       ))}
       {documents.map((document) => (
@@ -144,6 +156,9 @@ vi.mock("../components/DocumentSidebar", () => ({
           </button>
           <button type="button" onClick={() => onDeleteDocument(document)}>
             删除 {document.name}
+          </button>
+          <button type="button" onClick={() => onRenameDocument(document)}>
+            重命名 {document.name}
           </button>
         </div>
       ))}
@@ -308,7 +323,7 @@ vi.mock("../lib/tauri", () => ({
   createTemporaryResourceUrl: (resourceRef: string, ttlSeconds: number, filename?: string) => (
     createTemporaryResourceUrl(resourceRef, ttlSeconds, filename)
   ),
-  deleteLakeDirectory: vi.fn(),
+  deleteLakeDirectory: (path: string) => deleteLakeDirectory(path),
   deleteBackup: (input: { backupId: string }) => deleteBackup(input),
   deleteLakeDocument: (path: string) => deleteLakeDocument(path),
   deleteMultidimensionalTableDocument: vi.fn(),
@@ -330,10 +345,10 @@ vi.mock("../lib/tauri", () => ({
   readLakeDocument: (path: string) => readLakeDocument(path),
   readMultidimensionalTableDocument: (path: string) => readMultidimensionalTableDocument(path),
   readSpreadsheetDocument: (path: string) => readSpreadsheetDocument(path),
-  renameLakeDirectory: vi.fn(),
-  renameLakeDocument: vi.fn(),
-  renameMultidimensionalTableDocument: vi.fn(),
-  renameSpreadsheetDocument: vi.fn(),
+  renameLakeDirectory: (path: string, name: string) => renameLakeDirectory(path, name),
+  renameLakeDocument: (path: string, name: string) => renameLakeDocument(path, name),
+  renameMultidimensionalTableDocument: (path: string, name: string) => renameMultidimensionalTableDocument(path, name),
+  renameSpreadsheetDocument: (path: string, name: string) => renameSpreadsheetDocument(path, name),
   renameWorkspace: vi.fn(),
   saveOssSettings: vi.fn(),
   saveBinaryExport: (defaultPath: string, bytes: Uint8Array, filters: Array<{ name: string; extensions: string[] }>) => saveBinaryExport(defaultPath, bytes, filters),
@@ -385,6 +400,7 @@ beforeEach(() => {
   createLakeDocument.mockReset();
   createTemporaryResourceUrl.mockReset();
   createTemporaryResourceUrl.mockImplementation(async (resourceRef, ttlSeconds) => `${resourceRef}&ttl=${ttlSeconds}`);
+  deleteLakeDirectory.mockReset();
   deleteLakeDocument.mockReset();
   deleteSpreadsheetDocument.mockReset();
   downloadResourceFile.mockReset();
@@ -411,6 +427,10 @@ beforeEach(() => {
   listBackups.mockReset();
   listBackups.mockResolvedValue([]);
   moveWorkspaceItem.mockReset();
+  renameLakeDirectory.mockReset();
+  renameLakeDocument.mockReset();
+  renameMultidimensionalTableDocument.mockReset();
+  renameSpreadsheetDocument.mockReset();
   readLakeDocument.mockReset();
   readLakeDocument.mockResolvedValue("<p>hello</p>");
   readMultidimensionalTableDocument.mockReset();
@@ -498,6 +518,150 @@ test("启动时加载已知知识库列表并可切换当前知识库", async ()
     expect(setWorkspaceRoot).toHaveBeenCalledWith("/tmp/life");
     expect(screen.getByTestId("active-workspace-root")).toHaveTextContent("/tmp/life");
     expect(screen.getByRole("treeitem", { name: "life" })).toBeInTheDocument();
+  });
+});
+
+test("打开第二个文档时未锁定标签会被替换", async () => {
+  const user = userEvent.setup();
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [
+      { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+      { id: "b.lake", path: "b.lake", name: "b", parentPath: "", size: 1, kind: "lake" },
+    ],
+    order: ["document:a.lake", "document:b.lake"],
+  });
+  readLakeDocument.mockImplementation(async (path) => `<p>${path}</p>`);
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "a" }));
+  await waitFor(() => expect(screen.getByTestId("current-path")).toHaveTextContent("a.lake"));
+
+  await user.click(screen.getByRole("treeitem", { name: "b" }));
+
+  await waitFor(() => {
+    expect(screen.getByTestId("current-path")).toHaveTextContent("b.lake");
+    expect(screen.getAllByRole("tab")).toHaveLength(1);
+    expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true");
+  });
+});
+
+test("锁定当前标签后打开新文档会新增第二个标签", async () => {
+  const user = userEvent.setup();
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [
+      { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+      { id: "b.lake", path: "b.lake", name: "b", parentPath: "", size: 1, kind: "lake" },
+    ],
+    order: ["document:a.lake", "document:b.lake"],
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "a" }));
+  await user.pointer({ keys: "[MouseRight]", target: await screen.findByRole("tab", { name: "a" }) });
+  await user.click(screen.getByRole("menuitem", { name: "锁定标签" }));
+  await user.click(screen.getByRole("treeitem", { name: "b" }));
+
+  await waitFor(() => {
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+    expect(screen.getByRole("tab", { name: "a，已锁定" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("current-path")).toHaveTextContent("b.lake");
+  });
+});
+
+test("再次打开已经存在的标签只激活已有标签", async () => {
+  const user = userEvent.setup();
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [
+      { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+      { id: "b.lake", path: "b.lake", name: "b", parentPath: "", size: 1, kind: "lake" },
+    ],
+    order: ["document:a.lake", "document:b.lake"],
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "a" }));
+  await user.pointer({ keys: "[MouseRight]", target: await screen.findByRole("tab", { name: "a" }) });
+  await user.click(screen.getByRole("menuitem", { name: "锁定标签" }));
+  await user.click(screen.getByRole("treeitem", { name: "b" }));
+  await user.click(screen.getByRole("treeitem", { name: "a" }));
+
+  await waitFor(() => {
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+    expect(screen.getByRole("tab", { name: "a，已锁定" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("current-path")).toHaveTextContent("a.lake");
+  });
+});
+
+test("关闭活动未锁定标签后切换到相邻标签", async () => {
+  const user = userEvent.setup();
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [
+      { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+      { id: "b.lake", path: "b.lake", name: "b", parentPath: "", size: 1, kind: "lake" },
+    ],
+    order: ["document:a.lake", "document:b.lake"],
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "a" }));
+  await user.pointer({ keys: "[MouseRight]", target: await screen.findByRole("tab", { name: "a" }) });
+  await user.click(screen.getByRole("menuitem", { name: "锁定标签" }));
+  await user.click(screen.getByRole("treeitem", { name: "b" }));
+  await user.click(screen.getByRole("button", { name: "关闭 b" }));
+
+  await waitFor(() => {
+    expect(screen.getAllByRole("tab")).toHaveLength(1);
+    expect(screen.getByRole("tab", { name: "a，已锁定" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("current-path")).toHaveTextContent("a.lake");
+  });
+});
+
+test("保存失败时阻止切换标签和打开新文档", async () => {
+  const user = userEvent.setup();
+  const editor = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => "<p>dirty</p>"),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [
+      { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+      { id: "b.lake", path: "b.lake", name: "b", parentPath: "", size: 1, kind: "lake" },
+    ],
+    order: ["document:a.lake", "document:b.lake"],
+  });
+  writeLakeDocument.mockRejectedValue(new Error("写入失败"));
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "a" }));
+  await user.click(screen.getByRole("button", { name: "保存" }));
+  await screen.findByText("写入失败");
+
+  await user.click(screen.getByRole("treeitem", { name: "b" }));
+
+  await waitFor(() => {
+    expect(screen.getByText("当前文档保存失败，请先处理后再切换")).toBeInTheDocument();
+    expect(screen.getByTestId("current-path")).toHaveTextContent("a.lake");
   });
 });
 
