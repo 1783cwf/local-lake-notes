@@ -1,16 +1,25 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, Cloud, Download, Loader2, Save, Share2 } from "lucide-react";
+import { ChevronDown, Cloud, Download, FileSpreadsheet, FileText, Grid2X2, Loader2, Pin, Save, Share2, X } from "lucide-react";
 
-import type { SaveStatus } from "../app/appState";
+import type { OpenDocumentTab, SaveStatus } from "../app/appState";
 import type { DocumentExportFormat, ExportResourceStrategy } from "../features/lake-editor/lakeExport";
 import type { WorkspaceDocument } from "../features/workspace/workspaceStore";
 import { documentTitleFromPath } from "../features/workspace/workspaceStore";
 import { IconButton } from "./IconButton";
 
+export interface OpenDocumentTabView extends OpenDocumentTab {
+  document: WorkspaceDocument;
+}
+
 interface TopBarProps {
   document: WorkspaceDocument | null;
+  openTabs?: OpenDocumentTabView[];
+  activeTabId?: string | null;
   saveStatus: SaveStatus;
   onManualSave: () => void;
+  onActivateTab?: (tabId: string) => void | Promise<void>;
+  onToggleTabLocked?: (tabId: string) => void;
+  onCloseTab?: (tabId: string) => void | Promise<void>;
   onRenameDocument?: (title: string) => void | Promise<void>;
   onExportDocument?: (format: DocumentExportFormat, resourceStrategy: ExportResourceStrategy, signedUrlTtlSeconds: number) => void;
   onImportSpreadsheetExcel?: () => void;
@@ -23,8 +32,13 @@ interface TopBarProps {
 
 export function TopBar({
   document,
+  openTabs = [],
+  activeTabId = null,
   saveStatus,
   onManualSave,
+  onActivateTab,
+  onToggleTabLocked,
+  onCloseTab,
   onRenameDocument,
   onExportDocument,
   onImportSpreadsheetExcel,
@@ -38,15 +52,20 @@ export function TopBar({
   const [editingTitle, setEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(title);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [tabMenu, setTabMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
   const [resourceStrategy, setResourceStrategy] = useState<ExportResourceStrategy>(defaultExportResourceStrategy);
   const [ttlSeconds, setTtlSeconds] = useState(defaultSignedUrlTtlSeconds);
   const ttlOptions = Array.from(new Set([ttlSeconds, 3600, 24 * 3600, 7 * 24 * 3600])).sort((left, right) => left - right);
+  const menuTab = tabMenu ? openTabs.find((tab) => tab.id === tabMenu.tabId) : null;
 
   useEffect(() => {
     if (!editingTitle) {
       setDraftTitle(title);
     }
   }, [editingTitle, title]);
+  useEffect(() => {
+    setTabMenu(null);
+  }, [activeTabId, openTabs]);
   useEffect(() => {
     setResourceStrategy(defaultExportResourceStrategy);
   }, [defaultExportResourceStrategy]);
@@ -69,7 +88,102 @@ export function TopBar({
   return (
     <header className="top-bar">
       <div className="top-bar__title">
-        {document && editingTitle ? (
+        {openTabs.length > 0 ? (
+          <div className="document-tabs" role="tablist" aria-label="打开的文档">
+            {openTabs.map((tab) => {
+              const selected = tab.id === activeTabId;
+              const tabTitle = documentTitleFromPath(tab.document.path);
+
+              return (
+                <div
+                  key={tab.id}
+                  className={`document-tab${selected ? " is-active" : ""}${tab.locked ? " is-locked" : ""}`}
+                  role="tab"
+                  tabIndex={0}
+                  aria-selected={selected}
+                  aria-label={`${tabTitle}${tab.locked ? "，已锁定" : ""}`}
+                  onClick={() => {
+                    if (!selected) {
+                      void onActivateTab?.(tab.id);
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if ((event.key === "Enter" || event.key === " ") && !selected) {
+                      event.preventDefault();
+                      void onActivateTab?.(tab.id);
+                    }
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setTabMenu({ tabId: tab.id, x: event.clientX, y: event.clientY });
+                  }}
+                >
+                  {documentKindIcon(tab.document)}
+                  {selected && editingTitle ? (
+                    <input
+                      className="title-edit-input title-edit-input--tab"
+                      aria-label="文档名称"
+                      value={draftTitle}
+                      autoFocus
+                      onFocus={(event) => event.currentTarget.select()}
+                      onClick={(event) => event.stopPropagation()}
+                      onDoubleClick={(event) => event.stopPropagation()}
+                      onChange={(event) => setDraftTitle(event.target.value)}
+                      onBlur={submitTitle}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          event.currentTarget.blur();
+                        }
+                        if (event.key === "Escape") {
+                          setDraftTitle(title);
+                          setEditingTitle(false);
+                        }
+                      }}
+                    />
+                  ) : selected ? (
+                    <h1
+                      className="document-tab__title"
+                      title="双击重命名文档"
+                      onDoubleClick={(event) => {
+                        event.stopPropagation();
+                        setEditingTitle(true);
+                      }}
+                    >
+                      {tabTitle}
+                    </h1>
+                  ) : (
+                    <span className="document-tab__title" title={tabTitle}>
+                      {tabTitle}
+                    </span>
+                  )}
+                  {tab.locked ? (
+                    <Pin size={17} className="document-tab__pin" aria-label="已锁定" />
+                  ) : selected ? (
+                    <button
+                      type="button"
+                      className="document-tab__close"
+                      aria-label={`关闭 ${tabTitle}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void onCloseTab?.(tab.id);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          void onCloseTab?.(tab.id);
+                        }
+                      }}
+                    >
+                      <X size={18} />
+                    </button>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        ) : document && editingTitle ? (
           <input
             className="title-edit-input"
             aria-label="文档名称"
@@ -101,6 +215,38 @@ export function TopBar({
             {title}
           </h1>
         )}
+        {tabMenu && menuTab ? (
+          <div
+            className="document-tab-menu"
+            role="menu"
+            aria-label="文档标签菜单"
+            style={{ left: tabMenu.x, top: tabMenu.y }}
+            onMouseLeave={() => setTabMenu(null)}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                onToggleTabLocked?.(menuTab.id);
+                setTabMenu(null);
+              }}
+            >
+              {menuTab.locked ? "解除锁定" : "锁定标签"}
+            </button>
+            {!menuTab.locked ? (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  void onCloseTab?.(menuTab.id);
+                  setTabMenu(null);
+                }}
+              >
+                关闭标签
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         <span className={`save-status save-status--${saveStatus.state}`}>
           <Cloud size={14} />
           {saveStatusLabel(saveStatus)}
@@ -224,6 +370,16 @@ export function TopBar({
       </div>
     </header>
   );
+}
+
+function documentKindIcon(document: WorkspaceDocument) {
+  if (document.kind === "spreadsheet") {
+    return <FileSpreadsheet size={18} className="document-tab__icon" aria-hidden="true" />;
+  }
+  if (document.kind === "multidimensional-table") {
+    return <Grid2X2 size={18} className="document-tab__icon" aria-hidden="true" />;
+  }
+  return <FileText size={18} className="document-tab__icon" aria-hidden="true" />;
 }
 
 function formatTtlLabel(seconds: number): string {

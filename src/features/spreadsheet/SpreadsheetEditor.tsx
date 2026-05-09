@@ -290,7 +290,7 @@ function installSpreadsheetPointerReleaseGuard(container: HTMLElement): () => vo
   let hasActivePointerSequence = false;
 
   const rememberPointerDown = (event: PointerEvent) => {
-    if (event.button !== 0) {
+    if (!isSpreadsheetPointerButtonTracked(event.button)) {
       return;
     }
     idleMoveReleaseSent = false;
@@ -304,7 +304,7 @@ function installSpreadsheetPointerReleaseGuard(container: HTMLElement): () => vo
   };
 
   const rememberMouseDown = (event: MouseEvent) => {
-    if (event.button !== 0) {
+    if (!isSpreadsheetPointerButtonTracked(event.button)) {
       return;
     }
     idleMoveReleaseSent = false;
@@ -372,8 +372,27 @@ function installSpreadsheetPointerReleaseGuard(container: HTMLElement): () => vo
     hasActivePointerSequence = false;
   };
 
+  const releaseOnContextMenu = (event: MouseEvent) => {
+    if (!isEventInsideContainer(event, container)) {
+      return;
+    }
+    if (!pendingPointer && !hasActivePointerSequence) {
+      return;
+    }
+    const canvas = pendingPointer?.canvas ?? findCanvasForSyntheticRelease(event, container, lastCanvas);
+    if (!canvas) {
+      return;
+    }
+    // 右键菜单可能截断 Univer 画布收到的 pointerup/mouseup；菜单打开前补齐释放，避免选区拖拽态残留成整屏高亮。
+    dispatchSyntheticCanvasRelease(pendingPointer ?? createPendingPointer(event, canvas, 2), event);
+    pendingPointer = null;
+    idleMoveReleaseSent = true;
+    hasActivePointerSequence = false;
+  };
+
   container.addEventListener("pointerdown", rememberPointerDown, true);
   container.addEventListener("mousedown", rememberMouseDown, true);
+  container.addEventListener("contextmenu", releaseOnContextMenu, true);
   container.addEventListener("pointerup", clearIfCanvasHandledRelease);
   container.addEventListener("mouseup", clearIfCanvasHandledRelease);
   container.addEventListener("pointercancel", releaseIfLost, true);
@@ -387,6 +406,7 @@ function installSpreadsheetPointerReleaseGuard(container: HTMLElement): () => vo
   return () => {
     container.removeEventListener("pointerdown", rememberPointerDown, true);
     container.removeEventListener("mousedown", rememberMouseDown, true);
+    container.removeEventListener("contextmenu", releaseOnContextMenu, true);
     container.removeEventListener("pointerup", clearIfCanvasHandledRelease);
     container.removeEventListener("mouseup", clearIfCanvasHandledRelease);
     container.removeEventListener("pointercancel", releaseIfLost, true);
@@ -397,6 +417,10 @@ function installSpreadsheetPointerReleaseGuard(container: HTMLElement): () => vo
     document.removeEventListener("pointercancel", releaseIfLost, true);
     window.removeEventListener("blur", releaseOnWindowBlur);
   };
+}
+
+function isSpreadsheetPointerButtonTracked(button: number): boolean {
+  return button === 0 || button === 2;
 }
 
 function createPendingPointer(

@@ -25,6 +25,12 @@ export type CurrentDocumentState =
     content: string;
   };
 
+export interface OpenDocumentTab {
+  id: string;
+  path: string;
+  locked: boolean;
+}
+
 export interface UploadImageInput {
   bytes: number[];
   filename: string;

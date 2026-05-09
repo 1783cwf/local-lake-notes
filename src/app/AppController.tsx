@@ -102,6 +102,7 @@ import type {
   DatabaseLocationSettings,
   FileDownloadInput,
   OssSettings,
+  OpenDocumentTab,
   ResourceKeyStatus,
   RestoreBackupOutput,
   SaveStatus,
@@ -136,6 +137,8 @@ export function AppController() {
   const [workspace, setWorkspace] = useState<WorkspacePayload | null>(null);
   const [knownWorkspaces, setKnownWorkspaces] = useState<KnownWorkspace[]>([]);
   const [currentDocument, setCurrentDocument] = useState<CurrentDocumentState | null>(null);
+  const [openTabs, setOpenTabs] = useState<OpenDocumentTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>(emptySaveStatus);
   const [manualSaveRequest, setManualSaveRequest] = useState(0);
   const [exportRequest, setExportRequest] = useState<LakeDocumentExportRequest | null>(null);
@@ -231,6 +234,141 @@ export function AppController() {
     saveCurrentEditorNowRef.current = saveNow;
   }, []);
 
+  const clearOpenDocumentTabs = useCallback(() => {
+    setOpenTabs([]);
+    setActiveTabId(null);
+    setCurrentDocument(null);
+    setSaveStatus(emptySaveStatus);
+  }, []);
+
+  const saveBeforeLeavingCurrentTab = useCallback(async (errorMessage: string): Promise<boolean> => {
+    if (saveStatus.state === "error") {
+      setAppError(errorMessage);
+      return false;
+    }
+
+    try {
+      await saveCurrentEditorNowRef.current?.();
+      return true;
+    } catch (error) {
+      setAppError(toMessage(error));
+      return false;
+    }
+  }, [saveStatus.state]);
+
+  const activateDocumentTab = useCallback(async (
+    tabId: string,
+    candidateTabs: OpenDocumentTab[] = openTabs,
+    candidateWorkspace: WorkspacePayload | null = workspace,
+  ) => {
+    const tab = candidateTabs.find((entry) => entry.id === tabId);
+    const nextDocument = tab ? candidateWorkspace?.documents.find((entry) => entry.path === tab.path) : null;
+    if (!tab || !nextDocument) {
+      setOpenTabs(candidateTabs.filter((entry) => entry.id !== tabId));
+      setActiveTabId(null);
+      setCurrentDocument(null);
+      setSaveStatus(emptySaveStatus);
+      setAppError("找不到当前文档，已关闭编辑区");
+      return;
+    }
+
+    setActiveTabId(tab.id);
+    setCurrentDocument(await readDocumentState(nextDocument));
+    setSaveStatus(emptySaveStatus);
+    setAppError(null);
+  }, [openTabs, workspace]);
+
+  const activateTab = useCallback(async (tabId: string) => {
+    if (tabId === activeTabId) {
+      return;
+    }
+    if (!await saveBeforeLeavingCurrentTab("当前文档保存失败，请先处理后再切换")) {
+      return;
+    }
+
+    try {
+      await activateDocumentTab(tabId);
+    } catch (error) {
+      setAppError(toMessage(error));
+    }
+  }, [activateDocumentTab, activeTabId, saveBeforeLeavingCurrentTab]);
+
+  const openDocumentInTabs = useCallback(async (
+    document: WorkspaceDocument,
+    candidateWorkspace: WorkspacePayload | null = workspace,
+    options: { skipSaveBeforeSwitch?: boolean } = {},
+  ) => {
+    const existingTab = openTabs.find((tab) => tab.path === document.path);
+    if (existingTab?.id === activeTabId) {
+      setAppError(null);
+      return;
+    }
+
+    if (!options.skipSaveBeforeSwitch && !await saveBeforeLeavingCurrentTab("当前文档保存失败，请先处理后再切换")) {
+      return;
+    }
+
+    try {
+      if (existingTab) {
+        await activateDocumentTab(existingTab.id, openTabs, candidateWorkspace);
+        return;
+      }
+
+      const activeTab = openTabs.find((tab) => tab.id === activeTabId);
+      const nextTab = createOpenDocumentTab(document);
+      const nextTabs = activeTab && !activeTab.locked
+        ? openTabs.map((tab) => (tab.id === activeTab.id ? nextTab : tab))
+        : [...openTabs, nextTab];
+
+      setOpenTabs(nextTabs);
+      await activateDocumentTab(nextTab.id, nextTabs, candidateWorkspace);
+    } catch (error) {
+      setAppError(toMessage(error));
+    }
+  }, [activateDocumentTab, activeTabId, openTabs, saveBeforeLeavingCurrentTab, workspace]);
+
+  const toggleTabLocked = useCallback((tabId: string) => {
+    setOpenTabs((tabs) => tabs.map((tab) => (
+      tab.id === tabId ? { ...tab, locked: !tab.locked } : tab
+    )));
+  }, []);
+
+  const closeTab = useCallback(async (tabId: string) => {
+    const closingIndex = openTabs.findIndex((tab) => tab.id === tabId);
+    if (closingIndex < 0) {
+      return;
+    }
+    const closingTab = openTabs[closingIndex];
+    if (closingTab.locked) {
+      return;
+    }
+
+    if (tabId !== activeTabId) {
+      setOpenTabs(openTabs.filter((tab) => tab.id !== tabId));
+      return;
+    }
+
+    if (!await saveBeforeLeavingCurrentTab("当前文档保存失败，请先处理后再关闭标签")) {
+      return;
+    }
+
+    try {
+      const nextTabs = openTabs.filter((tab) => tab.id !== tabId);
+      setOpenTabs(nextTabs);
+      const nextTab = nextTabs[closingIndex] ?? nextTabs[closingIndex - 1] ?? null;
+      if (nextTab) {
+        await activateDocumentTab(nextTab.id, nextTabs);
+      } else {
+        setActiveTabId(null);
+        setCurrentDocument(null);
+        setSaveStatus(emptySaveStatus);
+        setAppError(null);
+      }
+    } catch (error) {
+      setAppError(toMessage(error));
+    }
+  }, [activateDocumentTab, activeTabId, openTabs, saveBeforeLeavingCurrentTab]);
+
   const beginUploadOperation = useCallback((kind: "image-upload" | "file-upload", label: string) => {
     uploadOperationCountRef.current += 1;
     setActiveAppOperation({
@@ -266,13 +404,12 @@ export function AppController() {
       const payload = await setWorkspaceRoot(selected);
       setWorkspace(payload);
       await refreshKnownWorkspaces();
-      setCurrentDocument(null);
-      setSaveStatus(emptySaveStatus);
+      clearOpenDocumentTabs();
       setAppError(null);
     } catch (error) {
       setAppError(toMessage(error));
     }
-  }, [refreshKnownWorkspaces]);
+  }, [clearOpenDocumentTabs, refreshKnownWorkspaces]);
 
   const createWorkspace = useCallback(() => {
     setTextDialog({
@@ -290,15 +427,14 @@ export function AppController() {
           const payload = await createWorkspaceRoot(selectedParent, name);
           setWorkspace(payload);
           await refreshKnownWorkspaces();
-          setCurrentDocument(null);
-          setSaveStatus(emptySaveStatus);
+          clearOpenDocumentTabs();
           setAppError(null);
         } catch (error) {
           setAppError(toMessage(error));
         }
       },
     });
-  }, [refreshKnownWorkspaces]);
+  }, [clearOpenDocumentTabs, refreshKnownWorkspaces]);
 
   const switchWorkspace = useCallback(async (root: string) => {
     if (workspace?.root === root) {
@@ -314,13 +450,12 @@ export function AppController() {
       const payload = await setWorkspaceRoot(root);
       setWorkspace(payload);
       await refreshKnownWorkspaces();
-      setCurrentDocument(null);
-      setSaveStatus(emptySaveStatus);
+      clearOpenDocumentTabs();
       setAppError(null);
     } catch (error) {
       setAppError(toMessage(error));
     }
-  }, [refreshKnownWorkspaces, saveStatus.state, workspace?.root]);
+  }, [clearOpenDocumentTabs, refreshKnownWorkspaces, saveStatus.state, workspace?.root]);
 
   const forgetWorkspace = useCallback(async (root: string) => {
     try {
@@ -328,16 +463,19 @@ export function AppController() {
       setKnownWorkspaces(nextWorkspaces);
       if (workspace?.root === root) {
         setWorkspace(null);
-        setCurrentDocument(null);
-        setSaveStatus(emptySaveStatus);
+        clearOpenDocumentTabs();
       }
       setAppError(null);
     } catch (error) {
       setAppError(toMessage(error));
     }
-  }, [workspace?.root]);
+  }, [clearOpenDocumentTabs, workspace?.root]);
 
   const createDocument = useCallback(async (parentPath = "") => {
+    if (!await saveBeforeLeavingCurrentTab("当前文档保存失败，请先处理后再新建文档")) {
+      return;
+    }
+
     try {
       const title = "未命名文档";
       const payload = await createLakeDocument(title, parentPath);
@@ -347,18 +485,17 @@ export function AppController() {
         documents: payload.documents,
         order: payload.order,
       });
-      setCurrentDocument({
-        kind: "lake",
-        entry: asLakeDocument(payload.createdDocument),
-        content: await readLakeDocument(payload.createdDocument.path),
-      });
-      setAppError(null);
+      await openDocumentInTabs(payload.createdDocument, payload, { skipSaveBeforeSwitch: true });
     } catch (error) {
       setAppError(toMessage(error));
     }
-  }, []);
+  }, [openDocumentInTabs, saveBeforeLeavingCurrentTab]);
 
   const createSpreadsheet = useCallback(async (parentPath = "") => {
+    if (!await saveBeforeLeavingCurrentTab("当前文档保存失败，请先处理后再新建表格")) {
+      return;
+    }
+
     try {
       const payload = await createSpreadsheetDocument("未命名表格", parentPath);
       setWorkspace({
@@ -367,18 +504,17 @@ export function AppController() {
         documents: payload.documents,
         order: payload.order,
       });
-      setCurrentDocument({
-        kind: "spreadsheet",
-        entry: asSpreadsheetDocument(payload.createdDocument),
-        content: await readSpreadsheetDocument(payload.createdDocument.path),
-      });
-      setAppError(null);
+      await openDocumentInTabs(payload.createdDocument, payload, { skipSaveBeforeSwitch: true });
     } catch (error) {
       setAppError(toMessage(error));
     }
-  }, []);
+  }, [openDocumentInTabs, saveBeforeLeavingCurrentTab]);
 
   const createMultidimensionalTable = useCallback(async (parentPath = "") => {
+    if (!await saveBeforeLeavingCurrentTab("当前文档保存失败，请先处理后再新建多维表格")) {
+      return;
+    }
+
     try {
       const payload = await createMultidimensionalTableDocument("未命名多维表格", parentPath);
       setWorkspace({
@@ -387,16 +523,11 @@ export function AppController() {
         documents: payload.documents,
         order: payload.order,
       });
-      setCurrentDocument({
-        kind: "multidimensional-table",
-        entry: asMultidimensionalTableDocument(payload.createdDocument),
-        content: await readMultidimensionalTableDocument(payload.createdDocument.path),
-      });
-      setAppError(null);
+      await openDocumentInTabs(payload.createdDocument, payload, { skipSaveBeforeSwitch: true });
     } catch (error) {
       setAppError(toMessage(error));
     }
-  }, []);
+  }, [openDocumentInTabs, saveBeforeLeavingCurrentTab]);
 
   const createDirectory = useCallback((parentPath = "") => {
     setTextDialog({
@@ -449,19 +580,21 @@ export function AppController() {
           ? await renameMultidimensionalTableDocument(document.path, nextName)
           : await renameLakeDocument(document.path, nextName);
       setWorkspace(payload);
+      const extension = documentExtension(document);
+      const nextPath = document.parentPath ? `${document.parentPath}/${nextName}${extension}` : `${nextName}${extension}`;
+      const nextTabs = rewriteOpenTabs(openTabs, document.path, nextPath);
+      setOpenTabs(nextTabs);
+      if (activeTabId === document.path) {
+        setActiveTabId(nextPath);
+      }
       if (currentDocument?.entry.path === document.path) {
-        const extension = documentExtension(document);
-        const nextPath = document.parentPath ? `${document.parentPath}/${nextName}${extension}` : `${nextName}${extension}`;
-        const nextDocument = payload.documents.find((entry) => entry.path === nextPath);
-        if (nextDocument) {
-          setCurrentDocument(await readDocumentState(nextDocument));
-        }
+        await activateDocumentTab(nextPath, nextTabs, payload);
       }
       setAppError(null);
     } catch (error) {
       setAppError(toMessage(error));
     }
-  }, [currentDocument?.entry.path]);
+  }, [activateDocumentTab, activeTabId, currentDocument?.entry.path, openTabs]);
 
   const renameDocument = useCallback((document: WorkspaceDocument) => {
     setTextDialog({
@@ -485,15 +618,28 @@ export function AppController() {
           ? await deleteMultidimensionalTableDocument(document.path)
           : await deleteLakeDocument(document.path);
       setWorkspace(payload);
+      const nextTabs = openTabs.filter((tab) => tab.path !== document.path);
+      setOpenTabs(nextTabs);
       if (currentDocument?.entry.path === document.path) {
+        const deletedIndex = openTabs.findIndex((tab) => tab.path === document.path);
+        const nextTab = nextTabs[deletedIndex] ?? nextTabs[deletedIndex - 1] ?? null;
+        if (nextTab) {
+          await activateDocumentTab(nextTab.id, nextTabs, payload);
+        } else {
+          setActiveTabId(null);
+          setCurrentDocument(null);
+          setSaveStatus(emptySaveStatus);
+        }
+      } else if (activeTabId === document.path) {
         setCurrentDocument(null);
         setSaveStatus(emptySaveStatus);
+        setActiveTabId(null);
       }
       setAppError(null);
     } catch (error) {
       setAppError(toMessage(error));
     }
-  }, [currentDocument?.entry.path]);
+  }, [activateDocumentTab, activeTabId, currentDocument?.entry.path, openTabs]);
 
   const renameDirectory = useCallback((directory: { path: string; name: string; parentPath: string }) => {
     setTextDialog({
@@ -510,13 +656,15 @@ export function AppController() {
         try {
           const payload = await renameLakeDirectory(directory.path, nextName);
           setWorkspace(payload);
+          const nextPrefix = directory.parentPath ? `${directory.parentPath}/${nextName}` : nextName;
+          const nextTabs = rewriteOpenTabsByPrefix(openTabs, directory.path, nextPrefix);
+          setOpenTabs(nextTabs);
+          if (activeTabId && isSameOrChildPath(activeTabId, directory.path)) {
+            setActiveTabId(replacePathPrefix(activeTabId, directory.path, nextPrefix));
+          }
           if (currentDocument?.entry.path.startsWith(`${directory.path}/`)) {
-            const nextPrefix = directory.parentPath ? `${directory.parentPath}/${nextName}` : nextName;
             const nextPath = currentDocument.entry.path.replace(directory.path, nextPrefix);
-            const nextDocument = payload.documents.find((entry) => entry.path === nextPath);
-            if (nextDocument) {
-              setCurrentDocument(await readDocumentState(nextDocument));
-            }
+            await activateDocumentTab(nextPath, nextTabs, payload);
           }
           setAppError(null);
         } catch (error) {
@@ -524,7 +672,7 @@ export function AppController() {
         }
       },
     });
-  }, [currentDocument]);
+  }, [activateDocumentTab, activeTabId, currentDocument, openTabs]);
 
   const deleteDirectory = useCallback(async (directory: { path: string; name: string }) => {
     if (!window.confirm(`删除目录「${directory.name}」及其所有文档？`)) {
@@ -534,30 +682,27 @@ export function AppController() {
     try {
       const payload = await deleteLakeDirectory(directory.path);
       setWorkspace(payload);
+      const nextTabs = openTabs.filter((tab) => !isSameOrChildPath(tab.path, directory.path));
+      setOpenTabs(nextTabs);
       if (currentDocument?.entry.path.startsWith(`${directory.path}/`)) {
-        setCurrentDocument(null);
-        setSaveStatus(emptySaveStatus);
+        const nextTab = nextTabs[0] ?? null;
+        if (nextTab) {
+          await activateDocumentTab(nextTab.id, nextTabs, payload);
+        } else {
+          setActiveTabId(null);
+          setCurrentDocument(null);
+          setSaveStatus(emptySaveStatus);
+        }
       }
       setAppError(null);
     } catch (error) {
       setAppError(toMessage(error));
     }
-  }, [currentDocument?.entry.path]);
+  }, [activateDocumentTab, currentDocument?.entry.path, openTabs]);
 
   const openDocument = useCallback(async (document: WorkspaceDocument) => {
-    if (saveStatus.state === "error") {
-      setAppError("当前文档保存失败，请先处理后再切换");
-      return;
-    }
-
-    try {
-      setCurrentDocument(await readDocumentState(document));
-      setSaveStatus(emptySaveStatus);
-      setAppError(null);
-    } catch (error) {
-      setAppError(toMessage(error));
-    }
-  }, [saveStatus.state]);
+    await openDocumentInTabs(document);
+  }, [openDocumentInTabs]);
 
   const saveDocument = useCallback(async (relativePath: string, content: string) => {
     await writeLakeDocument(relativePath, content);
@@ -906,6 +1051,10 @@ export function AppController() {
   const documents = useMemo(() => workspace?.documents ?? [], [workspace]);
   const directories = useMemo(() => workspace?.directories ?? [], [workspace]);
   const order = useMemo(() => workspace?.order ?? [], [workspace]);
+  const visibleOpenTabs = useMemo(() => openTabs.flatMap((tab) => {
+    const document = documents.find((entry) => entry.path === tab.path);
+    return document ? [{ ...tab, document }] : [];
+  }), [documents, openTabs]);
 
   const moveNode = useCallback(async (sourceId: string, intent: WorkspaceDropIntent) => {
     if (!workspace) {
@@ -927,8 +1076,15 @@ export function AppController() {
 
     const previousWorkspace = workspace;
     const previousCurrentDocument = currentDocument;
+    const previousOpenTabs = openTabs;
+    const previousActiveTabId = activeTabId;
     const optimisticWorkspace = applyWorkspaceMove(workspace, move);
+    const optimisticTabs = rebindOpenTabsForMove(openTabs, optimisticWorkspace, move).tabs;
     setWorkspace(optimisticWorkspace);
+    setOpenTabs(optimisticTabs);
+    if (activeTabId && pathMovesWithResolution(activeTabId, move)) {
+      setActiveTabId(rewriteMovedPath(activeTabId, move));
+    }
     setCurrentDocument(rebindCurrentDocument(currentDocument, optimisticWorkspace, move).document);
 
     try {
@@ -938,15 +1094,23 @@ export function AppController() {
         order: move.order,
       });
       const currentBinding = rebindCurrentDocument(currentDocument, payload, move);
+      const tabBinding = rebindOpenTabsForMove(openTabs, payload, move);
       setWorkspace(payload);
+      setOpenTabs(tabBinding.tabs);
+      if (activeTabId && pathMovesWithResolution(activeTabId, move)) {
+        const nextActiveTabId = rewriteMovedPath(activeTabId, move);
+        setActiveTabId(tabBinding.tabs.some((tab) => tab.id === nextActiveTabId) ? nextActiveTabId : null);
+      }
       setCurrentDocument(currentBinding.document);
-      setAppError(currentBinding.missing ? "移动后找不到当前文档，已关闭编辑区" : null);
+      setAppError(currentBinding.missing || tabBinding.missing ? "移动后找不到当前文档，已关闭编辑区" : null);
     } catch (error) {
       setWorkspace(previousWorkspace);
+      setOpenTabs(previousOpenTabs);
+      setActiveTabId(previousActiveTabId);
       setCurrentDocument(previousCurrentDocument);
       setAppError(toMessage(error));
     }
-  }, [currentDocument, workspace]);
+  }, [activeTabId, currentDocument, openTabs, workspace]);
 
   const beginSidebarResize = useCallback((event: PointerEvent<HTMLDivElement>) => {
     if (sidebarCollapsed) {
@@ -1015,8 +1179,13 @@ export function AppController() {
       <main className="editor-workspace">
         <TopBar
           document={currentDocument?.entry ?? null}
+          openTabs={visibleOpenTabs}
+          activeTabId={activeTabId}
           saveStatus={saveStatus}
           onManualSave={() => setManualSaveRequest((current) => current + 1)}
+          onActivateTab={activateTab}
+          onToggleTabLocked={toggleTabLocked}
+          onCloseTab={closeTab}
           onExportDocument={exportDocument}
           exportBusy={activeAppOperation?.kind === "document-export"}
           onImportSpreadsheetExcel={importSpreadsheetExcel}
@@ -1170,6 +1339,14 @@ function asMultidimensionalTableDocument(document: WorkspaceDocument): Workspace
   return document as WorkspaceDocument & { kind: "multidimensional-table" };
 }
 
+function createOpenDocumentTab(document: WorkspaceDocument): OpenDocumentTab {
+  return {
+    id: document.path,
+    path: document.path,
+    locked: false,
+  };
+}
+
 async function workspaceSpreadsheetExcelEntries(workspace: WorkspacePayload): Promise<WorkspaceZipEntryInput[]> {
   const tree = buildDocumentTree(workspace.documents, workspace.directories, workspace.order);
   const entries: WorkspaceZipEntryInput[] = [];
@@ -1254,6 +1431,29 @@ function rebindCurrentDocument(
     : { document: null, missing: true };
 }
 
+function rebindOpenTabsForMove(
+  tabs: OpenDocumentTab[],
+  workspace: WorkspacePayload,
+  move: WorkspaceMoveResolution,
+): { tabs: OpenDocumentTab[]; missing: boolean } {
+  if (!move.ok) {
+    return { tabs, missing: false };
+  }
+
+  let missing = false;
+  const nextTabs = tabs.flatMap((tab) => {
+    const nextPath = pathMovesWithResolution(tab.path, move) ? rewriteMovedPath(tab.path, move) : tab.path;
+    const nextDocument = workspace.documents.find((entry) => entry.path === nextPath);
+    if (!nextDocument) {
+      missing = true;
+      return [];
+    }
+    return [{ ...tab, id: nextPath, path: nextPath }];
+  });
+
+  return { tabs: nextTabs, missing };
+}
+
 function rebindDocumentEntry(
   currentDocument: CurrentDocumentState,
   entry: WorkspaceDocument,
@@ -1275,6 +1475,22 @@ function documentExtension(document: WorkspaceDocument): string {
     return ".dbtable.json";
   }
   return ".lake";
+}
+
+function rewriteOpenTabs(tabs: OpenDocumentTab[], fromPath: string, toPath: string): OpenDocumentTab[] {
+  return tabs.map((tab) => (
+    tab.path === fromPath ? { ...tab, id: toPath, path: toPath } : tab
+  ));
+}
+
+function rewriteOpenTabsByPrefix(tabs: OpenDocumentTab[], fromPath: string, toPath: string): OpenDocumentTab[] {
+  return tabs.map((tab) => {
+    if (!isSameOrChildPath(tab.path, fromPath)) {
+      return tab;
+    }
+    const nextPath = replacePathPrefix(tab.path, fromPath, toPath);
+    return { ...tab, id: nextPath, path: nextPath };
+  });
 }
 
 function replacePathPrefix(path: string, fromPath: string, toPath: string): string {
