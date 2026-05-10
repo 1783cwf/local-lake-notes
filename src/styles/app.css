@@ -776,6 +776,7 @@ button {
 .top-bar__title {
   min-width: 0;
   flex: 1;
+  overflow: hidden;
 }
 
 .top-bar__title h1 {
@@ -822,10 +823,15 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
-  max-width: min(720px, 100%);
+  max-width: 100%;
   min-height: 42px;
   overflow-x: auto;
-  scrollbar-width: thin;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.document-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .document-tab {
@@ -1682,9 +1688,30 @@ button {
   padding: 7px 9px;
 }
 
-.multitable-grid__cell--row-spacer {
+.multitable-grid__cell--row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: #f8fafc;
-  pointer-events: none;
+}
+
+.multitable-grid__cell--row-actions button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  color: #9aa3ad;
+  background: transparent;
+  cursor: pointer;
+}
+
+.multitable-grid__cell--row-actions button:hover,
+.multitable-grid__cell--row-actions button:focus-visible {
+  color: #d14343;
+  background: #fff1f0;
+  outline: none;
 }
 
 .multitable-grid__add-field,
@@ -3129,6 +3156,17 @@ button {
 .multitable-record-detail__finish:hover,
 .multitable-detail-field-panel__actions .is-primary:hover {
   background: #00a85f !important;
+}
+
+.multitable-record-detail__footer .is-danger {
+  margin-right: auto;
+  border-color: #ffe1de;
+  color: #d14343;
+}
+
+.multitable-record-detail__footer .is-danger:hover {
+  border-color: #ffccc7;
+  background: #fff1f0;
 }
 
 .multitable-detail-field-panel__actions .is-danger {

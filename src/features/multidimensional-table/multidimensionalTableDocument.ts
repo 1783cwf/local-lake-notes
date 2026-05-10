@@ -409,6 +409,16 @@ export function updateMultidimensionalRecordBody(
   };
 }
 
+export function deleteMultidimensionalRecord(
+  document: MultidimensionalTableDocument,
+  recordId: string,
+): MultidimensionalTableDocument {
+  return {
+    ...document,
+    records: document.records.filter((record) => record.id !== recordId),
+  };
+}
+
 export function deleteMultidimensionalField(
   document: MultidimensionalTableDocument,
   fieldId: string,

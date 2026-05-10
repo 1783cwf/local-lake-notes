@@ -3,6 +3,7 @@ import {
   createDefaultMultidimensionalTableDocument,
   createEmptyMultidimensionalTableRecord,
   deleteMultidimensionalField,
+  deleteMultidimensionalRecord,
   formatTimeFieldValue,
   parseMultidimensionalTableDocument,
   serializeMultidimensionalTableDocument,
@@ -175,4 +176,15 @@ test("记录正文会随记录一起保存", () => {
 
   expect(nextDocument.records[0].body).toBe("<p>正文内容</p>");
   expect(serializeMultidimensionalTableDocument(nextDocument)).toContain("正文内容");
+});
+
+test("可以按记录 id 删除多维表格记录", () => {
+  const source = createDefaultMultidimensionalTableDocument();
+  const firstRecord = createEmptyMultidimensionalTableRecord(source.fields, { title: "保留记录" });
+  const secondRecord = createEmptyMultidimensionalTableRecord(source.fields, { title: "删除记录" });
+
+  const nextDocument = deleteMultidimensionalRecord({ ...source, records: [firstRecord, secondRecord] }, secondRecord.id);
+
+  expect(nextDocument.records).toHaveLength(1);
+  expect(nextDocument.records[0].id).toBe(firstRecord.id);
 });

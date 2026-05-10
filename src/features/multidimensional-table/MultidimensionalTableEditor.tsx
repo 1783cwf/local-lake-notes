@@ -10,6 +10,7 @@ import { MultidimensionalTableBoard } from "./MultidimensionalTableBoard";
 import { MultidimensionalTableGrid } from "./MultidimensionalTableGrid";
 import {
   createEmptyMultidimensionalTableRecord,
+  deleteMultidimensionalRecord,
   formatTimeFieldValue,
   optionById,
   parseMultidimensionalTableDocument,
@@ -263,6 +264,9 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
       ],
     });
   }, [commitChange]);
+  const deleteRecord = useCallback((recordId: string) => {
+    commitChange(deleteMultidimensionalRecord(tableDocumentRef.current, recordId));
+  }, [commitChange]);
   const setActiveViewFilterRules = useCallback((filterRules: MultidimensionalTableFilterRule[]) => {
     const currentDocument = tableDocumentRef.current;
     const currentActiveViewId = currentDocument.activeViewId;
@@ -485,6 +489,7 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
           records={visibleRecords}
           onChange={commitChange}
           onAddRecord={addRecord}
+          onDeleteRecord={deleteRecord}
           onUploadFile={onUploadFile}
           onDownloadFile={onDownloadFile}
         />
@@ -494,6 +499,7 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
           records={visibleRecords}
           onChange={commitChange}
           onAddRecord={addRecord}
+          onDeleteRecord={deleteRecord}
           onUploadImage={onUploadImage}
           onUploadFile={onUploadFile}
           onDownloadFile={onDownloadFile}
