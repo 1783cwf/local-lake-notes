@@ -4,10 +4,15 @@ import type { FileDownloadInput, UploadImageInput, UploadImageOutput } from "../
 import type { LakeEditorInstance } from "../lake-editor/editorTypes";
 import { createLakeEditor, destroyLakeEditor, hasLakeEditorRuntime } from "../lake-editor/lakeEditorAdapter";
 import {
+  collectResourceReferences,
+  createLakeResourcePlaceholder,
   dehydrateLakeResources,
-  hydrateLakeResources,
+  hydrateLakeResourcesWithPreviews,
+  normalizeResourcePreviewConcurrency,
   parseResourceReference,
   resourceReferenceFromUpload,
+  runResourcePreviewQueue,
+  rewriteLakeResourceUrls,
   type ResourcePreview,
 } from "../lake-editor/resourceReference";
 import { createEditorFileUpload, createEditorImageUpload } from "../lake-editor/uploadAdapter";
@@ -20,6 +25,7 @@ interface MultidimensionalTableRichTextEditorProps {
   onUploadFile?: (input: UploadImageInput) => Promise<UploadImageOutput>;
   onDownloadFile?: (input: FileDownloadInput) => Promise<void>;
   onPrepareResourcePreview?: (resourceRef: string) => Promise<string>;
+  resourcePreviewConcurrency?: number;
 }
 
 export function MultidimensionalTableRichTextEditor({
@@ -30,6 +36,7 @@ export function MultidimensionalTableRichTextEditor({
   onUploadFile,
   onDownloadFile,
   onPrepareResourcePreview,
+  resourcePreviewConcurrency,
 }: MultidimensionalTableRichTextEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<LakeEditorInstance | null>(null);
@@ -124,32 +131,57 @@ export function MultidimensionalTableRichTextEditor({
 
     let cancelled = false;
     previewsRef.current = [];
-    const hydrateContent = onPrepareResourcePreview
-      ? hydrateLakeResources(value, async (resourceRef) => {
-        const previewUrl = await onPrepareResourcePreview(resourceRef);
-        rememberPreview(resourceRef, previewUrl);
-        return previewUrl;
-      })
-      : Promise.resolve(value);
+    const resourceRefs = Array.from(new Set(collectResourceReferences(value, { includeFileCards: true })));
+    const placeholderPreviews = resourceRefs.map((resourceRef) => ({
+      resourceRef,
+      previewUrl: createLakeResourcePlaceholder(resourceRef),
+    }));
+    previewsRef.current = placeholderPreviews;
+    settingDocumentRef.current = true;
+    editor.setDocument("text/lake", hydrateLakeResourcesWithPreviews(value, placeholderPreviews, { includeFileCards: true }));
+    settingDocumentRef.current = false;
+    lastValueRef.current = value;
 
-    void hydrateContent.then((hydratedContent) => {
-      if (cancelled || editorRef.current !== editor) {
-        return;
-      }
-      settingDocumentRef.current = true;
-      editor.setDocument("text/lake", hydratedContent);
-      settingDocumentRef.current = false;
-      lastValueRef.current = value;
-    }).catch((error) => {
-      if (!cancelled) {
-        setLoadError(error instanceof Error ? error.message : String(error));
-      }
-    });
+    if (!onPrepareResourcePreview) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void runResourcePreviewQueue(
+      resourceRefs,
+      normalizeResourcePreviewConcurrency(resourcePreviewConcurrency),
+      async (resourceRef) => {
+        try {
+          const previewUrl = await onPrepareResourcePreview(resourceRef);
+          if (cancelled || editorRef.current !== editor) {
+            return;
+          }
+          const previousPreview = previewsRef.current.find((preview) => (
+            preview.resourceRef === resourceRef
+          ))?.previewUrl;
+          rememberPreview(resourceRef, previewUrl);
+          const currentContent = editor.getDocument("text/lake");
+          const nextContent = previousPreview
+            ? rewriteLakeResourceUrls(currentContent, (resourceUrl) => (
+              resourceUrl === previousPreview ? previewUrl : resourceUrl
+            ), { includeFileCards: true })
+            : hydrateLakeResourcesWithPreviews(currentContent, previewsRef.current, { includeFileCards: true });
+          settingDocumentRef.current = true;
+          editor.setDocument("text/lake", nextContent);
+          settingDocumentRef.current = false;
+        } catch (error) {
+          if (!cancelled) {
+            setLoadError(error instanceof Error ? error.message : String(error));
+          }
+        }
+      },
+    );
 
     return () => {
       cancelled = true;
     };
-  }, [onPrepareResourcePreview, rememberPreview, value]);
+  }, [onPrepareResourcePreview, rememberPreview, resourcePreviewConcurrency, value]);
 
   if (loadError) {
     return (

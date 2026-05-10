@@ -55,6 +55,7 @@ interface MultidimensionalTableBoardProps {
   onUploadFile?: (input: UploadImageInput) => Promise<UploadImageOutput>;
   onDownloadFile?: (input: FileDownloadInput) => Promise<void>;
   onPrepareResourcePreview?: (resourceRef: string) => Promise<string>;
+  resourcePreviewConcurrency?: number;
 }
 
 const unassignedColumnId = "__unassigned__";
@@ -69,6 +70,7 @@ export function MultidimensionalTableBoard({
   onUploadFile,
   onDownloadFile,
   onPrepareResourcePreview,
+  resourcePreviewConcurrency,
 }: MultidimensionalTableBoardProps) {
   const boardView = document.views.find((view) => view.id === document.activeViewId && view.type === "board") ??
     document.views.find((view) => view.type === "board");
@@ -153,6 +155,7 @@ export function MultidimensionalTableBoard({
             onUploadFile={onUploadFile}
             onDownloadFile={onDownloadFile}
             onPrepareResourcePreview={onPrepareResourcePreview}
+            resourcePreviewConcurrency={resourcePreviewConcurrency}
           />
         ) : null}
       </div>
@@ -356,6 +359,7 @@ function RecordDetailPanel({
   onUploadFile,
   onDownloadFile,
   onPrepareResourcePreview,
+  resourcePreviewConcurrency,
 }: {
   document: MultidimensionalTableDocument;
   record: MultidimensionalTableRecord;
@@ -369,6 +373,7 @@ function RecordDetailPanel({
   onUploadFile?: (input: UploadImageInput) => Promise<UploadImageOutput>;
   onDownloadFile?: (input: FileDownloadInput) => Promise<void>;
   onPrepareResourcePreview?: (resourceRef: string) => Promise<string>;
+  resourcePreviewConcurrency?: number;
 }) {
   const [fieldPanelOpen, setFieldPanelOpen] = useState(false);
   const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
@@ -515,6 +520,7 @@ function RecordDetailPanel({
               onUploadFile={onUploadFile}
               onDownloadFile={onDownloadFile}
               onPrepareResourcePreview={onPrepareResourcePreview}
+              resourcePreviewConcurrency={resourcePreviewConcurrency}
             />
           )}
         </section>
@@ -529,6 +535,7 @@ function RecordDetailPanel({
           onUploadFile={onUploadFile}
           onDownloadFile={onDownloadFile}
           onPrepareResourcePreview={onPrepareResourcePreview}
+          resourcePreviewConcurrency={resourcePreviewConcurrency}
         />,
         window.document.body,
       ) : null}
@@ -551,6 +558,7 @@ function RecordBodyFullscreenEditor({
   onUploadFile,
   onDownloadFile,
   onPrepareResourcePreview,
+  resourcePreviewConcurrency,
 }: {
   title: string;
   value: string;
@@ -560,6 +568,7 @@ function RecordBodyFullscreenEditor({
   onUploadFile?: (input: UploadImageInput) => Promise<UploadImageOutput>;
   onDownloadFile?: (input: FileDownloadInput) => Promise<void>;
   onPrepareResourcePreview?: (resourceRef: string) => Promise<string>;
+  resourcePreviewConcurrency?: number;
 }) {
   return (
     <div className="multitable-record-body-fullscreen" role="dialog" aria-modal="true" aria-label="正文全屏编辑">
@@ -582,6 +591,7 @@ function RecordBodyFullscreenEditor({
             onUploadFile={onUploadFile}
             onDownloadFile={onDownloadFile}
             onPrepareResourcePreview={onPrepareResourcePreview}
+            resourcePreviewConcurrency={resourcePreviewConcurrency}
           />
         </div>
       </section>

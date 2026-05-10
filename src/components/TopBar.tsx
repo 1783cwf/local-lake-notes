@@ -26,6 +26,7 @@ interface TopBarProps {
   onExportSpreadsheetExcel?: () => void;
   defaultExportResourceStrategy?: ExportResourceStrategy;
   defaultSignedUrlTtlSeconds?: number;
+  signedUrlExportEnabled?: boolean;
   exportBusy?: boolean;
   spreadsheetExcelBusy?: boolean;
 }
@@ -45,6 +46,7 @@ export function TopBar({
   onExportSpreadsheetExcel,
   defaultExportResourceStrategy = "bundle",
   defaultSignedUrlTtlSeconds = 24 * 60 * 60,
+  signedUrlExportEnabled = true,
   exportBusy = false,
   spreadsheetExcelBusy = false,
 }: TopBarProps) {
@@ -77,6 +79,11 @@ export function TopBar({
   useEffect(() => {
     setResourceStrategy(defaultExportResourceStrategy);
   }, [defaultExportResourceStrategy]);
+  useEffect(() => {
+    if (!signedUrlExportEnabled && resourceStrategy === "signed-url") {
+      setResourceStrategy("bundle");
+    }
+  }, [resourceStrategy, signedUrlExportEnabled]);
   useEffect(() => {
     setTtlSeconds(defaultSignedUrlTtlSeconds);
   }, [defaultSignedUrlTtlSeconds]);
@@ -340,6 +347,7 @@ export function TopBar({
                       name="export-resource-strategy"
                       checked={resourceStrategy === "signed-url"}
                       onChange={() => setResourceStrategy("signed-url")}
+                      disabled={!signedUrlExportEnabled}
                     />
                     短时签名链接
                   </label>

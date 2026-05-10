@@ -140,23 +140,15 @@ fn renames_document_child_container_with_spreadsheet() {
     .unwrap();
 
     let current_path = resolve_existing_spreadsheet_path(dir.path(), "测试表格1.json").unwrap();
-    let renamed = rename_document_on_disk(
-        dir.path(),
-        current_path,
-        "测试表格1.json",
-        "测试表格2.json",
-    )
-    .unwrap();
+    let renamed =
+        rename_document_on_disk(dir.path(), current_path, "测试表格1.json", "测试表格2.json")
+            .unwrap();
 
     assert_eq!(renamed.target_path, "测试表格2.json");
     assert_eq!(renamed.target_child_container_path, "测试表格2");
     assert!(renamed.moved_child_container);
     assert!(dir.path().join("测试表格2.json").exists());
-    assert!(dir
-        .path()
-        .join("测试表格2")
-        .join("测试文件2.lake")
-        .exists());
+    assert!(dir.path().join("测试表格2").join("测试文件2.lake").exists());
     assert!(dir
         .path()
         .join("测试表格2")
@@ -173,13 +165,9 @@ fn rejects_renaming_document_when_target_child_container_exists() {
     fs::create_dir_all(dir.path().join("测试表格2")).unwrap();
 
     let current_path = resolve_existing_spreadsheet_path(dir.path(), "测试表格1.json").unwrap();
-    let error = rename_document_on_disk(
-        dir.path(),
-        current_path,
-        "测试表格1.json",
-        "测试表格2.json",
-    )
-    .unwrap_err();
+    let error =
+        rename_document_on_disk(dir.path(), current_path, "测试表格1.json", "测试表格2.json")
+            .unwrap_err();
 
     assert!(matches!(error, AppError::WorkspaceItemConflict(_)));
     assert!(dir.path().join("测试表格1.json").exists());
@@ -309,14 +297,8 @@ fn reads_only_external_xlsx_bytes_for_excel_import() {
 
 #[test]
 fn sanitizes_file_stems_without_dropping_chinese_text() {
-    assert_eq!(
-        safe_file_stem(" 测试 文件/1 ").unwrap(),
-        "测试-文件-1"
-    );
-    assert_eq!(
-        safe_directory_name(" 测试 目录/1 ").unwrap(),
-        "测试-目录-1"
-    );
+    assert_eq!(safe_file_stem(" 测试 文件/1 ").unwrap(), "测试-文件-1");
+    assert_eq!(safe_directory_name(" 测试 目录/1 ").unwrap(), "测试-目录-1");
 }
 
 #[test]
