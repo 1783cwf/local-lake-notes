@@ -50,6 +50,7 @@ interface MultidimensionalTableBoardProps {
   records?: MultidimensionalTableRecord[];
   onChange: (document: MultidimensionalTableDocument) => void;
   onAddRecord: (values?: Record<string, MultidimensionalTableFieldValue>) => void;
+  onDeleteRecord: (recordId: string) => void;
   onUploadImage?: (input: UploadImageInput) => Promise<UploadImageOutput>;
   onUploadFile?: (input: UploadImageInput) => Promise<UploadImageOutput>;
   onDownloadFile?: (input: FileDownloadInput) => Promise<void>;
@@ -63,6 +64,7 @@ export function MultidimensionalTableBoard({
   records = document.records,
   onChange,
   onAddRecord,
+  onDeleteRecord,
   onUploadImage,
   onUploadFile,
   onDownloadFile,
@@ -143,6 +145,10 @@ export function MultidimensionalTableBoard({
             onChange={onChange}
             onClose={() => setSelectedRecordId(null)}
             onAddNext={() => onAddRecord({ [groupField.id]: selectedRecord.values[groupField.id] ?? "" })}
+            onDelete={() => {
+              onDeleteRecord(selectedRecord.id);
+              setSelectedRecordId(null);
+            }}
             onUploadImage={onUploadImage}
             onUploadFile={onUploadFile}
             onDownloadFile={onDownloadFile}
@@ -345,6 +351,7 @@ function RecordDetailPanel({
   onChange,
   onClose,
   onAddNext,
+  onDelete,
   onUploadImage,
   onUploadFile,
   onDownloadFile,
@@ -357,6 +364,7 @@ function RecordDetailPanel({
   onChange: (document: MultidimensionalTableDocument) => void;
   onClose: () => void;
   onAddNext: () => void;
+  onDelete: () => void;
   onUploadImage?: (input: UploadImageInput) => Promise<UploadImageOutput>;
   onUploadFile?: (input: UploadImageInput) => Promise<UploadImageOutput>;
   onDownloadFile?: (input: FileDownloadInput) => Promise<void>;
@@ -525,6 +533,7 @@ function RecordDetailPanel({
         window.document.body,
       ) : null}
       <footer className="multitable-record-detail__footer">
+        <button type="button" className="is-danger" onClick={onDelete}>删除记录</button>
         <button type="button" onClick={onAddNext}>添加下一个</button>
         <button type="button" className="multitable-record-detail__finish" onClick={onClose}>完成</button>
       </footer>

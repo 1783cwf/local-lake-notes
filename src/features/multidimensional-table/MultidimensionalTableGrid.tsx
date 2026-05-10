@@ -1,4 +1,4 @@
-import { ChevronDown, Plus } from "lucide-react";
+import { ChevronDown, Plus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 import type { FileDownloadInput, UploadImageInput, UploadImageOutput } from "../../app/appState";
@@ -23,6 +23,7 @@ interface MultidimensionalTableGridProps {
   records?: MultidimensionalTableRecord[];
   onChange: (document: MultidimensionalTableDocument) => void;
   onAddRecord: (values?: Record<string, MultidimensionalTableFieldValue>) => void;
+  onDeleteRecord: (recordId: string) => void;
   onUploadFile?: (input: UploadImageInput) => Promise<UploadImageOutput>;
   onDownloadFile?: (input: FileDownloadInput) => Promise<void>;
 }
@@ -32,6 +33,7 @@ export function MultidimensionalTableGrid({
   records = document.records,
   onChange,
   onAddRecord,
+  onDeleteRecord,
   onUploadFile,
   onDownloadFile,
 }: MultidimensionalTableGridProps) {
@@ -89,7 +91,11 @@ export function MultidimensionalTableGrid({
                 />
               </div>
             ))}
-            <div className="multitable-grid__cell multitable-grid__cell--row-spacer" aria-hidden="true" />
+            <div className="multitable-grid__cell multitable-grid__cell--row-actions">
+              <button type="button" aria-label={`删除记录 ${recordTitle(record, document.fields)}`} onClick={() => onDeleteRecord(record.id)}>
+                <Trash2 size={15} />
+              </button>
+            </div>
           </div>
         ))}
       </div>
@@ -99,6 +105,12 @@ export function MultidimensionalTableGrid({
       </button>
     </div>
   );
+}
+
+function recordTitle(record: MultidimensionalTableRecord, fields: MultidimensionalTableField[]): string {
+  const primaryField = fields.find((field) => field.primary) ?? fields[0];
+  const value = primaryField ? record.values[primaryField.id] : "";
+  return typeof value === "string" && value.trim() ? value.trim() : "未命名记录";
 }
 
 function FieldHeader({

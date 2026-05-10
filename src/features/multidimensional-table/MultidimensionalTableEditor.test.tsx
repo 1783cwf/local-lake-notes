@@ -231,6 +231,23 @@ test("表格视图编辑文本字段后会防抖保存", async () => {
   }, { timeout: 1400 });
 });
 
+test("表格视图可以删除记录并保存", async () => {
+  const user = userEvent.setup();
+  let savedContent = "";
+  const onSave = vi.fn(async (_path: string, content: string) => {
+    savedContent = content;
+  });
+  renderEditor({ onSave });
+
+  await user.click(screen.getByRole("tab", { name: /表格/ }));
+  await user.click(screen.getByRole("button", { name: /删除记录 共性公文迁移到湘潭/ }));
+
+  expect(screen.queryByDisplayValue("共性公文迁移到湘潭")).not.toBeInTheDocument();
+  await waitFor(() => {
+    expect(JSON.parse(savedContent).records).toHaveLength(0);
+  }, { timeout: 1400 });
+});
+
 test("表格视图可以新增字段并修改字段分类", async () => {
   const user = userEvent.setup();
   const onSave = vi.fn(async () => undefined);
@@ -273,7 +290,8 @@ test("字段配置可以修改时间格式并删除字段", async () => {
   }, { timeout: 1400 });
   expect(document.querySelectorAll(".multitable-grid__header .multitable-grid__cell--header")).toHaveLength(5);
   expect(document.querySelectorAll(".multitable-grid__row:first-child .multitable-grid__cell")).toHaveLength(6);
-  expect(document.querySelector(".multitable-grid__row:first-child .multitable-grid__cell--row-spacer")).toBeInTheDocument();
+  expect(document.querySelector(".multitable-grid__row:first-child .multitable-grid__cell--row-actions")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /删除记录 共性公文迁移到湘潭/ })).toBeInTheDocument();
 });
 
 test("单选和多选字段可以用选项面板选择并新增选项", async () => {
@@ -340,6 +358,24 @@ test("看板新增记录会写入当前分组状态", async () => {
 
   await waitFor(() => {
     expect(onSave).toHaveBeenCalledWith("project.dbtable.json", expect.stringContaining("status-single-1"));
+  }, { timeout: 1400 });
+});
+
+test("看板详情可以删除记录并关闭详情", async () => {
+  const user = userEvent.setup();
+  let savedContent = "";
+  const onSave = vi.fn(async (_path: string, content: string) => {
+    savedContent = content;
+  });
+  renderEditor({ onSave });
+
+  await user.click(screen.getByRole("button", { name: /共性公文迁移到湘潭/ }));
+  await user.click(screen.getByRole("button", { name: "删除记录" }));
+
+  expect(screen.queryByRole("complementary", { name: "记录详情" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /共性公文迁移到湘潭/ })).not.toBeInTheDocument();
+  await waitFor(() => {
+    expect(JSON.parse(savedContent).records).toHaveLength(0);
   }, { timeout: 1400 });
 });
 

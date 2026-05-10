@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Cloud, Download, FileSpreadsheet, FileText, Grid2X2, Loader2, Pin, Save, Share2, X } from "lucide-react";
 
 import type { OpenDocumentTab, SaveStatus } from "../app/appState";
@@ -55,6 +55,7 @@ export function TopBar({
   const [tabMenu, setTabMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
   const [resourceStrategy, setResourceStrategy] = useState<ExportResourceStrategy>(defaultExportResourceStrategy);
   const [ttlSeconds, setTtlSeconds] = useState(defaultSignedUrlTtlSeconds);
+  const activeTabRef = useRef<HTMLDivElement | null>(null);
   const ttlOptions = Array.from(new Set([ttlSeconds, 3600, 24 * 3600, 7 * 24 * 3600])).sort((left, right) => left - right);
   const menuTab = tabMenu ? openTabs.find((tab) => tab.id === tabMenu.tabId) : null;
 
@@ -66,6 +67,13 @@ export function TopBar({
   useEffect(() => {
     setTabMenu(null);
   }, [activeTabId, openTabs]);
+  useEffect(() => {
+    const activeTabElement = activeTabRef.current;
+    // 活动标签可能在横向滚动区外，切换后主动拉回可见区域，避免只露出半截标签。
+    if (activeTabElement && typeof activeTabElement.scrollIntoView === "function") {
+      activeTabElement.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }, [activeTabId, openTabs.length]);
   useEffect(() => {
     setResourceStrategy(defaultExportResourceStrategy);
   }, [defaultExportResourceStrategy]);
@@ -97,6 +105,7 @@ export function TopBar({
               return (
                 <div
                   key={tab.id}
+                  ref={selected ? activeTabRef : null}
                   className={`document-tab${selected ? " is-active" : ""}${tab.locked ? " is-locked" : ""}`}
                   role="tab"
                   tabIndex={0}
