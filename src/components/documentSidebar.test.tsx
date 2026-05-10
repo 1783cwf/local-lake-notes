@@ -150,7 +150,7 @@ test("可以按文档名称搜索文档", async () => {
       {
         id: "notes/product.lake",
         path: "notes/product.lake",
-        name: "产品方案",
+        name: "测试文件1",
         parentPath: "notes",
         size: 1,
         kind: "lake",
@@ -158,7 +158,7 @@ test("可以按文档名称搜索文档", async () => {
       {
         id: "meeting/record.lake",
         path: "meeting/record.lake",
-        name: "会议记录",
+        name: "测试文件2",
         parentPath: "meeting",
         size: 1,
         kind: "lake",
@@ -166,15 +166,15 @@ test("可以按文档名称搜索文档", async () => {
     ],
   });
 
-  await user.type(screen.getByRole("searchbox", { name: "搜索文档" }), "会议");
+  await user.type(screen.getByRole("searchbox", { name: "搜索文档" }), "测试文件2");
 
-  expect(screen.getByRole("treeitem", { name: /会议记录/ })).toBeInTheDocument();
+  expect(screen.getByRole("treeitem", { name: /测试文件2/ })).toBeInTheDocument();
   expect(screen.getByRole("treeitem", { name: /meeting/ })).toBeInTheDocument();
-  expect(screen.queryByRole("treeitem", { name: /产品方案/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("treeitem", { name: /测试文件1/ })).not.toBeInTheDocument();
 
   await user.click(screen.getByRole("button", { name: "清空搜索" }));
 
-  expect(screen.getByRole("treeitem", { name: /产品方案/ })).toBeInTheDocument();
+  expect(screen.getByRole("treeitem", { name: /测试文件1/ })).toBeInTheDocument();
 });
 
 test("表格文档可以搜索并通过目录入口创建", async () => {
@@ -187,7 +187,7 @@ test("表格文档可以搜索并通过目录入口创建", async () => {
       {
         id: "notes/budget.json",
         path: "notes/budget.json",
-        name: "预算表",
+        name: "测试表格1",
         parentPath: "notes",
         size: 1,
         kind: "spreadsheet",
@@ -195,9 +195,9 @@ test("表格文档可以搜索并通过目录入口创建", async () => {
     ],
   });
 
-  await user.type(screen.getByRole("searchbox", { name: "搜索文档" }), "预算");
+  await user.type(screen.getByRole("searchbox", { name: "搜索文档" }), "测试表格1");
 
-  expect(screen.getByRole("treeitem", { name: /预算表/ })).toHaveClass("is-current");
+  expect(screen.getByRole("treeitem", { name: /测试表格1/ })).toHaveClass("is-current");
 
   await user.click(screen.getAllByRole("button", { name: "新建表格" })[1]);
 
@@ -214,7 +214,7 @@ test("多维表格文档可以搜索并通过目录入口创建", async () => {
       {
         id: "notes/project.dbtable.json",
         path: "notes/project.dbtable.json",
-        name: "上线记录",
+        name: "测试表格2",
         parentPath: "notes",
         size: 1,
         kind: "multidimensional-table",
@@ -222,9 +222,9 @@ test("多维表格文档可以搜索并通过目录入口创建", async () => {
     ],
   });
 
-  await user.type(screen.getByRole("searchbox", { name: "搜索文档" }), "上线");
+  await user.type(screen.getByRole("searchbox", { name: "搜索文档" }), "测试表格2");
 
-  expect(screen.getByRole("treeitem", { name: /上线记录/ })).toHaveClass("is-current");
+  expect(screen.getByRole("treeitem", { name: /测试表格2/ })).toHaveClass("is-current");
 
   await user.click(screen.getAllByRole("button", { name: "新建多维表格" })[1]);
 
@@ -284,10 +284,10 @@ test("按指针位置计算 before、inside 和 after 落点意图", () => {
 test("文档行中部也可作为拖入子级落点", () => {
   renderSidebar({
     currentPath: "a.lake",
-    documents: [{ id: "a.lake", path: "a.lake", name: "阿里云", parentPath: "", size: 1, kind: "lake" }],
+    documents: [{ id: "a.lake", path: "a.lake", name: "测试文件1", parentPath: "", size: 1, kind: "lake" }],
   });
   const flatNodes = flattenDocumentTree(buildDocumentTree(
-    [{ id: "a.lake", path: "a.lake", name: "阿里云", parentPath: "", size: 1, kind: "lake" }],
+    [{ id: "a.lake", path: "a.lake", name: "测试文件1", parentPath: "", size: 1, kind: "lake" }],
     [],
   ));
   const documentRow = screen.getByTestId("tree-row-document:a.lake");

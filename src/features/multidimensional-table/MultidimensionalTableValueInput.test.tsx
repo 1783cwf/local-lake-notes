@@ -33,13 +33,13 @@ test("日期时间格式同时显示日历和时分选择", async () => {
       field={timeField("yyyy-mm-dd hh:mm")}
       value="2026-05-07 12:30"
       onChange={onChange}
-      ariaLabel="上线时间"
+      ariaLabel="测试时间"
     />,
   );
 
-  await user.click(screen.getByLabelText("打开上线时间选择器"));
+  await user.click(screen.getByLabelText("打开测试时间选择器"));
 
-  expect(screen.getByRole("dialog", { name: "上线时间选择器" })).toBeInTheDocument();
+  expect(screen.getByRole("dialog", { name: "测试时间选择器" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "选择日期 2026-05-07" })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getByRole("button", { name: "选择小时 12" })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getByRole("button", { name: "选择分钟 30" })).toHaveAttribute("aria-pressed", "true");

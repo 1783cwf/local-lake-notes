@@ -27,8 +27,8 @@ test("Lake 内容可以导出为 Markdown", () => {
 
 test("HTML 导出保留 Lake 内容和打印样式", async () => {
   const fileValue = `data:${encodeURIComponent(JSON.stringify({
-    name: "测试附件.zip",
-    src: "file:///tmp/测试附件.zip",
+    name: "测试文件1.zip",
+    src: "file:///tmp/测试文件1.zip",
     size: 35 * 1024,
   }))}`;
   const html = await lakeDocumentToHtml(
@@ -44,7 +44,7 @@ test("HTML 导出保留 Lake 内容和打印样式", async () => {
   expect(html).toContain("yuque-lake-export-outline-width");
   expect(html).toContain("href=\"#heading-hello\"");
   expect(html).toContain("lake-export-attachment");
-  expect(html).toContain("测试附件.zip");
+  expect(html).toContain("测试文件1.zip");
   expect(html).toContain("(35 kB)");
   expect(html).toContain("<p class=\"ne-p\">world</p>");
 });
@@ -55,9 +55,9 @@ test("短时签名 HTML 导出会重写图片和附件链接", async () => {
     bucket: "yuque",
     key: "files/a.pdf",
     kind: "file",
-    name: "资料.pdf",
+    name: "测试文件1.pdf",
   });
-  const fileValue = `data:${encodeURIComponent(JSON.stringify({ src: fileRef, name: "资料.pdf" }))}`;
+  const fileValue = `data:${encodeURIComponent(JSON.stringify({ src: fileRef, name: "测试文件1.pdf" }))}`;
   const html = await lakeDocumentToHtmlWithResources(
     "标题",
     `<p><img src="${imageRef}" alt="截图"></p><card name="file" value="${fileValue}"></card>`,
@@ -70,7 +70,7 @@ test("短时签名 HTML 导出会重写图片和附件链接", async () => {
 
   expect(html).toContain("资源链接有效期：1 小时");
   expect(html).toContain("https://signed.example/截图");
-  expect(html).toContain("https://signed.example/资料.pdf");
+  expect(html).toContain("https://signed.example/测试文件1.pdf");
 });
 
 test("短时签名 HTML 导出可将图片内嵌为 base64 并保留附件签名链接", async () => {
@@ -79,9 +79,9 @@ test("短时签名 HTML 导出可将图片内嵌为 base64 并保留附件签名
     bucket: "yuque",
     key: "files/a.pdf",
     kind: "file",
-    name: "资料.pdf",
+    name: "测试文件1.pdf",
   });
-  const fileValue = `data:${encodeURIComponent(JSON.stringify({ src: fileRef, name: "资料.pdf" }))}`;
+  const fileValue = `data:${encodeURIComponent(JSON.stringify({ src: fileRef, name: "测试文件1.pdf" }))}`;
   const html = await lakeDocumentToHtmlWithResources(
     "标题",
     `<p><img src="${imageRef}" alt="截图"></p><card name="file" value="${fileValue}"></card>`,
@@ -95,7 +95,7 @@ test("短时签名 HTML 导出可将图片内嵌为 base64 并保留附件签名
   );
 
   expect(html).toContain("src=\"data:image/png;base64,QQ==\"");
-  expect(html).toContain("https://signed.example/资料.pdf");
+  expect(html).toContain("https://signed.example/测试文件1.pdf");
   expect(html).not.toContain("https://signed.example/截图");
 });
 
@@ -105,17 +105,17 @@ test("短时签名 HTML 导出会把公共 URL 按资源规则重写", async () 
     "标题",
     [
       "<p>",
-      "<img src=\"https://oss.weistuday.com:16666/yuque/images/2026/05/a.png\" alt=\"截图.png\">",
+      "<img src=\"https://oss.example.test/yuque/images/2026/05/a.png\" alt=\"截图.png\">",
       "</p>",
       "<p>",
-      "<a href=\"https://oss.weistuday.com:16666/yuque/files/2026/04/test-file.pdf\">测试资料.pdf</a>",
+      "<a href=\"https://oss.example.test/yuque/files/2026/04/test-file.pdf\">测试文件2.pdf</a>",
       "</p>",
     ].join(""),
     {
       strategy: "signed-url",
       signedUrlTtlSeconds: 3600,
       bucket: "yuque",
-      publicBaseUrl: "https://oss.weistuday.com:16666/yuque",
+      publicBaseUrl: "https://oss.example.test/yuque",
       imagePrefix: "images",
       filePrefix: "files",
       signResource: async (resourceRef, filename) => {
@@ -125,9 +125,9 @@ test("短时签名 HTML 导出会把公共 URL 按资源规则重写", async () 
     },
   );
 
-  expect(html).not.toContain("https://oss.weistuday.com:16666/yuque/");
+  expect(html).not.toContain("https://oss.example.test/yuque/");
   expect(html).toContain("https://signed.example/截图.png");
-  expect(html).toContain("https://signed.example/测试资料.pdf");
+  expect(html).toContain("https://signed.example/测试文件2.pdf");
   expect(html).toContain("lake-export-attachment");
   expect(signedRefs).toHaveLength(2);
   expect(signedRefs[0]).toContain("yuque-resource://yuque/images/2026/05/a.png");
@@ -145,9 +145,9 @@ test("本地资源包 HTML 导出会生成 index 和资源文件", async () => {
     bucket: "yuque",
     key: "files/a.pdf",
     kind: "file",
-    name: "资料.pdf",
+    name: "测试文件1.pdf",
   });
-  const fileValue = `data:${encodeURIComponent(JSON.stringify({ src: fileRef, name: "资料.pdf" }))}`;
+  const fileValue = `data:${encodeURIComponent(JSON.stringify({ src: fileRef, name: "测试文件1.pdf" }))}`;
   const zip = await lakeDocumentToHtmlBundle(
     "标题",
     `<p><img src="${imageRef}" alt="截图"></p><card name="file" value="${fileValue}"></card>`,
@@ -159,21 +159,21 @@ test("本地资源包 HTML 导出会生成 index 和资源文件", async () => {
   );
   const entries = readStoredZipEntries(zip);
 
-  expect(entries.map((entry) => entry.path)).toEqual(["index.html", "attachments/资料.pdf"]);
+  expect(entries.map((entry) => entry.path)).toEqual(["index.html", "attachments/测试文件1.pdf"]);
   expect(entries[0].content).toContain("data:image/png;base64,QQ==");
-  expect(entries[0].content).toContain("attachments/资料.pdf");
+  expect(entries[0].content).toContain("attachments/测试文件1.pdf");
   expect(entries[1].content).toBe("A");
 });
 
 test("本地资源包 HTML 导出会把公共 URL 打进资源目录", async () => {
   const zip = await lakeDocumentToHtmlBundle(
     "标题",
-    "<p><a href=\"https://oss.weistuday.com:16666/yuque/files/a.pdf\">资料.pdf</a></p>",
+    "<p><a href=\"https://oss.example.test/yuque/files/a.pdf\">测试文件1.pdf</a></p>",
     {
       strategy: "bundle",
       signedUrlTtlSeconds: 3600,
       bucket: "yuque",
-      publicBaseUrl: "https://oss.weistuday.com:16666/yuque",
+      publicBaseUrl: "https://oss.example.test/yuque",
       imagePrefix: "images",
       filePrefix: "files",
       loadResource: async () => new Uint8Array([67]),
@@ -181,9 +181,9 @@ test("本地资源包 HTML 导出会把公共 URL 打进资源目录", async () 
   );
   const entries = readStoredZipEntries(zip);
 
-  expect(entries.map((entry) => entry.path)).toEqual(["index.html", "attachments/资料.pdf"]);
-  expect(entries[0].content).not.toContain("https://oss.weistuday.com:16666/yuque/");
-  expect(entries[0].content).toContain("attachments/资料.pdf");
+  expect(entries.map((entry) => entry.path)).toEqual(["index.html", "attachments/测试文件1.pdf"]);
+  expect(entries[0].content).not.toContain("https://oss.example.test/yuque/");
+  expect(entries[0].content).toContain("attachments/测试文件1.pdf");
   expect(entries[1].content).toBe("C");
 });
 

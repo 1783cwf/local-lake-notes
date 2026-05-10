@@ -16,7 +16,7 @@ describe("spreadsheetXlsxBridge", () => {
   test("导入包含多 sheet、中文、公式和合并单元格的 XLSX", async () => {
     const workbook = new ExcelJS.Workbook();
     const summary = workbook.addWorksheet("汇总");
-    summary.getCell("A1").value = "项目";
+    summary.getCell("A1").value = "测试字段1";
     summary.getCell("B1").value = 12;
     summary.getCell("C1").value = { formula: "B1*2", result: 24 };
     summary.getCell("D1").value = new Date("2026-05-06T00:00:00.000Z");
@@ -26,14 +26,14 @@ describe("spreadsheetXlsxBridge", () => {
     summary.getCell("A1").alignment = { horizontal: "center", vertical: "middle" };
     workbook.addWorksheet("明细").getCell("A1").value = "中文内容";
 
-    const imported = await importXlsxWorkbookData(toBytes(await workbook.xlsx.writeBuffer()), "预算表");
+    const imported = await importXlsxWorkbookData(toBytes(await workbook.xlsx.writeBuffer()), "测试表格1");
     const firstSheet = imported.sheets[imported.sheetOrder[0]];
     const secondSheet = imported.sheets[imported.sheetOrder[1]];
 
-    expect(imported.name).toBe("预算表");
+    expect(imported.name).toBe("测试表格1");
     expect(firstSheet.name).toBe("汇总");
     expect(secondSheet.name).toBe("明细");
-    expect(firstSheet.cellData?.[0]?.[0]).toMatchObject({ v: "项目", t: CellValueType.STRING });
+    expect(firstSheet.cellData?.[0]?.[0]).toMatchObject({ v: "测试字段1", t: CellValueType.STRING });
     expect(firstSheet.cellData?.[0]?.[1]).toMatchObject({ v: 12, t: CellValueType.NUMBER });
     expect(firstSheet.cellData?.[0]?.[2]).toMatchObject({ v: 24, t: CellValueType.NUMBER, f: "=B1*2" });
     expect(firstSheet.cellData?.[0]?.[3]).toMatchObject({ v: "2026-05-06", t: CellValueType.STRING });
@@ -51,11 +51,11 @@ describe("spreadsheetXlsxBridge", () => {
     const workbookData = createEmptySpreadsheetWorkbookData("导出表格");
     const sheetId = workbookData.sheetOrder[0];
     const sheet = workbookData.sheets[sheetId];
-    sheet.name = "预算";
+    sheet.name = "测试表格1";
     sheet.mergeData = [{ startRow: 2, startColumn: 0, endRow: 2, endColumn: 1 }];
     sheet.cellData = {
       0: {
-        0: { v: "收入", t: CellValueType.STRING },
+        0: { v: "测试字段2", t: CellValueType.STRING },
         1: { v: 100, t: CellValueType.NUMBER },
         2: { v: 200, t: CellValueType.NUMBER, f: "=B1*2" },
       },
@@ -67,10 +67,10 @@ describe("spreadsheetXlsxBridge", () => {
     const file = await exportXlsxWorkbookData(workbookData);
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(await file.arrayBuffer());
-    const worksheet = workbook.getWorksheet("预算");
+    const worksheet = workbook.getWorksheet("测试表格1");
 
     expect(worksheet).toBeTruthy();
-    expect(worksheet?.getCell("A1").value).toBe("收入");
+    expect(worksheet?.getCell("A1").value).toBe("测试字段2");
     expect(worksheet?.getCell("B1").value).toBe(100);
     expect(worksheet?.getCell("C1").value).toMatchObject({ formula: "B1*2", result: 200 });
     expect(worksheet?.getCell("A3").value).toBe("合并标题");

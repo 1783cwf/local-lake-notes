@@ -38,9 +38,9 @@ test("右上角导出菜单可以选择文档导出格式", async () => {
   render(
     <TopBar
       document={{
-        id: "导出测试.lake",
-        path: "导出测试.lake",
-        name: "导出测试",
+        id: "测试文件1.lake",
+        path: "测试文件1.lake",
+        name: "测试文件1",
         parentPath: "",
         size: 1,
         kind: "lake",
@@ -65,9 +65,9 @@ test("表格文档显示 Excel 导入导出菜单", async () => {
   render(
     <TopBar
       document={{
-        id: "预算.json",
-        path: "预算.json",
-        name: "预算",
+        id: "测试表格1.json",
+        path: "测试表格1.json",
+        name: "测试表格1",
         parentPath: "",
         size: 1,
         kind: "spreadsheet",
@@ -96,9 +96,9 @@ test("多维表格只显示保存和分享，不显示文档或 Excel 导出菜�
   render(
     <TopBar
       document={{
-        id: "上线记录.dbtable.json",
-        path: "上线记录.dbtable.json",
-        name: "上线记录",
+        id: "测试表格2.dbtable.json",
+        path: "测试表格2.dbtable.json",
+        name: "测试表格2",
         parentPath: "",
         size: 1,
         kind: "multidimensional-table",
@@ -109,7 +109,7 @@ test("多维表格只显示保存和分享，不显示文档或 Excel 导出菜�
     />,
   );
 
-  expect(screen.getByRole("heading", { name: "上线记录" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "测试表格2" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "保存" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "导出文档" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Excel 导入导出" })).not.toBeInTheDocument();
