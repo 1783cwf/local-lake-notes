@@ -59,53 +59,53 @@ test("按保存的拖拽顺序排列同级节点", () => {
 
 test("文档同名目录会合并为文档子级", () => {
   const tree = buildDocumentTree(
-    [doc("阿里云.lake"), doc("阿里云/访问密钥.lake", "阿里云")],
-    [dir("阿里云")],
-    ["document:阿里云.lake", "document:阿里云/访问密钥.lake"],
+    [doc("测试文件1.lake"), doc("测试文件1/测试文件2.lake", "测试文件1")],
+    [dir("测试文件1")],
+    ["document:测试文件1.lake", "document:测试文件1/测试文件2.lake"],
   );
 
   expect(tree).toHaveLength(1);
   expect(tree[0]).toMatchObject({
-    itemId: "document:阿里云.lake",
+    itemId: "document:测试文件1.lake",
     type: "document",
-    name: "阿里云",
+    name: "测试文件1",
   });
-  expect(tree[0].children.map((node) => node.itemId)).toEqual(["document:阿里云/访问密钥.lake"]);
+  expect(tree[0].children.map((node) => node.itemId)).toEqual(["document:测试文件1/测试文件2.lake"]);
 });
 
 test("带内部标记的空同名目录会作为文档子级容器隐藏", () => {
   const tree = buildDocumentTree(
-    [doc("阿里云.lake")],
-    [dir("阿里云", "", { isDocumentChildContainer: true })],
+    [doc("测试文件1.lake")],
+    [dir("测试文件1", "", { isDocumentChildContainer: true })],
   );
 
   expect(tree).toHaveLength(1);
   expect(tree[0]).toMatchObject({
-    itemId: "document:阿里云.lake",
+    itemId: "document:测试文件1.lake",
     type: "document",
-    name: "阿里云",
+    name: "测试文件1",
   });
 });
 
 test("普通空同名目录不会误合并为文档子级容器", () => {
   const tree = buildDocumentTree(
-    [doc("阿里云.lake")],
-    [dir("阿里云")],
+    [doc("测试文件1.lake")],
+    [dir("测试文件1")],
   );
 
-  expect(tree.map((node) => node.itemId)).toEqual(["folder:阿里云", "document:阿里云.lake"]);
+  expect(tree.map((node) => node.itemId)).toEqual(["folder:测试文件1", "document:测试文件1.lake"]);
 });
 
 test("从 .lake 路径提取文档标题", () => {
-  expect(documentTitleFromPath("nested/高级工程师的要求.lake")).toBe("高级工程师的要求");
+  expect(documentTitleFromPath("nested/测试文件1.lake")).toBe("测试文件1");
 });
 
 test("从 Univer 快照 JSON 路径提取表格标题", () => {
-  expect(documentTitleFromPath("nested/预算表.json")).toBe("预算表");
+  expect(documentTitleFromPath("nested/测试表格1.json")).toBe("测试表格1");
 });
 
 test("从多维表格 JSON 路径提取标题", () => {
-  expect(documentTitleFromPath("nested/上线记录.dbtable.json")).toBe("上线记录");
+  expect(documentTitleFromPath("nested/测试表格2.dbtable.json")).toBe("测试表格2");
 });
 
 test("计算文档拖入目录的目标父目录和乐观路径", () => {
@@ -132,58 +132,58 @@ test("计算文档拖入目录的目标父目录和乐观路径", () => {
 
 test("计算文档拖入另一个文档的目标父目录", () => {
   const workspace = workspacePayload(
-    [doc("阿里云.lake"), doc("各种代理.lake")],
+    [doc("测试文件1.lake"), doc("测试文件3.lake")],
     [],
-    ["document:阿里云.lake", "document:各种代理.lake"],
+    ["document:测试文件1.lake", "document:测试文件3.lake"],
   );
   const tree = buildDocumentTree(workspace.documents, workspace.directories, workspace.order);
 
-  const move = resolveWorkspaceMove(tree, "document:各种代理.lake", {
+  const move = resolveWorkspaceMove(tree, "document:测试文件3.lake", {
     placement: "inside",
-    targetId: "document:阿里云.lake",
+    targetId: "document:测试文件1.lake",
   });
   const movedWorkspace = move.ok ? applyWorkspaceMove(workspace, move) : workspace;
 
   expect(move).toMatchObject({
     ok: true,
-    targetParentPath: "阿里云",
-    targetPath: "阿里云/各种代理.lake",
+    targetParentPath: "测试文件1",
+    targetPath: "测试文件1/测试文件3.lake",
   });
-  expect(movedWorkspace.documents.find((entry) => entry.name === "各种代理")?.parentPath).toBe("阿里云");
+  expect(movedWorkspace.documents.find((entry) => entry.name === "测试文件3")?.parentPath).toBe("测试文件1");
 });
 
 test("移动带子级的文档时同步迁移同名子目录内容", () => {
   const workspace = workspacePayload(
     [
-      doc("阿里云.lake"),
-      doc("阿里云/访问密钥.lake", "阿里云"),
-      doc("常用配置.lake"),
+      doc("测试文件1.lake"),
+      doc("测试文件1/测试文件2.lake", "测试文件1"),
+      doc("测试文件4.lake"),
     ],
-    [dir("阿里云")],
+    [dir("测试文件1")],
     [
-      "document:常用配置.lake",
-      "document:阿里云.lake",
-      "document:阿里云/访问密钥.lake",
+      "document:测试文件4.lake",
+      "document:测试文件1.lake",
+      "document:测试文件1/测试文件2.lake",
     ],
   );
   const tree = buildDocumentTree(workspace.documents, workspace.directories, workspace.order);
 
-  const move = resolveWorkspaceMove(tree, "document:阿里云.lake", {
+  const move = resolveWorkspaceMove(tree, "document:测试文件1.lake", {
     placement: "inside",
-    targetId: "document:常用配置.lake",
+    targetId: "document:测试文件4.lake",
   });
   const movedWorkspace = move.ok ? applyWorkspaceMove(workspace, move) : workspace;
 
   expect(move).toMatchObject({
     ok: true,
-    targetParentPath: "常用配置",
-    targetPath: "常用配置/阿里云.lake",
+    targetParentPath: "测试文件4",
+    targetPath: "测试文件4/测试文件1.lake",
   });
-  expect(movedWorkspace.directories.map((entry) => entry.path)).toEqual(["常用配置/阿里云"]);
+  expect(movedWorkspace.directories.map((entry) => entry.path)).toEqual(["测试文件4/测试文件1"]);
   expect(movedWorkspace.documents.map((entry) => entry.path)).toEqual([
-    "常用配置/阿里云.lake",
-    "常用配置/阿里云/访问密钥.lake",
-    "常用配置.lake",
+    "测试文件4/测试文件1.lake",
+    "测试文件4/测试文件1/测试文件2.lake",
+    "测试文件4.lake",
   ]);
 });
 
@@ -248,13 +248,13 @@ test("阻止目录拖入自身或子目录", () => {
 
 test("阻止文档拖入自身子级", () => {
   const tree = buildDocumentTree(
-    [doc("阿里云.lake"), doc("阿里云/访问密钥.lake", "阿里云")],
-    [dir("阿里云")],
+    [doc("测试文件1.lake"), doc("测试文件1/测试文件2.lake", "测试文件1")],
+    [dir("测试文件1")],
   );
 
-  expect(resolveWorkspaceMove(tree, "document:阿里云.lake", {
+  expect(resolveWorkspaceMove(tree, "document:测试文件1.lake", {
     placement: "inside",
-    targetId: "document:阿里云/访问密钥.lake",
+    targetId: "document:测试文件1/测试文件2.lake",
   })).toMatchObject({ ok: false });
 });
 

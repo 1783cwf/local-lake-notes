@@ -311,8 +311,19 @@ vi.mock("../features/multidimensional-table/MultidimensionalTableEditor", () => 
 }));
 
 vi.mock("../lib/tauri", () => ({
+  analyzeResourceMigration: vi.fn(async () => ({
+    totalReferences: 0,
+    uniqueResources: 0,
+    documentCount: 0,
+    totalBytes: 0,
+    migratedResources: [],
+    skippedResources: [],
+    unreadableResources: [],
+    conflictResources: [],
+  })),
   chooseExcelImportFile: () => chooseExcelImportFile(),
   chooseDatabaseDirectory: vi.fn(async () => "/tmp/selected-db"),
+  chooseStorageDirectory: vi.fn(async () => "/tmp/file-storage"),
   chooseWorkspaceDirectory: vi.fn(async () => "/tmp/kb"),
   createLakeDirectory: (parentPath: string, name: string) => createLakeDirectory(parentPath, name),
   createBackup: (input: { forceFull: boolean }) => createBackup(input),
@@ -359,9 +370,29 @@ vi.mock("../lib/tauri", () => ({
     databasePath: `${directory}/yuque-lake-notes.sqlite3`,
     custom: true,
   })),
+  testStorageConnection: vi.fn(async () => ({
+    provider: "s3",
+    storageId: "notes",
+    ok: true,
+    message: "连接测试成功",
+  })),
   resetBackupKey: vi.fn(async () => ({ configured: true, needsKey: false, fingerprint: "fingerprint" })),
   resetResourceKey: vi.fn(async () => ({ configured: true, needsKey: false, fingerprint: "resource-fingerprint", knownFingerprints: ["resource-fingerprint"] })),
   restoreBackup: (input: { backupId: string; allowKeyMismatch?: boolean }) => restoreBackup(input),
+  runResourceMigration: vi.fn(async () => ({
+    analysis: {
+      totalReferences: 0,
+      uniqueResources: 0,
+      documentCount: 0,
+      totalBytes: 0,
+      migratedResources: [],
+      skippedResources: [],
+      unreadableResources: [],
+      conflictResources: [],
+    },
+    rewrittenDocuments: [],
+    copiedResources: 0,
+  })),
   readResourceBytes: vi.fn(async () => new Uint8Array([1, 2, 3])),
   saveWorkspaceOrder: vi.fn(),
   setBackupKey: vi.fn(async () => ({ configured: true, needsKey: false, fingerprint: "fingerprint" })),
@@ -828,22 +859,22 @@ test("连续创建嵌套目录后可以在子目录中新建并打开 Lake 文�
   };
   const rootDirectoryWorkspace: WorkspacePayload = {
     ...initialWorkspace,
-    directories: [{ id: "工作", path: "工作", name: "工作", parentPath: "" }],
-    order: ["folder:工作"],
+    directories: [{ id: "测试目录1", path: "测试目录1", name: "测试目录1", parentPath: "" }],
+    order: ["folder:测试目录1"],
   };
   const childDirectoryWorkspace: WorkspacePayload = {
     ...initialWorkspace,
     directories: [
-      { id: "工作", path: "工作", name: "工作", parentPath: "" },
-      { id: "工作/摩卡", path: "工作/摩卡", name: "摩卡", parentPath: "工作" },
+      { id: "测试目录1", path: "测试目录1", name: "测试目录1", parentPath: "" },
+      { id: "测试目录1/测试目录2", path: "测试目录1/测试目录2", name: "测试目录2", parentPath: "测试目录1" },
     ],
-    order: ["folder:工作", "folder:工作/摩卡"],
+    order: ["folder:测试目录1", "folder:测试目录1/测试目录2"],
   };
   const createdWorkspace: CreateDocumentPayload = {
     ...childDirectoryWorkspace,
-    documents: [{ id: "工作/摩卡/未命名文档.lake", path: "工作/摩卡/未命名文档.lake", name: "未命名文档", parentPath: "工作/摩卡", size: 1, kind: "lake" }],
-    order: ["folder:工作", "folder:工作/摩卡", "document:工作/摩卡/未命名文档.lake"],
-    createdDocument: { id: "工作/摩卡/未命名文档.lake", path: "工作/摩卡/未命名文档.lake", name: "未命名文档", parentPath: "工作/摩卡", size: 1, kind: "lake" },
+    documents: [{ id: "测试目录1/测试目录2/未命名文档.lake", path: "测试目录1/测试目录2/未命名文档.lake", name: "未命名文档", parentPath: "测试目录1/测试目录2", size: 1, kind: "lake" }],
+    order: ["folder:测试目录1", "folder:测试目录1/测试目录2", "document:测试目录1/测试目录2/未命名文档.lake"],
+    createdDocument: { id: "测试目录1/测试目录2/未命名文档.lake", path: "测试目录1/测试目录2/未命名文档.lake", name: "未命名文档", parentPath: "测试目录1/测试目录2", size: 1, kind: "lake" },
   };
   getRecentWorkspace.mockResolvedValue(initialWorkspace);
   createLakeDirectory
@@ -856,22 +887,22 @@ test("连续创建嵌套目录后可以在子目录中新建并打开 Lake 文�
 
   await user.click(await screen.findByRole("button", { name: "根目录新建目录" }));
   await user.clear(await screen.findByLabelText("目录名称"));
-  await user.type(screen.getByLabelText("目录名称"), "工作");
+  await user.type(screen.getByLabelText("目录名称"), "测试目录1");
   await user.click(screen.getByRole("button", { name: "创建" }));
-  await waitFor(() => expect(createLakeDirectory).toHaveBeenCalledWith("", "工作"));
+  await waitFor(() => expect(createLakeDirectory).toHaveBeenCalledWith("", "测试目录1"));
 
-  await user.click(await screen.findByRole("button", { name: "在 工作 下新建目录" }));
+  await user.click(await screen.findByRole("button", { name: "在 测试目录1 下新建目录" }));
   await user.clear(screen.getByLabelText("目录名称"));
-  await user.type(screen.getByLabelText("目录名称"), "摩卡");
+  await user.type(screen.getByLabelText("目录名称"), "测试目录2");
   await user.click(screen.getByRole("button", { name: "创建" }));
-  await waitFor(() => expect(createLakeDirectory).toHaveBeenCalledWith("工作", "摩卡"));
+  await waitFor(() => expect(createLakeDirectory).toHaveBeenCalledWith("测试目录1", "测试目录2"));
 
-  await user.click(await screen.findByRole("button", { name: "在 摩卡 下新建文档" }));
+  await user.click(await screen.findByRole("button", { name: "在 测试目录2 下新建文档" }));
 
   await waitFor(() => {
-    expect(createLakeDocument).toHaveBeenCalledWith("未命名文档", "工作/摩卡");
-    expect(readLakeDocument).toHaveBeenCalledWith("工作/摩卡/未命名文档.lake");
-    expect(screen.getByTestId("current-path")).toHaveTextContent("工作/摩卡/未命名文档.lake");
+    expect(createLakeDocument).toHaveBeenCalledWith("未命名文档", "测试目录1/测试目录2");
+    expect(readLakeDocument).toHaveBeenCalledWith("测试目录1/测试目录2/未命名文档.lake");
+    expect(screen.getByTestId("current-path")).toHaveTextContent("测试目录1/测试目录2/未命名文档.lake");
     expect(screen.getByRole("heading", { name: "未命名文档" })).toBeInTheDocument();
   });
 });
@@ -1110,10 +1141,10 @@ test("可以导出整个知识库 ZIP，表格文档会转换为 Excel，多维�
     sheets: {
       "sheet-0001": {
         id: "sheet-0001",
-        name: "预算",
+        name: "测试表格1",
         cellData: {
           0: {
-            0: { v: "收入", t: CellValueType.STRING },
+            0: { v: "测试字段1", t: CellValueType.STRING },
             1: { v: 100, t: CellValueType.NUMBER },
           },
         },
@@ -1151,8 +1182,8 @@ test("可以导出整个知识库 ZIP，表格文档会转换为 Excel，多维�
   expect(zipEntries.map((entry) => entry.path)).toEqual(["notes/", "notes/a.md", "notes/budget.xlsx", "notes/project.dbtable.json"]);
   expect(zipEntries.find((entry) => entry.path === "notes/a.md")?.content).toContain("![图片](file:///tmp/a.png)");
   expect(zipEntries.find((entry) => entry.path === "notes/project.dbtable.json")?.content).toContain("\"kind\":\"multidimensional-table\"");
-  expect(workbook.getWorksheet("预算")?.getCell("A1").value).toBe("收入");
-  expect(workbook.getWorksheet("预算")?.getCell("B1").value).toBe(100);
+  expect(workbook.getWorksheet("测试表格1")?.getCell("A1").value).toBe("测试字段1");
+  expect(workbook.getWorksheet("测试表格1")?.getCell("B1").value).toBe(100);
 });
 
 test("创建备份前先保存当前打开文档的最新内容", async () => {

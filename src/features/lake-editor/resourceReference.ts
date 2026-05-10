@@ -1,9 +1,12 @@
 import type { UploadImageOutput } from "../../app/appState";
 
 export type ResourceKind = "image" | "file";
+export type ResourceProviderKind = "s3" | "local" | "webdav";
 
 export interface LakeResourceReference {
   bucket: string;
+  storageId?: string;
+  provider?: ResourceProviderKind;
   key: string;
   kind: ResourceKind;
   name?: string;
@@ -39,9 +42,16 @@ export interface PublicResourceReferenceMetadata {
 }
 
 const resourceProtocol = "yuque-resource:";
+export const defaultResourcePreviewConcurrency = 6;
+const minResourcePreviewConcurrency = 4;
+const maxResourcePreviewConcurrency = 8;
 
 export function createResourceReference(input: LakeResourceReference): string {
-  const url = new URL(`${resourceProtocol}//${encodeURIComponent(input.bucket)}/${encodePath(input.key)}`);
+  const storageId = input.storageId ?? input.bucket;
+  const url = new URL(`${resourceProtocol}//${encodeURIComponent(storageId)}/${encodePath(input.key)}`);
+  if (input.provider) {
+    url.searchParams.set("provider", input.provider);
+  }
   url.searchParams.set("kind", input.kind);
   if (input.name) {
     url.searchParams.set("name", input.name);
@@ -67,6 +77,10 @@ export function parseResourceReference(value: string): LakeResourceReference | n
   try {
     const url = new URL(value);
     const bucket = decodeURIComponent(url.hostname);
+    const provider = parseResourceProvider(url.searchParams.get("provider"));
+    if (provider === false) {
+      return null;
+    }
     const key = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
     const kind = url.searchParams.get("kind") === "file" ? "file" : "image";
     const sizeText = url.searchParams.get("size");
@@ -80,6 +94,8 @@ export function parseResourceReference(value: string): LakeResourceReference | n
     }
     return {
       bucket,
+      storageId: provider ? bucket : undefined,
+      provider: provider ?? undefined,
       key,
       kind,
       name: url.searchParams.get("name") ?? undefined,
@@ -151,6 +167,56 @@ export async function hydrateLakeResources(
   return rewriteLakeResourceUrls(content, (value) => previews.get(value) ?? value);
 }
 
+export function hydrateLakeResourcesWithPreviews(
+  content: string,
+  previews: ResourcePreview[],
+  options: RewriteLakeResourceOptions = {},
+): string {
+  if (previews.length === 0) {
+    return content;
+  }
+  return rewriteLakeResourceUrls(content, (value) => (
+    previews.find((preview) => preview.resourceRef === value)?.previewUrl ?? value
+  ), options);
+}
+
+export function createLakeResourcePlaceholder(resourceRef: string): string {
+  const kind = parseResourceReference(resourceRef)?.kind;
+  const label = kind === "file" ? "资源加载中..." : "图片加载中...";
+  const svg = [
+    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"640\" height=\"360\" viewBox=\"0 0 640 360\">",
+    "<rect width=\"640\" height=\"360\" rx=\"18\" fill=\"#f4f7f5\"/>",
+    "<rect x=\"1\" y=\"1\" width=\"638\" height=\"358\" rx=\"17\" fill=\"none\" stroke=\"#d8e2dd\"/>",
+    `<title>${escapeSvgText(resourceRef)}</title>`,
+    `<text x=\"320\" y=\"182\" text-anchor=\"middle\" dominant-baseline=\"middle\" fill=\"#66736c\" font-size=\"24\" font-family=\"-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif\">${label}</text>`,
+    "</svg>",
+  ].join("");
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+export function normalizeResourcePreviewConcurrency(value: number | undefined): number {
+  if (!Number.isFinite(value)) {
+    return defaultResourcePreviewConcurrency;
+  }
+  return Math.min(maxResourcePreviewConcurrency, Math.max(minResourcePreviewConcurrency, Math.floor(value ?? defaultResourcePreviewConcurrency)));
+}
+
+export async function runResourcePreviewQueue(
+  resourceRefs: string[],
+  concurrency: number,
+  worker: (resourceRef: string) => Promise<void>,
+): Promise<void> {
+  let nextIndex = 0;
+  const workerCount = Math.min(normalizeResourcePreviewConcurrency(concurrency), resourceRefs.length);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < resourceRefs.length) {
+      const resourceRef = resourceRefs[nextIndex];
+      nextIndex += 1;
+      await worker(resourceRef);
+    }
+  }));
+}
+
 export function rewriteLakeResourceUrls(
   content: string,
   rewrite: (value: string) => string,
@@ -189,14 +255,14 @@ export function rewriteLakeResourceUrls(
   return template.innerHTML;
 }
 
-export function collectResourceReferences(content: string): string[] {
+export function collectResourceReferences(content: string, options: RewriteLakeResourceOptions = {}): string[] {
   const refs: string[] = [];
   rewriteLakeResourceUrls(content, (value) => {
     if (parseResourceReference(value)) {
       refs.push(value);
     }
     return value;
-  });
+  }, options);
   return refs;
 }
 
@@ -219,6 +285,24 @@ export function encodeLakeCardValue(value: Record<string, unknown>): string {
 
 function parseMaybeResourceUrl(value: string): string | null {
   return parseResourceReference(value) ? value : null;
+}
+
+function parseResourceProvider(value: string | null): ResourceProviderKind | false | null {
+  if (!value) {
+    return null;
+  }
+  if (value === "s3" || value === "local" || value === "webdav") {
+    return value;
+  }
+  return false;
+}
+
+function escapeSvgText(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;");
 }
 
 function parseEncryptionMetadata(url: URL): LakeResourceReference["encryption"] | false | null {

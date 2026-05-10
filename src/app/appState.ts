@@ -53,7 +53,23 @@ export interface FileDownloadInput {
   resourceRef?: string;
 }
 
+export type StorageProviderKind = "s3" | "local" | "webdav";
+
+export interface LocalStorageSettings {
+  rootDirectory: string;
+  storageId: string;
+}
+
+export interface WebDavStorageSettings {
+  endpoint: string;
+  username: string;
+  password: string;
+  rootPath: string;
+  storageId: string;
+}
+
 export interface OssSettings {
+  activeProvider: StorageProviderKind;
   endpoint: string;
   bucket: string;
   region: string;
@@ -68,6 +84,16 @@ export interface OssSettings {
   defaultSignedUrlTtlSeconds: number;
   maxSignedUrlTtlSeconds: number;
   allowSignedUrlExport: boolean;
+  resourcePreviewConcurrency: number;
+  local: LocalStorageSettings;
+  webdav: WebDavStorageSettings;
+}
+
+export interface StorageConnectionTestOutput {
+  provider: StorageProviderKind;
+  storageId: string;
+  ok: boolean;
+  message: string;
 }
 
 export interface DatabaseLocationSettings {
@@ -132,6 +158,48 @@ export interface DeleteBackupInput {
 
 export interface DeleteBackupOutput {
   deletedBackupIds: string[];
+}
+
+export interface ResourceMigrationTargetInput {
+  provider: StorageProviderKind;
+  storageId: string;
+}
+
+export interface ResourceMigrationInput {
+  source: ResourceMigrationTargetInput;
+  target: ResourceMigrationTargetInput;
+}
+
+export interface ResourceMigrationReference {
+  resourceRef: string;
+  provider: StorageProviderKind;
+  storageId: string;
+  key: string;
+  documentPath: string;
+  location: string;
+}
+
+export interface ResourceMigrationIssue {
+  resourceRef: string;
+  documentPath: string;
+  message: string;
+}
+
+export interface ResourceMigrationAnalysisOutput {
+  totalReferences: number;
+  uniqueResources: number;
+  documentCount: number;
+  totalBytes: number;
+  migratedResources: ResourceMigrationReference[];
+  skippedResources: ResourceMigrationReference[];
+  unreadableResources: ResourceMigrationIssue[];
+  conflictResources: ResourceMigrationIssue[];
+}
+
+export interface ResourceMigrationRunOutput {
+  analysis: ResourceMigrationAnalysisOutput;
+  rewrittenDocuments: string[];
+  copiedResources: number;
 }
 
 export type ExportResourceStrategy = "bundle" | "signed-url";

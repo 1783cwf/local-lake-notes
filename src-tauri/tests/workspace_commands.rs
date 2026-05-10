@@ -34,7 +34,7 @@ fn lists_lake_and_univer_snapshot_documents_in_nested_directories() {
     )
     .unwrap();
     fs::write(
-        dir.path().join("notes").join("上线记录.dbtable.json"),
+        dir.path().join("notes").join("测试表格2.dbtable.json"),
         MULTIDIMENSIONAL_TABLE_SNAPSHOT,
     )
     .unwrap();
@@ -53,7 +53,7 @@ fn lists_lake_and_univer_snapshot_documents_in_nested_directories() {
             ("notes/b.lake", WorkspaceDocumentKind::Lake),
             ("notes/budget.json", WorkspaceDocumentKind::Spreadsheet),
             (
-                "notes/上线记录.dbtable.json",
+                "notes/测试表格2.dbtable.json",
                 WorkspaceDocumentKind::MultidimensionalTable
             ),
         ]
@@ -63,22 +63,22 @@ fn lists_lake_and_univer_snapshot_documents_in_nested_directories() {
 #[test]
 fn creates_unique_safe_lake_document() {
     let dir = tempdir().unwrap();
-    fs::write(dir.path().join("高级工程师的要求.lake"), "<p>old</p>").unwrap();
+    fs::write(dir.path().join("测试文件1.lake"), "<p>old</p>").unwrap();
 
-    let path = create_document(dir.path(), "高级工程师的要求").unwrap();
+    let path = create_document(dir.path(), "测试文件1").unwrap();
 
-    assert_eq!(path, "高级工程师的要求-2.lake");
+    assert_eq!(path, "测试文件1-2.lake");
     assert!(dir.path().join(path).exists());
 }
 
 #[test]
 fn creates_unique_safe_spreadsheet_document() {
     let dir = tempdir().unwrap();
-    fs::write(dir.path().join("预算表.json"), WORKBOOK_SNAPSHOT).unwrap();
+    fs::write(dir.path().join("测试表格1.json"), WORKBOOK_SNAPSHOT).unwrap();
 
-    let path = create_spreadsheet(dir.path(), "预算表").unwrap();
+    let path = create_spreadsheet(dir.path(), "测试表格1").unwrap();
 
-    assert_eq!(path, "预算表-2.json");
+    assert_eq!(path, "测试表格1-2.json");
     assert!(dir.path().join(path).exists());
 }
 
@@ -86,14 +86,14 @@ fn creates_unique_safe_spreadsheet_document() {
 fn creates_unique_safe_multidimensional_table_document() {
     let dir = tempdir().unwrap();
     fs::write(
-        dir.path().join("上线记录.dbtable.json"),
+        dir.path().join("测试表格2.dbtable.json"),
         MULTIDIMENSIONAL_TABLE_SNAPSHOT,
     )
     .unwrap();
 
-    let path = create_multidimensional_table(dir.path(), "上线记录").unwrap();
+    let path = create_multidimensional_table(dir.path(), "测试表格2").unwrap();
 
-    assert_eq!(path, "上线记录-2.dbtable.json");
+    assert_eq!(path, "测试表格2-2.dbtable.json");
     assert!(dir.path().join(path).exists());
 }
 
@@ -101,7 +101,7 @@ fn creates_unique_safe_multidimensional_table_document() {
 fn creates_multidimensional_table_with_neutral_default_fields() {
     let dir = tempdir().unwrap();
 
-    let path = create_multidimensional_table(dir.path(), "项目表").unwrap();
+    let path = create_multidimensional_table(dir.path(), "测试表格1").unwrap();
     let content = fs::read_to_string(dir.path().join(path)).unwrap();
     let snapshot = serde_json::from_str::<Value>(&content).unwrap();
     let field_names = snapshot["fields"]
@@ -131,72 +131,60 @@ fn creates_multidimensional_table_with_neutral_default_fields() {
 #[test]
 fn renames_document_child_container_with_spreadsheet() {
     let dir = tempdir().unwrap();
-    fs::write(dir.path().join("服务部署.json"), WORKBOOK_SNAPSHOT).unwrap();
-    fs::create_dir_all(dir.path().join("服务部署")).unwrap();
+    fs::write(dir.path().join("测试表格1.json"), WORKBOOK_SNAPSHOT).unwrap();
+    fs::create_dir_all(dir.path().join("测试表格1")).unwrap();
     fs::write(
-        dir.path().join("服务部署").join("接口清单.lake"),
+        dir.path().join("测试表格1").join("测试文件2.lake"),
         "<p>api</p>",
     )
     .unwrap();
 
-    let current_path = resolve_existing_spreadsheet_path(dir.path(), "服务部署.json").unwrap();
-    let renamed = rename_document_on_disk(
-        dir.path(),
-        current_path,
-        "服务部署.json",
-        "服务部署规划.json",
-    )
-    .unwrap();
+    let current_path = resolve_existing_spreadsheet_path(dir.path(), "测试表格1.json").unwrap();
+    let renamed =
+        rename_document_on_disk(dir.path(), current_path, "测试表格1.json", "测试表格2.json")
+            .unwrap();
 
-    assert_eq!(renamed.target_path, "服务部署规划.json");
-    assert_eq!(renamed.target_child_container_path, "服务部署规划");
+    assert_eq!(renamed.target_path, "测试表格2.json");
+    assert_eq!(renamed.target_child_container_path, "测试表格2");
     assert!(renamed.moved_child_container);
-    assert!(dir.path().join("服务部署规划.json").exists());
+    assert!(dir.path().join("测试表格2.json").exists());
+    assert!(dir.path().join("测试表格2").join("测试文件2.lake").exists());
     assert!(dir
         .path()
-        .join("服务部署规划")
-        .join("接口清单.lake")
-        .exists());
-    assert!(dir
-        .path()
-        .join("服务部署规划")
+        .join("测试表格2")
         .join(DOCUMENT_CHILD_CONTAINER_MARKER)
         .exists());
-    assert!(!dir.path().join("服务部署").exists());
+    assert!(!dir.path().join("测试表格1").exists());
 }
 
 #[test]
 fn rejects_renaming_document_when_target_child_container_exists() {
     let dir = tempdir().unwrap();
-    fs::write(dir.path().join("服务部署.json"), WORKBOOK_SNAPSHOT).unwrap();
-    fs::create_dir_all(dir.path().join("服务部署")).unwrap();
-    fs::create_dir_all(dir.path().join("服务部署规划")).unwrap();
+    fs::write(dir.path().join("测试表格1.json"), WORKBOOK_SNAPSHOT).unwrap();
+    fs::create_dir_all(dir.path().join("测试表格1")).unwrap();
+    fs::create_dir_all(dir.path().join("测试表格2")).unwrap();
 
-    let current_path = resolve_existing_spreadsheet_path(dir.path(), "服务部署.json").unwrap();
-    let error = rename_document_on_disk(
-        dir.path(),
-        current_path,
-        "服务部署.json",
-        "服务部署规划.json",
-    )
-    .unwrap_err();
+    let current_path = resolve_existing_spreadsheet_path(dir.path(), "测试表格1.json").unwrap();
+    let error =
+        rename_document_on_disk(dir.path(), current_path, "测试表格1.json", "测试表格2.json")
+            .unwrap_err();
 
     assert!(matches!(error, AppError::WorkspaceItemConflict(_)));
-    assert!(dir.path().join("服务部署.json").exists());
-    assert!(dir.path().join("服务部署").exists());
+    assert!(dir.path().join("测试表格1.json").exists());
+    assert!(dir.path().join("测试表格1").exists());
 }
 
 #[test]
 fn marks_created_document_child_container() {
     let dir = tempdir().unwrap();
-    fs::write(dir.path().join("阿里云.lake"), "<p>a</p>").unwrap();
-    fs::write(dir.path().join("访问密钥.lake"), "<p>key</p>").unwrap();
+    fs::write(dir.path().join("测试文件1.lake"), "<p>a</p>").unwrap();
+    fs::write(dir.path().join("测试文件2.lake"), "<p>key</p>").unwrap();
 
     move_workspace_item_on_disk(
         dir.path(),
         &MoveWorkspaceItemInput {
-            source_id: "document:访问密钥.lake".to_string(),
-            target_parent_path: "阿里云".to_string(),
+            source_id: "document:测试文件2.lake".to_string(),
+            target_parent_path: "测试文件1".to_string(),
             order: vec![],
         },
     )
@@ -204,13 +192,13 @@ fn marks_created_document_child_container() {
 
     assert!(dir
         .path()
-        .join("阿里云")
+        .join("测试文件1")
         .join(DOCUMENT_CHILD_CONTAINER_MARKER)
         .exists());
     assert!(list_directories(dir.path())
         .unwrap()
         .iter()
-        .any(|directory| directory.path == "阿里云" && directory.is_document_child_container));
+        .any(|directory| directory.path == "测试文件1" && directory.is_document_child_container));
 }
 
 #[test]
@@ -236,9 +224,9 @@ fn creates_spreadsheet_inside_directory() {
     let dir = tempdir().unwrap();
     fs::create_dir_all(dir.path().join("reports")).unwrap();
 
-    let path = create_spreadsheet_at(dir.path(), "reports", "月度 预算").unwrap();
+    let path = create_spreadsheet_at(dir.path(), "reports", "测试 表格1").unwrap();
 
-    assert_eq!(path, "reports/月度-预算.json");
+    assert_eq!(path, "reports/测试-表格1.json");
     assert!(dir.path().join(path).exists());
 }
 
@@ -247,9 +235,9 @@ fn creates_multidimensional_table_inside_directory() {
     let dir = tempdir().unwrap();
     fs::create_dir_all(dir.path().join("projects")).unwrap();
 
-    let path = create_multidimensional_table_at(dir.path(), "projects", "摩卡 上线").unwrap();
+    let path = create_multidimensional_table_at(dir.path(), "projects", "测试文件1").unwrap();
 
-    assert_eq!(path, "projects/摩卡-上线.dbtable.json");
+    assert_eq!(path, "projects/测试文件1.dbtable.json");
     assert!(dir.path().join(path).exists());
 }
 
@@ -309,25 +297,19 @@ fn reads_only_external_xlsx_bytes_for_excel_import() {
 
 #[test]
 fn sanitizes_file_stems_without_dropping_chinese_text() {
-    assert_eq!(
-        safe_file_stem(" 高级 工程师/要求 ").unwrap(),
-        "高级-工程师-要求"
-    );
-    assert_eq!(
-        safe_directory_name(" 个人 学习/前端 ").unwrap(),
-        "个人-学习-前端"
-    );
+    assert_eq!(safe_file_stem(" 测试 文件/1 ").unwrap(), "测试-文件-1");
+    assert_eq!(safe_directory_name(" 测试 目录/1 ").unwrap(), "测试-目录-1");
 }
 
 #[test]
 fn creates_workspace_directory_inside_selected_parent() {
     let dir = tempdir().unwrap();
 
-    let workspace = create_workspace_root_at(dir.path(), " 工作 知识库 ").unwrap();
+    let workspace = create_workspace_root_at(dir.path(), " 测试 目录1 ").unwrap();
 
     assert_eq!(
         workspace,
-        dir.path().join("工作-知识库").canonicalize().unwrap()
+        dir.path().join("测试-目录1").canonicalize().unwrap()
     );
     assert!(workspace.is_dir());
 }
@@ -423,32 +405,32 @@ fn same_parent_move_only_reports_paths_for_order_update() {
 #[test]
 fn moves_document_into_document_child_container() {
     let dir = tempdir().unwrap();
-    fs::write(dir.path().join("阿里云.lake"), "<p>a</p>").unwrap();
-    fs::write(dir.path().join("各种代理.lake"), "<p>proxy</p>").unwrap();
+    fs::write(dir.path().join("测试文件1.lake"), "<p>a</p>").unwrap();
+    fs::write(dir.path().join("测试文件3.lake"), "<p>proxy</p>").unwrap();
 
     let moved = move_workspace_item_on_disk(
         dir.path(),
         &MoveWorkspaceItemInput {
-            source_id: "document:各种代理.lake".to_string(),
-            target_parent_path: "阿里云".to_string(),
+            source_id: "document:测试文件3.lake".to_string(),
+            target_parent_path: "测试文件1".to_string(),
             order: vec![],
         },
     )
     .unwrap();
 
-    assert_eq!(moved.source_path, "各种代理.lake");
-    assert_eq!(moved.target_path, "阿里云/各种代理.lake");
-    assert!(dir.path().join("阿里云").join("各种代理.lake").exists());
+    assert_eq!(moved.source_path, "测试文件3.lake");
+    assert_eq!(moved.target_path, "测试文件1/测试文件3.lake");
+    assert!(dir.path().join("测试文件1").join("测试文件3.lake").exists());
 }
 
 #[test]
 fn moves_document_child_container_with_document() {
     let dir = tempdir().unwrap();
-    fs::create_dir_all(dir.path().join("阿里云")).unwrap();
-    fs::write(dir.path().join("常用配置.lake"), "<p>config</p>").unwrap();
-    fs::write(dir.path().join("阿里云.lake"), "<p>a</p>").unwrap();
+    fs::create_dir_all(dir.path().join("测试文件1")).unwrap();
+    fs::write(dir.path().join("测试文件4.lake"), "<p>config</p>").unwrap();
+    fs::write(dir.path().join("测试文件1.lake"), "<p>a</p>").unwrap();
     fs::write(
-        dir.path().join("阿里云").join("访问密钥.lake"),
+        dir.path().join("测试文件1").join("测试文件2.lake"),
         "<p>key</p>",
     )
     .unwrap();
@@ -456,22 +438,22 @@ fn moves_document_child_container_with_document() {
     let moved = move_workspace_item_on_disk(
         dir.path(),
         &MoveWorkspaceItemInput {
-            source_id: "document:阿里云.lake".to_string(),
-            target_parent_path: "常用配置".to_string(),
+            source_id: "document:测试文件1.lake".to_string(),
+            target_parent_path: "测试文件4".to_string(),
             order: vec![],
         },
     )
     .unwrap();
 
-    assert_eq!(moved.target_path, "常用配置/阿里云.lake");
-    assert!(dir.path().join("常用配置").join("阿里云.lake").exists());
+    assert_eq!(moved.target_path, "测试文件4/测试文件1.lake");
+    assert!(dir.path().join("测试文件4").join("测试文件1.lake").exists());
     assert!(dir
         .path()
-        .join("常用配置")
-        .join("阿里云")
-        .join("访问密钥.lake")
+        .join("测试文件4")
+        .join("测试文件1")
+        .join("测试文件2.lake")
         .exists());
-    assert!(!dir.path().join("阿里云").exists());
+    assert!(!dir.path().join("测试文件1").exists());
 }
 
 #[test]

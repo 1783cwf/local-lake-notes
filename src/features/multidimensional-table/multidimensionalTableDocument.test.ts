@@ -34,13 +34,13 @@ test("空内容会生成默认多维表格模板", () => {
 test("有效多维表格 JSON 可以稳定解析和序列化", () => {
   const source = createDefaultMultidimensionalTableDocument();
   const record = createEmptyMultidimensionalTableRecord(source.fields, {
-    title: "共性公文迁移到湘潭",
+    title: "测试记录1",
     status: "status-single-1",
   });
   const content = serializeMultidimensionalTableDocument({ ...source, records: [record] });
   const parsed = parseMultidimensionalTableDocument(content);
 
-  expect(parsed.records[0].values.title).toBe("共性公文迁移到湘潭");
+  expect(parsed.records[0].values.title).toBe("测试记录1");
   expect(parsed.records[0].values.status).toBe("status-single-1");
   expect(serializeMultidimensionalTableDocument(parsed)).toContain("\"kind\": \"multidimensional-table\"");
 });
@@ -103,7 +103,7 @@ test("时间字段支持纯时间格式", () => {
 test("字段删除会同步清理记录值和看板视图引用", () => {
   const source = createDefaultMultidimensionalTableDocument();
   const record = createEmptyMultidimensionalTableRecord(source.fields, {
-    title: "共性公文迁移到湘潭",
+    title: "测试记录1",
     date: "2026-05-07T12:30",
   });
   const deleted = deleteMultidimensionalField({ ...source, records: [record] }, "date");
@@ -116,7 +116,7 @@ test("字段删除会同步清理记录值和看板视图引用", () => {
 test("删除单选和多选字段选项会同步清理记录值", () => {
   const source = createDefaultMultidimensionalTableDocument();
   const record = createEmptyMultidimensionalTableRecord(source.fields, {
-    title: "共性公文迁移到湘潭",
+    title: "测试记录1",
     status: "status-single-1",
   });
   const withoutStatusPending = updateMultidimensionalFieldOptions(
@@ -140,7 +140,7 @@ test("附件字段会保存结构化附件并兼容旧文本值", () => {
   const record = createEmptyMultidimensionalTableRecord(source.fields, {
     attachment: [{
       id: "file-1",
-      name: "需求说明.pdf",
+      name: "测试文件1.pdf",
       url: "yuque-resource://bucket/files/a.pdf?kind=file",
       resourceRef: "yuque-resource://bucket/files/a.pdf?kind=file",
       size: 12,
@@ -153,7 +153,7 @@ test("附件字段会保存结构化附件并兼容旧文本值", () => {
     fields: source.fields,
     records: [{
       id: "legacy",
-      values: { attachment: "/tmp/旧附件.docx" },
+      values: { attachment: "/tmp/测试旧文件.docx" },
       createdAt: "2026-05-07T00:00:00.000Z",
       updatedAt: "2026-05-07T00:00:00.000Z",
     }],
@@ -162,10 +162,10 @@ test("附件字段会保存结构化附件并兼容旧文本值", () => {
   }));
 
   expect(parsed.records[0].values.attachment).toEqual(expect.arrayContaining([
-    expect.objectContaining({ name: "需求说明.pdf" }),
+    expect.objectContaining({ name: "测试文件1.pdf" }),
   ]));
   expect(legacyParsed.records[0].values.attachment).toEqual(expect.arrayContaining([
-    expect.objectContaining({ name: "旧附件.docx" }),
+    expect.objectContaining({ name: "测试旧文件.docx" }),
   ]));
 });
 

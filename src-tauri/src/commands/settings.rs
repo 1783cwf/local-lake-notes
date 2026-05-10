@@ -1,11 +1,15 @@
 use tauri::AppHandle;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{DatabaseLocationSettings, OssSettings, SaveDatabaseLocationInput};
+use crate::models::{
+    DatabaseLocationSettings, OssSettings, SaveDatabaseLocationInput, StorageConnectionTestOutput,
+    StorageProviderKind,
+};
 use crate::storage::app_database::{
     database_location_settings, load_oss_settings as load_database_oss_settings,
     save_database_location, save_oss_settings as save_database_oss_settings,
 };
+use crate::storage::{local_store, s3, webdav};
 
 #[tauri::command]
 pub fn get_oss_settings(app: AppHandle) -> AppResult<Option<OssSettings>> {
@@ -17,6 +21,26 @@ pub fn save_oss_settings(app: AppHandle, settings: OssSettings) -> AppResult<Oss
     validate_oss_settings(&settings)?;
     save_database_oss_settings(&app, &settings)?;
     Ok(settings)
+}
+
+#[tauri::command]
+pub async fn test_storage_connection(
+    settings: OssSettings,
+) -> AppResult<StorageConnectionTestOutput> {
+    validate_oss_settings(&settings)?;
+    match settings.active_provider {
+        StorageProviderKind::S3 => s3::test_connection(&settings).await?,
+        StorageProviderKind::Local => local_store::test_connection(&settings.local)?,
+        StorageProviderKind::Webdav => webdav::test_connection(&settings.webdav).await?,
+    }
+    let storage_id = settings.active_storage_id();
+
+    Ok(StorageConnectionTestOutput {
+        provider: settings.active_provider,
+        storage_id,
+        ok: true,
+        message: "连接测试成功".to_string(),
+    })
 }
 
 #[tauri::command]
@@ -37,18 +61,46 @@ pub fn load_oss_settings(app: &AppHandle) -> AppResult<Option<OssSettings>> {
 }
 
 pub fn validate_oss_settings(settings: &OssSettings) -> AppResult<()> {
-    let missing = [
-        ("endpoint", settings.endpoint.trim()),
-        ("bucket", settings.bucket.trim()),
-        ("region", settings.region.trim()),
-        ("access key", settings.access_key_id.trim()),
-        ("secret key", settings.secret_access_key.trim()),
-    ]
-    .into_iter()
-    .find_map(|(name, value)| if value.is_empty() { Some(name) } else { None });
+    if !(4..=8).contains(&settings.resource_preview_concurrency) {
+        return Err(AppError::InvalidOssSettings(
+            "资源预览并发数必须在 4 到 8 之间".to_string(),
+        ));
+    }
 
-    if let Some(name) = missing {
-        return Err(AppError::InvalidOssSettings(name.to_string()));
+    match settings.active_provider {
+        StorageProviderKind::S3 => {
+            let missing = [
+                ("endpoint", settings.endpoint.trim()),
+                ("bucket", settings.bucket.trim()),
+                ("region", settings.region.trim()),
+                ("access key", settings.access_key_id.trim()),
+                ("secret key", settings.secret_access_key.trim()),
+            ]
+            .into_iter()
+            .find_map(|(name, value)| if value.is_empty() { Some(name) } else { None });
+
+            if let Some(name) = missing {
+                return Err(AppError::InvalidOssSettings(name.to_string()));
+            }
+        }
+        StorageProviderKind::Local => {
+            if settings.local.root_directory.trim().is_empty() {
+                return Err(AppError::InvalidOssSettings("本地存储目录".to_string()));
+            }
+        }
+        StorageProviderKind::Webdav => {
+            let missing = [
+                ("WebDAV 地址", settings.webdav.endpoint.trim()),
+                ("WebDAV 用户名", settings.webdav.username.trim()),
+                ("WebDAV 密码", settings.webdav.password.trim()),
+            ]
+            .into_iter()
+            .find_map(|(name, value)| if value.is_empty() { Some(name) } else { None });
+
+            if let Some(name) = missing {
+                return Err(AppError::InvalidOssSettings(name.to_string()));
+            }
+        }
     }
     if settings.image_prefix.trim().is_empty() {
         return Err(AppError::InvalidOssSettings("图片目录".to_string()));
@@ -64,6 +116,13 @@ pub fn validate_oss_settings(settings: &OssSettings) -> AppResult<()> {
     {
         return Err(AppError::InvalidOssSettings(
             "签名链接默认有效期".to_string(),
+        ));
+    }
+    if settings.active_provider != StorageProviderKind::S3
+        && settings.default_export_resource_strategy == "signed-url"
+    {
+        return Err(AppError::InvalidOssSettings(
+            "本地和 WebDAV 存储暂不支持短时签名链接导出".to_string(),
         ));
     }
 

@@ -1,6 +1,6 @@
 # Local Lake Notes
 
-Local Lake Notes 是一个基于 Tauri 的本地离线笔记应用原型，目标是在桌面端直接使用语雀 Lake 编辑器编辑 `.lake` 文档。当前版本以 Lake 原生格式为主，文档文件保存在用户选择的知识库目录中，应用配置、排序和 OSS 设置等非文档数据保存在 SQLite 中。
+Local Lake Notes 是一个基于 Tauri 的本地离线笔记应用原型，目标是在桌面端直接使用语雀 Lake 编辑器编辑 `.lake` 文档。当前版本以 Lake 原生格式为主，文档文件保存在用户选择的知识库目录中，应用配置、排序和文件存储设置等非文档数据保存在 SQLite 中。
 
 ## 当前能力
 
@@ -19,7 +19,7 @@ Local Lake Notes 是一个基于 Tauri 的本地离线笔记应用原型，目�
 - 支持目录展开/收起，以及目录和文档重命名、删除，并可在同一知识库内任意拖拽排序或移动层级。
 - 使用 Lake 编辑器内置大纲能力。
 - 支持目录栏拖拽调整宽度，编辑区占满剩余空间。
-- 支持图片上传到兼容 S3 协议的 OSS。
+- 支持图片和附件上传到文件存储，当前可选择 S3 兼容存储、本地目录或 WebDAV。
 - 应用数据使用 SQLite 存储，并支持在设置页自定义数据库目录。
 - 打包后的桌面应用支持通过菜单打开开发者工具，便于排查运行时错误。
 - 兼容 Lake 编辑器的远程内置图片资源，并隔离编辑器挂载节点，避免切换或关闭文档时因第三方 DOM 销毁导致白屏。
@@ -32,7 +32,7 @@ Local Lake Notes 是一个基于 Tauri 的本地离线笔记应用原型，目�
 - 本地数据库：SQLite，使用 `rusqlite`
 - 编辑器：语雀 Lake 编辑器静态资源，位于 `public/vendor/lakex-doc`
 - 表格编辑器：Univer 开源 Sheets，表格落盘为 Univer `IWorkbookData` workbook snapshot JSON
-- 对象存储：AWS S3 SDK，兼容 S3 协议的 OSS
+- 文件存储：AWS S3 SDK、本地文件系统、WebDAV
 
 ## 目录结构
 
@@ -45,12 +45,12 @@ Local Lake Notes 是一个基于 Tauri 的本地离线笔记应用原型，目�
 │   ├── features/lake-editor       # Lake 编辑器适配、上传、自动保存
 │   ├── features/spreadsheet        # Univer 表格编辑、快照读写和 Excel 转换
 │   ├── features/multidimensional-table # 多维表格字段、记录、表格视图和看板视图
-│   ├── features/settings          # OSS 设置
+│   ├── features/settings          # 文件存储、数据存储、备份和资源密钥设置
 │   ├── features/workspace         # 知识库文档树模型
 │   └── lib/tauri.ts               # 前端 Tauri 调用封装
 ├── src-tauri                      # Tauri/Rust 后端
 │   ├── src/commands               # Tauri 命令
-│   ├── src/storage                # SQLite 和 S3 存储实现
+│   ├── src/storage                # SQLite、对象存储 provider、备份和资源加密实现
 │   └── tests                      # Rust 集成测试
 ├── docs                           # 需求和计划文档
 └── yuque-developer-docs.md        # 语雀开发者文档整理稿
@@ -77,7 +77,7 @@ Local Lake Notes 是一个基于 Tauri 的本地离线笔记应用原型，目�
 - 最近打开的知识库路径
 - 已知知识库列表
 - 目录和文档排序
-- OSS 设置
+- 文件存储设置
 - 备份和资源密钥的非敏感元数据
 
 开发环境固定使用仓库内的 SQLite 文件，方便反复调试时复用同一份应用数据：
@@ -203,7 +203,9 @@ npm run tauri dev
 19. 拖拽目录、文档、表格或多维表格到同级前后、目录内部和根目录末尾，确认侧边栏顺序、磁盘路径和重启后的排序保持一致。
 20. 拖动目录栏边界，确认目录宽度可调且编辑区占满剩余空间。
 21. 在设置页的数据存储中选择一个临时数据库目录，保存后重启应用，确认最近知识库、已知知识库列表和排序仍正常。
-22. 配置 OSS 后上传图片和附件，确认文档或多维表格记录中可以预览、下载。
+22. 配置文件存储后上传图片和附件，确认文档或多维表格记录中可以预览、下载。
+23. 切换为本地文件存储，选择临时目录后上传图片和附件，确认目录内生成资源对象，重启后仍可预览和下载。
+24. 在设置页文件存储中执行资源迁移 dry-run，确认能看到待迁移资源、涉及文档、不可读资源和冲突统计。
 
 ## 测试
 
@@ -243,21 +245,22 @@ npm run build
 固定发版流程：
 
 1. 在功能分支完成版本号、README 和代码修改，至少执行 `npm run build`、`npm run test:run`、`cd src-tauri && cargo test`。
-2. 提交功能分支并推送远程，创建 PR 合并到 `main`。
-3. 合并后切换到最新 `main`，确认 `HEAD` 等于 `origin/main`。
-4. 只在 `main` 的合并提交上创建版本 tag，禁止直接在功能分支 tag 发布。
-5. 推送 tag 后等待 `Release` workflow 完成，确认 GitHub Release 指向 `main` 的合并提交。
-6. Release 名称只使用版本号，例如 `v1.4.0`，不要使用应用名加版本号。
-7. Release notes 只描述当前版本相对上一版本的变化，不要把上一版本完整说明复制到本次 Release 中。
-8. 发布完成后确认 Release assets 已上传，Release 名称、Release notes、版本号和 tag 都一致。
+2. 提交功能分支并推送远程，先合并到 `devlop`，确认 `devlop` 已包含本次全部变更。
+3. 从最新 `devlop` 拉出 `release/vX.Y.Z` 分支并推送远程，作为本次发布候选分支。
+4. 将 `release/vX.Y.Z` 合并到 `main`，确认 `main` 的 `HEAD` 等于 `origin/main` 的发布合并提交。
+5. 只在 `main` 的发布合并提交上创建版本 tag，禁止直接在功能分支、`devlop` 或 release 分支 tag 发布。
+6. 推送 tag 后创建 GitHub Release，确认 Release 指向 `main` 的发布合并提交。
+7. Release 名称只使用版本号，例如 `v1.6.0`，不要使用应用名加版本号。
+8. Release notes 只描述当前版本相对上一版本的变化，不要把上一版本完整说明复制到本次 Release 中。
+9. 发布完成后确认 Release assets 已上传，Release 名称、Release notes、版本号和 tag 都一致。
 
 示例：
 
 ```bash
 git switch main
 git pull --ff-only origin main
-git tag v1.4.0
-git push origin v1.4.0
+git tag v1.6.0
+git push origin v1.6.0
 ```
 
 Release notes 格式：
@@ -281,15 +284,17 @@ v1.4.0
 本次 Release notes 草稿：
 
 ```text
-v1.5.1
+v1.6.0
 
-从 v1.5.0 到 v1.5.1 的主要变化：
+从 v1.5.1 到 v1.6.0 的主要变化：
 
-- 修复顶部多文档标签条宽度和滚动显示问题，隐藏原生横向滚动条，并在切换后自动把活动标签拉回可见区域。
-- 修复页签切换或第三方编辑器卸载时偶发 `NotFoundError: removeChild` 导致白屏的问题。
-- 多维表格表格视图新增记录删除按钮，支持删除当前行并保存。
-- 多维表格看板详情新增“删除记录”，删除后自动关闭详情并保存。
-- 更新应用、Tauri 配置和 Rust crate 版本号到 1.5.1。
+- 新增文件存储 provider 体系，支持 S3、本地目录和 WebDAV，并在设置页显示当前激活存储。
+- 新增存储连接测试、资源迁移 dry-run 和执行迁移，迁移过程提供 loading、清点统计和成功/失败提示。
+- 图片和附件预览改为先展示正文与加载占位，再按配置并发请求资源预览，支持 4-8 个并发访问请求。
+- 本地存储资源读取避免不必要的远端加解密链路，优化本地 provider 使用体验。
+- 设置页新增明确的保存存储设置按钮，并修复长表单底部不可见、不可滚动的问题。
+- 修复 Lake 文档滚动容器边界，避免编辑器大纲随外层页面滚动异常。
+- 更新 README 文件存储、资源迁移和发版流程说明，并更新应用、Tauri 配置和 Rust crate 版本号到 1.6.0。
 
 验证：
 
@@ -364,9 +369,13 @@ src-tauri/target/<target-triple>/release/bundle/dmg/
 - Windows 未签名安装包可能触发 SmartScreen 风险提示。
 - 正式对外分发需要配置 macOS Developer ID 签名、公证，以及 Windows 代码签名证书。
 
-## OSS 配置
+## 文件存储配置
 
-当前图片和附件上传使用兼容 S3 协议的配置项：
+当前图片、附件、短时导出临时对象和备份对象使用统一文件存储 provider。设置页可选择一个当前激活 provider，新上传资源和新备份会写入该 provider；已有文档中的 `yuque-resource://...` 会记录 provider/storageId，切换 provider 后仍能按原引用读取历史资源。
+
+### S3 兼容存储
+
+S3 provider 使用兼容 S3 协议的配置项：
 
 - endpoint
 - bucket
@@ -388,16 +397,31 @@ images/2026/04/<uuid>.png
 
 推荐把 bucket 保持为私有读写，不要配置公开只读 bucket policy。应用会把文档中的图片和附件保存为 `yuque-resource://...` 内部资源引用，编辑预览、附件下载、短时签名和导出资源读取都由 Tauri 后端通过 S3 凭据完成，前端不会持有 S3 secret。
 
-上传图片和附件前，需要先在设置页配置本机资源加密密钥。新上传的资源会在 Tauri 后端使用本地密钥加密后再写入 OSS，存储桶中的原始对象是密文，不能直接通过对象 URL 预览。密钥只保存在本机系统钥匙串中，SQLite 和 `.lake` 文档只保存 key fingerprint；如果换设备使用，需要后续导入对应资源密钥，否则旧加密资源无法解密。
+### 本地和 WebDAV 存储
+
+本地 provider 需要选择一个本地目录作为对象根目录，应用会把资源、备份和索引都保存为相对 object key，并拒绝 `..`、绝对路径等越界 key。
+
+WebDAV provider 需要配置服务地址、用户名、密码、根路径和存储标识。`.lake` 和多维表格文档只保存 provider、storageId 和相对 object key，不会写入 WebDAV 完整 URL 或凭据。
+
+使用 S3 或 WebDAV provider 上传图片和附件前，需要先在设置页配置本机资源加密密钥。新上传的远端资源会在 Tauri 后端使用本地密钥加密后再写入文件存储，provider 中的原始对象是密文，不能直接通过对象 URL 预览。密钥只保存在本机系统钥匙串中，SQLite 和 `.lake` 文档只保存 key fingerprint；如果换设备使用，需要后续导入对应资源密钥，否则旧加密资源无法解密。本地 provider 面向本机目录读写，不再额外执行资源级加解密。
 
 导出资源有两种策略：
 
 - 本地资源包：单篇 HTML/Markdown 会导出为 zip，包含正文文件和 `assets/`、`attachments/` 资源目录；知识库整体导出也会把资源放入 zip。适合长期留存和离线交付。
-- 短时签名链接：导出文件中的资源链接会改写为带有效期的 S3 presigned URL，适合临时在线交付。加密资源不会直接签原始密文对象；应用会先解密并上传一份临时明文对象到 `tmp/exports/` 前缀，再对临时明文对象生成短时链接。有效期结束后需要重新导出，建议在对象存储侧给该前缀配置 lifecycle 清理规则。
+- 短时签名链接：仅 S3 provider 支持。导出文件中的资源链接会改写为带有效期的 S3 presigned URL，适合临时在线交付。加密资源不会直接签原始密文对象；应用会先解密并上传一份临时明文对象到 `tmp/exports/` 前缀，再对临时明文对象生成短时链接。有效期结束后需要重新导出，建议在对象存储侧给该前缀配置 lifecycle 清理规则。
+
+### 资源迁移
+
+设置页的文件存储面板提供资源迁移入口，用于把当前知识库中引用的资源从旧 provider 批量复制到当前激活 provider。
+
+- Dry-run 会清点资源数量、涉及文档数量、总大小、不可读资源和目标冲突。
+- 执行迁移会先复制并校验全部目标对象，再重写 `.lake` 文档和多维表格中的 resourceRef。
+- 同一个 resourceRef 被多个文档引用时只复制一次。
+- 迁移会按目标 provider 策略转换资源：目标为本地时写入可直接读取的资源对象，目标为 S3 或 WebDAV 时写入带 `enc` 和 `keyFingerprint` 的加密资源对象。
+- 迁移完成后不会删除旧 provider 中的对象，旧对象清理需要单独确认。
 
 ## 后续方向
 
-- 支持多知识库列表和知识库排序。
-- 支持 WebDAV 备份笔记和设置。
 - 补充 `.lake` 与 HTML/Markdown 的导入能力。
 - 增强多维表格视图能力，例如字段顺序、表格字段显示隐藏和更多视图类型。
+- 支持多个存储 profile 列表和凭据 keyring 化。

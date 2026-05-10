@@ -6,10 +6,11 @@ use tauri::{AppHandle, Manager};
 use crate::commands::settings::{load_oss_settings, validate_oss_settings};
 use crate::error::{AppError, AppResult};
 use crate::models::{UploadImageInput, UploadImageOutput};
+use crate::storage::object_store::put_active_object;
 use crate::storage::resource_crypto::{encrypt_resource_bytes, RESOURCE_CIPHERTEXT_CONTENT_TYPE};
 use crate::storage::resource_key::{active_resource_fingerprint, current_resource_secret};
 use crate::storage::s3::{
-    build_file_object_key, build_image_object_key, build_resource_ref_with_encryption, put_object,
+    build_file_object_key, build_image_object_key, build_resource_ref_with_encryption,
 };
 
 #[tauri::command]
@@ -43,17 +44,24 @@ async fn upload_object(
             .first_or_octet_stream()
             .to_string()
     });
-    let key_fingerprint = active_resource_fingerprint(&app)?;
-    let secret = current_resource_secret(&app, Some(&key_fingerprint))?;
-    let encrypted_bytes = encrypt_resource_bytes(&input.bytes, &secret)?;
+    let key_fingerprint = if settings.active_provider == crate::models::StorageProviderKind::Local {
+        None
+    } else {
+        Some(active_resource_fingerprint(&app)?)
+    };
+    let (stored_bytes, stored_content_type) = if let Some(fingerprint) = key_fingerprint.as_deref()
+    {
+        let secret = current_resource_secret(&app, Some(fingerprint))?;
+        (
+            encrypt_resource_bytes(&input.bytes, &secret)?,
+            RESOURCE_CIPHERTEXT_CONTENT_TYPE,
+        )
+    } else {
+        // 本地存储只落在用户指定目录，本机访问不需要再做资源级加密，避免上传和预览都被密钥链路拖慢。
+        (input.bytes.clone(), content_type.as_str())
+    };
 
-    put_object(
-        &settings,
-        &key,
-        encrypted_bytes,
-        RESOURCE_CIPHERTEXT_CONTENT_TYPE,
-    )
-    .await?;
+    put_active_object(&settings, &key, stored_bytes, stored_content_type).await?;
     let kind = if key.starts_with(settings.file_prefix.trim_matches('/')) {
         "file"
     } else {
@@ -66,7 +74,7 @@ async fn upload_object(
         &input.filename,
         input.bytes.len(),
         &content_type,
-        Some(&key_fingerprint),
+        key_fingerprint.as_deref(),
     );
     // 上传后的编辑器回显不能依赖公共访问 URL。桶保持私有时，预览走本地缓存；
     // 文档保存仍写入 resource_ref，后续打开时可从 S3 重新生成缓存。

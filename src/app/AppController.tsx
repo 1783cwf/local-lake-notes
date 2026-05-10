@@ -42,8 +42,10 @@ import {
 } from "../features/workspace/workspaceStore";
 import {
   chooseWorkspaceDirectory,
+  analyzeResourceMigration,
   chooseExcelImportFile,
   chooseDatabaseDirectory,
+  chooseStorageDirectory,
   createWorkspaceRoot,
   createLakeDirectory,
   createLakeDocument,
@@ -84,9 +86,11 @@ import {
   resetBackupKey,
   resetResourceKey,
   restoreBackup,
+  runResourceMigration,
   setBackupKey,
   setResourceKey,
   setWorkspaceRoot,
+  testStorageConnection,
   uploadFile,
   uploadImage,
   verifyBackupKeyStatus,
@@ -719,16 +723,22 @@ export function AppController() {
   const createResourceExportOptions = useCallback((
     resourceStrategy?: LakeDocumentExportRequest["resourceStrategy"],
     signedUrlTtlSeconds?: number,
-  ): LakeDocumentResourceExportOptions => ({
-    strategy: resourceStrategy ?? ossSettings?.defaultExportResourceStrategy ?? "bundle",
-    signedUrlTtlSeconds: signedUrlTtlSeconds ?? ossSettings?.defaultSignedUrlTtlSeconds ?? 24 * 60 * 60,
-    bucket: ossSettings?.bucket,
-    publicBaseUrl: ossSettings?.publicBaseUrl,
-    imagePrefix: ossSettings?.imagePrefix,
-    filePrefix: ossSettings?.filePrefix,
-    signResource: (resourceRef, filename, ttlSeconds) => createTemporaryResourceUrl(resourceRef, ttlSeconds, filename),
-    loadResource: readResourceBytes,
-  }), [
+  ): LakeDocumentResourceExportOptions => {
+    const requestedStrategy = resourceStrategy ?? ossSettings?.defaultExportResourceStrategy ?? "bundle";
+    const strategy = ossSettings?.activeProvider === "s3" ? requestedStrategy : "bundle";
+
+    return {
+      strategy,
+      signedUrlTtlSeconds: signedUrlTtlSeconds ?? ossSettings?.defaultSignedUrlTtlSeconds ?? 24 * 60 * 60,
+      bucket: ossSettings?.bucket,
+      publicBaseUrl: ossSettings?.publicBaseUrl,
+      imagePrefix: ossSettings?.imagePrefix,
+      filePrefix: ossSettings?.filePrefix,
+      signResource: (resourceRef, filename, ttlSeconds) => createTemporaryResourceUrl(resourceRef, ttlSeconds, filename),
+      loadResource: readResourceBytes,
+    };
+  }, [
+    ossSettings?.activeProvider,
     ossSettings?.bucket,
     ossSettings?.defaultExportResourceStrategy,
     ossSettings?.defaultSignedUrlTtlSeconds,
@@ -998,13 +1008,13 @@ export function AppController() {
   const uploadEditorImage = useCallback(async (input: UploadImageInput): Promise<UploadImageOutput> => {
     if (!ossSettings) {
       setSettingsOpen(true);
-      throw new Error("请先配置 OSS 上传信息");
+      throw new Error("请先配置文件存储");
     }
-    if (!resourceKeyStatus.configured) {
+    if (ossSettings.activeProvider !== "local" && !resourceKeyStatus.configured) {
       setSettingsOpen(true);
       throw new Error(resourceKeyStatus.needsKey ? "本机缺少资源加密密钥" : "请先设置资源加密密钥");
     }
-    beginUploadOperation("image-upload", "正在上传并加密图片");
+    beginUploadOperation("image-upload", ossSettings.activeProvider === "local" ? "正在上传图片" : "正在上传并加密图片");
     try {
       return await uploadImage(input);
     } finally {
@@ -1015,13 +1025,13 @@ export function AppController() {
   const uploadEditorFile = useCallback(async (input: UploadImageInput): Promise<UploadImageOutput> => {
     if (!ossSettings) {
       setSettingsOpen(true);
-      throw new Error("请先配置 OSS 上传信息");
+      throw new Error("请先配置文件存储");
     }
-    if (!resourceKeyStatus.configured) {
+    if (ossSettings.activeProvider !== "local" && !resourceKeyStatus.configured) {
       setSettingsOpen(true);
       throw new Error(resourceKeyStatus.needsKey ? "本机缺少资源加密密钥" : "请先设置资源加密密钥");
     }
-    beginUploadOperation("file-upload", "正在上传并加密附件");
+    beginUploadOperation("file-upload", ossSettings.activeProvider === "local" ? "正在上传附件" : "正在上传并加密附件");
     try {
       return await uploadFile(input);
     } finally {
@@ -1193,6 +1203,7 @@ export function AppController() {
           spreadsheetExcelBusy={activeAppOperation?.kind === "spreadsheet-excel"}
           defaultExportResourceStrategy={ossSettings?.defaultExportResourceStrategy}
           defaultSignedUrlTtlSeconds={ossSettings?.defaultSignedUrlTtlSeconds}
+          signedUrlExportEnabled={ossSettings?.activeProvider === "s3"}
           onRenameDocument={(title) => {
             if (currentDocument) {
               return renameDocumentTo(currentDocument.entry, title);
@@ -1230,6 +1241,7 @@ export function AppController() {
               onUploadFile={uploadEditorFile}
               onDownloadFile={downloadEditorFile}
               onPrepareResourcePreview={prepareEditorResourcePreview}
+              resourcePreviewConcurrency={ossSettings?.resourcePreviewConcurrency}
               onSaveStatusChange={setSaveStatus}
               onRegisterSaveNow={registerEditorSaveNow}
             />
@@ -1246,6 +1258,7 @@ export function AppController() {
             onUploadFile={uploadEditorFile}
             onDownloadFile={downloadEditorFile}
             onPrepareResourcePreview={prepareEditorResourcePreview}
+            resourcePreviewConcurrency={ossSettings?.resourcePreviewConcurrency}
             onSaveStatusChange={setSaveStatus}
             onRegisterSaveNow={registerEditorSaveNow}
           />
@@ -1258,6 +1271,7 @@ export function AppController() {
         onClose={() => setSettingsOpen(false)}
         onSave={saveSettings}
         onChooseDatabaseDirectory={chooseDatabaseDirectory}
+        onChooseStorageDirectory={chooseStorageDirectory}
         onSaveDatabaseLocation={saveDatabaseDirectory}
         backupKeyStatus={backupKeyStatus}
         resourceKeyStatus={resourceKeyStatus}
@@ -1271,6 +1285,13 @@ export function AppController() {
         onCreateBackup={runBackup}
         onRestoreBackup={runRestore}
         onDeleteBackup={runDeleteBackup}
+        onTestStorageConnection={testStorageConnection}
+        onAnalyzeResourceMigration={analyzeResourceMigration}
+        onRunResourceMigration={async (input) => {
+          const output = await runResourceMigration(input);
+          await refreshCurrentDocumentFromDisk();
+          return output;
+        }}
       />
       {textDialog ? (
         <TextInputDialog dialog={textDialog} onClose={() => setTextDialog(null)} />

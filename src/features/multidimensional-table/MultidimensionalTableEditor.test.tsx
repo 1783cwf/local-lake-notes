@@ -64,7 +64,7 @@ test("可以在同一个多维表格中新增看板视图并共享原有数据",
   await user.click(screen.getByRole("button", { name: "新增看板" }));
 
   expect(screen.getByRole("tab", { name: /看板 2/ })).toHaveAttribute("aria-selected", "true");
-  expect(screen.getByRole("button", { name: /共性公文迁移到湘潭/ })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /测试记录1/ })).toBeInTheDocument();
 
   await waitFor(() => {
     expect(savedContent).toContain("\"name\": \"看板 2\"");
@@ -88,18 +88,18 @@ test("视图页签支持重命名和删除多余看板", async () => {
   await user.click(screen.getByRole("button", { name: "看板 2 视图操作" }));
   await user.click(screen.getByRole("menuitem", { name: "重命名" }));
   await user.clear(screen.getByLabelText("重命名视图 看板 2"));
-  await user.type(screen.getByLabelText("重命名视图 看板 2"), "发布排期");
+  await user.type(screen.getByLabelText("重命名视图 看板 2"), "测试视图1");
   await user.keyboard("{Enter}");
 
-  expect(screen.getByRole("tab", { name: /发布排期/ })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByRole("tab", { name: /测试视图1/ })).toHaveAttribute("aria-selected", "true");
   await waitFor(() => {
-    expect(savedContent).toContain("\"name\": \"发布排期\"");
+    expect(savedContent).toContain("\"name\": \"测试视图1\"");
   }, { timeout: 1400 });
 
-  await user.click(screen.getByRole("button", { name: "发布排期 视图操作" }));
+  await user.click(screen.getByRole("button", { name: "测试视图1 视图操作" }));
   await user.click(screen.getByRole("menuitem", { name: "删除" }));
 
-  expect(screen.queryByRole("tab", { name: /发布排期/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("tab", { name: /测试视图1/ })).not.toBeInTheDocument();
   expect(screen.getByRole("tab", { name: /进展看板/ })).toHaveAttribute("aria-selected", "true");
   await waitFor(() => {
     const savedDocument = JSON.parse(savedContent);
@@ -124,13 +124,13 @@ test("工具栏已移除生成表单并支持搜索筛选排序", async () => {
     title: "B 任务",
     status: "status-single-1",
     category: ["multi-1"],
-    description: "湘潭项目",
+    description: "测试内容1",
   });
   const secondRecord = createEmptyMultidimensionalTableRecord(table.fields, {
     title: "A 任务",
     status: "status-single-2",
     category: ["multi-2"],
-    description: "株洲项目",
+    description: "测试内容2",
   });
 
   renderEditor({
@@ -140,7 +140,7 @@ test("工具栏已移除生成表单并支持搜索筛选排序", async () => {
   expect(screen.queryByRole("button", { name: "生成表单" })).not.toBeInTheDocument();
 
   await user.click(screen.getByRole("button", { name: "搜索" }));
-  await user.type(screen.getByLabelText("搜索记录"), "湘潭");
+  await user.type(screen.getByLabelText("搜索记录"), "测试内容1");
   expect(screen.getByDisplayValue("B 任务")).toBeInTheDocument();
   expect(screen.queryByDisplayValue("A 任务")).not.toBeInTheDocument();
 
@@ -170,17 +170,17 @@ test("筛选支持多规则并保存到当前视图", async () => {
   const firstRecord = createEmptyMultidimensionalTableRecord(table.fields, {
     title: "待办任务",
     status: "status-single-1",
-    description: "湘潭项目",
+    description: "测试内容1",
   });
   const secondRecord = createEmptyMultidimensionalTableRecord(table.fields, {
-    title: "株洲任务",
+    title: "测试记录2",
     status: "status-single-2",
-    description: "株洲项目",
+    description: "测试内容2",
   });
   const thirdRecord = createEmptyMultidimensionalTableRecord(table.fields, {
-    title: "湘潭任务",
+    title: "测试记录3",
     status: "status-single-2",
-    description: "湘潭项目",
+    description: "测试内容1",
   });
   const content = serializeMultidimensionalTableDocument({
     ...table,
@@ -196,24 +196,24 @@ test("筛选支持多规则并保存到当前视图", async () => {
   await user.click(screen.getByRole("button", { name: "添加筛选规则" }));
   await user.selectOptions(screen.getByLabelText("筛选字段 2"), "description");
   await user.selectOptions(screen.getByLabelText("筛选条件 2"), "contains");
-  await user.type(screen.getByLabelText("筛选值 2"), "湘潭");
+  await user.type(screen.getByLabelText("筛选值 2"), "测试内容1");
 
   expect(screen.queryByRole("button", { name: /待办任务/ })).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /株洲任务/ })).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: /湘潭任务/ })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /测试记录2/ })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /测试记录3/ })).toBeInTheDocument();
 
   await waitFor(() => {
     expect(savedContent).toContain("\"filterRules\"");
     expect(savedContent).toContain("\"status-single-2\"");
-    expect(savedContent).toContain("湘潭");
+    expect(savedContent).toContain("测试内容1");
   }, { timeout: 1400 });
 
   rendered.unmount();
   renderEditor({ content: savedContent });
 
   expect(screen.queryByRole("button", { name: /待办任务/ })).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /株洲任务/ })).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: /湘潭任务/ })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /测试记录2/ })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /测试记录3/ })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "2个筛选" })).toBeInTheDocument();
 });
 
@@ -224,10 +224,10 @@ test("表格视图编辑文本字段后会防抖保存", async () => {
 
   await user.click(screen.getByRole("tab", { name: /表格/ }));
   await user.clear(screen.getByLabelText("标题"));
-  await user.type(screen.getByLabelText("标题"), "新的上线任务");
+  await user.type(screen.getByLabelText("标题"), "新的测试记录");
 
   await waitFor(() => {
-    expect(onSave).toHaveBeenCalledWith("project.dbtable.json", expect.stringContaining("新的上线任务"));
+    expect(onSave).toHaveBeenCalledWith("project.dbtable.json", expect.stringContaining("新的测试记录"));
   }, { timeout: 1400 });
 });
 
@@ -240,9 +240,9 @@ test("表格视图可以删除记录并保存", async () => {
   renderEditor({ onSave });
 
   await user.click(screen.getByRole("tab", { name: /表格/ }));
-  await user.click(screen.getByRole("button", { name: /删除记录 共性公文迁移到湘潭/ }));
+  await user.click(screen.getByRole("button", { name: /删除记录 测试记录1/ }));
 
-  expect(screen.queryByDisplayValue("共性公文迁移到湘潭")).not.toBeInTheDocument();
+  expect(screen.queryByDisplayValue("测试记录1")).not.toBeInTheDocument();
   await waitFor(() => {
     expect(JSON.parse(savedContent).records).toHaveLength(0);
   }, { timeout: 1400 });
@@ -291,7 +291,7 @@ test("字段配置可以修改时间格式并删除字段", async () => {
   expect(document.querySelectorAll(".multitable-grid__header .multitable-grid__cell--header")).toHaveLength(5);
   expect(document.querySelectorAll(".multitable-grid__row:first-child .multitable-grid__cell")).toHaveLength(6);
   expect(document.querySelector(".multitable-grid__row:first-child .multitable-grid__cell--row-actions")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: /删除记录 共性公文迁移到湘潭/ })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /删除记录 测试记录1/ })).toBeInTheDocument();
 });
 
 test("单选和多选字段可以用选项面板选择并新增选项", async () => {
@@ -369,11 +369,11 @@ test("看板详情可以删除记录并关闭详情", async () => {
   });
   renderEditor({ onSave });
 
-  await user.click(screen.getByRole("button", { name: /共性公文迁移到湘潭/ }));
+  await user.click(screen.getByRole("button", { name: /测试记录1/ }));
   await user.click(screen.getByRole("button", { name: "删除记录" }));
 
   expect(screen.queryByRole("complementary", { name: "记录详情" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /共性公文迁移到湘潭/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /测试记录1/ })).not.toBeInTheDocument();
   await waitFor(() => {
     expect(JSON.parse(savedContent).records).toHaveLength(0);
   }, { timeout: 1400 });
@@ -391,13 +391,13 @@ test("看板配置可以控制卡片字段显示隐藏", async () => {
   expect(screen.getByLabelText(/状态/)).toBeInTheDocument();
   await user.click(screen.getByLabelText(/主要内容/));
 
-  expect(screen.queryByText("将访问共性公文的流量指向湘潭pod4")).not.toBeInTheDocument();
+  expect(screen.queryByText("测试内容1")).not.toBeInTheDocument();
   await waitFor(() => {
     expect(onSave).toHaveBeenCalledWith("project.dbtable.json", expect.stringContaining("\"cardFieldIds\""));
   }, { timeout: 1400 });
 
   await user.click(screen.getByLabelText(/标题/));
-  expect(screen.queryByRole("button", { name: /共性公文迁移到湘潭/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /测试记录1/ })).not.toBeInTheDocument();
 });
 
 test("看板配置和筛选面板点击外部区域会收起", async () => {
@@ -431,10 +431,10 @@ test("看板可以切换分组字段并直接调整卡片记录", async () => {
     ],
   };
   const record = createEmptyMultidimensionalTableRecord([...table.fields, priorityField], {
-    title: "共性公文迁移到湘潭",
+    title: "测试记录1",
     status: "status-single-1",
     category: ["multi-1", "multi-2"],
-    description: "将访问共性公文的流量指向湘潭pod4",
+    description: "测试内容1",
     date: "2026-04-13T09:00",
     priority: "priority-high",
     attachment: [],
@@ -450,7 +450,7 @@ test("看板可以切换分组字段并直接调整卡片记录", async () => {
   });
 
   await user.selectOptions(screen.getByLabelText("看板分组字段"), "priority");
-  await user.click(screen.getByRole("button", { name: /共性公文迁移到湘潭/ }));
+  await user.click(screen.getByRole("button", { name: /测试记录1/ }));
   await user.clear(screen.getByLabelText("看板标题"));
   await user.type(screen.getByLabelText("看板标题"), "新的看板任务");
   await user.click(screen.getByRole("button", { name: "编辑字段 日期" }));
@@ -468,26 +468,26 @@ test("看板详情支持附件上传下载和正文编辑", async () => {
   const user = userEvent.setup();
   const onSave = vi.fn(async () => undefined);
   const onUploadFile = vi.fn(async () => ({
-    url: "blob:需求说明.pdf",
-    filename: "需求说明.pdf",
+    url: "blob:测试文件1.pdf",
+    filename: "测试文件1.pdf",
     size: 4,
     resourceRef: "yuque-resource://bucket/files/a.pdf?kind=file",
   }));
   const onDownloadFile = vi.fn(async () => undefined);
   renderEditor({ onSave, onUploadFile, onDownloadFile });
 
-  await user.click(screen.getByRole("button", { name: /共性公文迁移到湘潭/ }));
-  await user.upload(screen.getByLabelText("上传记录附件"), new File(["demo"], "需求说明.pdf", { type: "application/pdf" }));
+  await user.click(screen.getByRole("button", { name: /测试记录1/ }));
+  await user.upload(screen.getByLabelText("上传记录附件"), new File(["demo"], "测试文件1.pdf", { type: "application/pdf" }));
 
   await waitFor(() => {
     expect(onUploadFile).toHaveBeenCalled();
-    expect(onSave).toHaveBeenCalledWith("project.dbtable.json", expect.stringContaining("需求说明.pdf"));
+    expect(onSave).toHaveBeenCalledWith("project.dbtable.json", expect.stringContaining("测试文件1.pdf"));
   }, { timeout: 1400 });
 
-  await user.click(screen.getByRole("button", { name: "下载附件 需求说明.pdf" }));
+  await user.click(screen.getByRole("button", { name: "下载附件 测试文件1.pdf" }));
   expect(onDownloadFile).toHaveBeenCalledWith({
-    url: "blob:需求说明.pdf",
-    filename: "需求说明.pdf",
+    url: "blob:测试文件1.pdf",
+    filename: "测试文件1.pdf",
     resourceRef: "yuque-resource://bucket/files/a.pdf?kind=file",
   });
 
@@ -501,7 +501,7 @@ test("看板详情点击外部区域会关闭", async () => {
   const user = userEvent.setup();
   renderEditor();
 
-  await user.click(screen.getByRole("button", { name: /共性公文迁移到湘潭/ }));
+  await user.click(screen.getByRole("button", { name: /测试记录1/ }));
   expect(screen.getByRole("complementary", { name: "记录详情" })).toBeInTheDocument();
 
   await user.click(document.querySelector(".multitable-record-detail-backdrop")!);
@@ -513,7 +513,7 @@ test("看板详情正文可以全屏编辑并保存", async () => {
   const onSave = vi.fn(async () => undefined);
   renderEditor({ onSave });
 
-  await user.click(screen.getByRole("button", { name: /共性公文迁移到湘潭/ }));
+  await user.click(screen.getByRole("button", { name: /测试记录1/ }));
   await user.click(screen.getByRole("button", { name: "全屏编辑正文" }));
 
   expect(screen.getByRole("dialog", { name: "正文全屏编辑" })).toBeInTheDocument();
@@ -549,10 +549,10 @@ function renderEditor({
 } = {}) {
   const table = tableWithCategory();
   const record = createEmptyMultidimensionalTableRecord(table.fields, {
-    title: "共性公文迁移到湘潭",
+    title: "测试记录1",
     status: "status-single-1",
     category: ["multi-1", "multi-2"],
-    description: "将访问共性公文的流量指向湘潭pod4",
+    description: "测试内容1",
     date: "2026-04-13T09:00",
     attachment: [],
   });

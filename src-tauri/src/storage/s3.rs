@@ -9,11 +9,13 @@ use std::time::Duration;
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
-use crate::models::OssSettings;
+use crate::models::{OssSettings, StorageProviderKind};
 use crate::storage::resource_crypto::RESOURCE_ENCRYPTION_ALGORITHM;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResourceRef {
+    pub provider: StorageProviderKind,
+    pub storage_id: String,
     pub bucket: String,
     pub key: String,
     pub kind: String,
@@ -83,25 +85,59 @@ pub fn build_resource_ref_with_encryption(
     content_type: &str,
     key_fingerprint: Option<&str>,
 ) -> String {
-    let encryption_query = key_fingerprint
+    let encryption = key_fingerprint
         .filter(|fingerprint| !fingerprint.trim().is_empty())
-        .map(|fingerprint| {
-            format!(
-                "&enc={}&keyFingerprint={}",
-                url_encode(RESOURCE_ENCRYPTION_ALGORITHM),
-                url_encode(fingerprint)
-            )
-        })
-        .unwrap_or_default();
+        .map(|fingerprint| ResourceEncryptionMetadata {
+            algorithm: RESOURCE_ENCRYPTION_ALGORITHM.to_string(),
+            key_fingerprint: fingerprint.to_string(),
+        });
+    build_resource_ref_for_target(
+        &settings.active_provider,
+        &settings.active_storage_id(),
+        key,
+        kind,
+        Some(filename),
+        Some(size),
+        Some(content_type),
+        encryption.as_ref(),
+    )
+}
+
+pub fn build_resource_ref_for_target(
+    provider: &StorageProviderKind,
+    storage_id: &str,
+    key: &str,
+    kind: &str,
+    filename: Option<&str>,
+    size: Option<usize>,
+    content_type: Option<&str>,
+    encryption: Option<&ResourceEncryptionMetadata>,
+) -> String {
+    let mut query = vec![
+        format!("provider={}", url_encode(storage_provider_query(provider))),
+        format!("kind={}", url_encode(kind)),
+    ];
+    if let Some(filename) = filename.filter(|value| !value.trim().is_empty()) {
+        query.push(format!("name={}", url_encode(filename)));
+    }
+    if let Some(size) = size {
+        query.push(format!("size={size}"));
+    }
+    if let Some(content_type) = content_type.filter(|value| !value.trim().is_empty()) {
+        query.push(format!("type={}", url_encode(content_type)));
+    }
+    if let Some(encryption) = encryption {
+        query.push(format!("enc={}", url_encode(&encryption.algorithm)));
+        query.push(format!(
+            "keyFingerprint={}",
+            url_encode(&encryption.key_fingerprint)
+        ));
+    }
     format!(
-        "yuque-resource://{}/{}?kind={}&name={}&size={}&type={}{}",
-        url_encode(&settings.bucket),
+        "yuque-resource://{}/{}?{}",
+        url_encode(storage_id),
         key.split('/').map(url_encode).collect::<Vec<_>>().join("/"),
-        url_encode(kind),
-        url_encode(filename),
-        size,
-        url_encode(content_type),
-        encryption_query
+        query.join("&")
     )
 }
 
@@ -110,19 +146,19 @@ pub fn parse_resource_ref(resource_ref: &str) -> AppResult<(String, String)> {
         return Err(AppError::InvalidExternalUrl);
     };
     let (target, _) = rest.split_once('?').unwrap_or((rest, ""));
-    let Some((bucket, key)) = target.split_once('/') else {
+    let Some((storage_id, key)) = target.split_once('/') else {
         return Err(AppError::InvalidExternalUrl);
     };
-    let bucket = percent_decode(bucket);
+    let storage_id = percent_decode(storage_id);
     let key = key
         .split('/')
         .map(percent_decode)
         .collect::<Vec<_>>()
         .join("/");
-    if bucket.is_empty() || key.is_empty() {
+    if storage_id.is_empty() || key.is_empty() {
         return Err(AppError::InvalidExternalUrl);
     }
-    Ok((bucket, key))
+    Ok((storage_id, key))
 }
 
 pub fn parse_resource_ref_detail(resource_ref: &str) -> AppResult<ResourceRef> {
@@ -130,20 +166,26 @@ pub fn parse_resource_ref_detail(resource_ref: &str) -> AppResult<ResourceRef> {
         return Err(AppError::InvalidExternalUrl);
     };
     let (target, query) = rest.split_once('?').unwrap_or((rest, ""));
-    let Some((bucket, key)) = target.split_once('/') else {
+    let Some((storage_id, key)) = target.split_once('/') else {
         return Err(AppError::InvalidExternalUrl);
     };
-    let bucket = percent_decode(bucket);
+    let storage_id = percent_decode(storage_id);
     let key = key
         .split('/')
         .map(percent_decode)
         .collect::<Vec<_>>()
         .join("/");
-    if bucket.is_empty() || key.is_empty() {
+    if storage_id.is_empty() || key.is_empty() {
         return Err(AppError::InvalidExternalUrl);
     }
 
     let params = parse_query_params(query);
+    let provider = match params.get("provider").map(String::as_str) {
+        Some("s3") | None => StorageProviderKind::S3,
+        Some("local") => StorageProviderKind::Local,
+        Some("webdav") => StorageProviderKind::Webdav,
+        Some(_) => return Err(AppError::InvalidExternalUrl),
+    };
     let encryption = match params.get("enc") {
         Some(algorithm) if algorithm == RESOURCE_ENCRYPTION_ALGORITHM => {
             let fingerprint = params
@@ -160,7 +202,9 @@ pub fn parse_resource_ref_detail(resource_ref: &str) -> AppResult<ResourceRef> {
     };
 
     Ok(ResourceRef {
-        bucket,
+        provider,
+        storage_id: storage_id.clone(),
+        bucket: storage_id,
         key,
         kind: params
             .get("kind")
@@ -254,6 +298,18 @@ pub async fn list_object_keys(settings: &OssSettings, prefix: &str) -> AppResult
     Ok(keys)
 }
 
+pub async fn test_connection(settings: &OssSettings) -> AppResult<()> {
+    let client = s3_client(settings).await;
+    client
+        .list_objects_v2()
+        .bucket(&settings.bucket)
+        .max_keys(1)
+        .send()
+        .await
+        .map_err(|error| AppError::S3(error.to_string()))?;
+    Ok(())
+}
+
 pub async fn presign_get_object_url(
     settings: &OssSettings,
     key: &str,
@@ -291,6 +347,14 @@ pub fn validate_resource_key(settings: &OssSettings, bucket: &str, key: &str) ->
         Ok(())
     } else {
         Err(AppError::InvalidExternalUrl)
+    }
+}
+
+fn storage_provider_query(provider: &StorageProviderKind) -> &'static str {
+    match provider {
+        StorageProviderKind::S3 => "s3",
+        StorageProviderKind::Local => "local",
+        StorageProviderKind::Webdav => "webdav",
     }
 }
 
