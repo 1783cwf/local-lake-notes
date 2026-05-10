@@ -1,5 +1,5 @@
 use tempfile::tempdir;
-use yuque_lake_notes_lib::models::OssSettings;
+use yuque_lake_notes_lib::models::{OssSettings, StorageProviderKind};
 use yuque_lake_notes_lib::storage::app_database::{
     clear_recent_workspace_root_at, clone_database_to_directory_at, forget_known_workspace_at,
     list_known_workspaces_at, load_oss_settings_at, load_recent_workspace_root_at,
@@ -10,6 +10,7 @@ use yuque_lake_notes_lib::storage::app_database::{
 
 fn valid_settings() -> OssSettings {
     OssSettings {
+        active_provider: StorageProviderKind::S3,
         endpoint: "https://oss.example".to_string(),
         bucket: "notes".to_string(),
         region: "us-east-1".to_string(),
@@ -24,6 +25,9 @@ fn valid_settings() -> OssSettings {
         default_signed_url_ttl_seconds: 24 * 60 * 60,
         max_signed_url_ttl_seconds: 7 * 24 * 60 * 60,
         allow_signed_url_export: true,
+        resource_preview_concurrency: 6,
+        local: Default::default(),
+        webdav: Default::default(),
     }
 }
 

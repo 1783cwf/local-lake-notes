@@ -13,7 +13,11 @@ import type {
   OssSettings,
   RestoreBackupInput,
   RestoreBackupOutput,
+  ResourceMigrationAnalysisOutput,
+  ResourceMigrationInput,
+  ResourceMigrationRunOutput,
   ResourceKeyStatus,
+  StorageConnectionTestOutput,
   UploadImageInput,
   UploadImageOutput,
 } from "../app/appState";
@@ -32,6 +36,7 @@ import {
   MULTIDIMENSIONAL_TABLE_EXTENSION,
   serializeMultidimensionalTableDocument,
 } from "../features/multidimensional-table/multidimensionalTableDocument";
+import { mergeOssSettings } from "../features/settings/ossSettingsStore";
 
 const browserWorkspaceKey = "yuque-lake-notes.browser-workspace";
 const browserCurrentWorkspaceRootKey = "yuque-lake-notes.browser-current-workspace-root";
@@ -72,6 +77,20 @@ export async function chooseDatabaseDirectory(): Promise<string | null> {
     directory: true,
     multiple: false,
     title: "选择数据库目录",
+  });
+
+  return typeof selected === "string" ? selected : null;
+}
+
+export async function chooseStorageDirectory(): Promise<string | null> {
+  if (!isTauriRuntime()) {
+    return "/browser-preview/storage";
+  }
+
+  const selected = await open({
+    directory: true,
+    multiple: false,
+    title: "选择文件存储目录",
   });
 
   return typeof selected === "string" ? selected : null;
@@ -616,19 +635,44 @@ export async function savePdfExport(
 export async function getOssSettings(): Promise<OssSettings | null> {
   if (!isTauriRuntime()) {
     const stored = window.localStorage.getItem(browserSettingsKey);
-    return stored ? (JSON.parse(stored) as OssSettings) : null;
+    return stored ? mergeOssSettings(JSON.parse(stored) as OssSettings) : null;
   }
 
   return invoke<OssSettings | null>("get_oss_settings");
 }
 
 export async function saveOssSettings(settings: OssSettings): Promise<OssSettings> {
+  const normalized = mergeOssSettings(settings);
   if (!isTauriRuntime()) {
-    window.localStorage.setItem(browserSettingsKey, JSON.stringify(settings));
-    return settings;
+    window.localStorage.setItem(browserSettingsKey, JSON.stringify(normalized));
+    return normalized;
   }
 
-  return invoke<OssSettings>("save_oss_settings", { settings });
+  return invoke<OssSettings>("save_oss_settings", { settings: normalized });
+}
+
+export async function testStorageConnection(settings: OssSettings): Promise<StorageConnectionTestOutput> {
+  const normalized = mergeOssSettings(settings);
+  if (!isTauriRuntime()) {
+    return {
+      provider: normalized.activeProvider,
+      storageId: activeStorageId(normalized),
+      ok: true,
+      message: "浏览器预览环境已跳过真实连接测试",
+    };
+  }
+
+  return invoke<StorageConnectionTestOutput>("test_storage_connection", { settings: normalized });
+}
+
+function activeStorageId(settings: OssSettings): string {
+  if (settings.activeProvider === "local") {
+    return settings.local.storageId.trim() || "local";
+  }
+  if (settings.activeProvider === "webdav") {
+    return settings.webdav.storageId.trim() || "webdav";
+  }
+  return settings.bucket.trim();
 }
 
 export async function getDatabaseLocation(): Promise<DatabaseLocationSettings> {
@@ -801,9 +845,29 @@ export async function deleteBackup(input: DeleteBackupInput): Promise<DeleteBack
   return invoke<DeleteBackupOutput>("delete_backup", { input });
 }
 
+export async function analyzeResourceMigration(input: ResourceMigrationInput): Promise<ResourceMigrationAnalysisOutput> {
+  if (!isTauriRuntime()) {
+    return emptyBrowserResourceMigrationAnalysis();
+  }
+
+  return invoke<ResourceMigrationAnalysisOutput>("analyze_resource_migration", { input });
+}
+
+export async function runResourceMigration(input: ResourceMigrationInput): Promise<ResourceMigrationRunOutput> {
+  if (!isTauriRuntime()) {
+    return {
+      analysis: emptyBrowserResourceMigrationAnalysis(),
+      rewrittenDocuments: [],
+      copiedResources: 0,
+    };
+  }
+
+  return invoke<ResourceMigrationRunOutput>("run_resource_migration", { input });
+}
+
 export async function uploadImage(input: UploadImageInput): Promise<UploadImageOutput> {
   if (!isTauriRuntime()) {
-    const resourceRef = `yuque-resource://browser/images/${encodeURIComponent(input.filename)}?kind=image&name=${encodeURIComponent(input.filename)}&size=${input.bytes.length}`;
+    const resourceRef = buildBrowserResourceRef(input, "image");
     return {
       url: resourceRef,
       size: input.bytes.length,
@@ -819,7 +883,7 @@ export async function uploadImage(input: UploadImageInput): Promise<UploadImageO
 
 export async function uploadFile(input: UploadImageInput): Promise<UploadImageOutput> {
   if (!isTauriRuntime()) {
-    const resourceRef = `yuque-resource://browser/files/${encodeURIComponent(input.filename)}?kind=file&name=${encodeURIComponent(input.filename)}&size=${input.bytes.length}`;
+    const resourceRef = buildBrowserResourceRef(input, "file");
     return {
       url: resourceRef,
       size: input.bytes.length,
@@ -929,6 +993,50 @@ export async function downloadResourceFile(input: FileDownloadInput): Promise<st
 function fileExtension(filename: string): string | undefined {
   const extension = filename.split(".").pop();
   return extension && extension !== filename ? extension : undefined;
+}
+
+function buildBrowserResourceRef(input: UploadImageInput, kind: "image" | "file"): string {
+  const stored = window.localStorage.getItem(browserSettingsKey);
+  const settings = mergeOssSettings(stored ? JSON.parse(stored) as OssSettings : null);
+  const storageId = browserStorageId(settings);
+  const prefix = kind === "image" ? settings.imagePrefix : settings.filePrefix;
+  const key = `${trimSlashes(prefix)}/${encodeURIComponent(input.filename)}`;
+  const url = new URL(`yuque-resource://${encodeURIComponent(storageId)}/${key}`);
+  url.searchParams.set("kind", kind);
+  url.searchParams.set("name", input.filename);
+  url.searchParams.set("size", String(input.bytes.length));
+  url.searchParams.set("provider", settings.activeProvider === "s3" ? "s3" : settings.activeProvider);
+  if (input.mimeType) {
+    url.searchParams.set("type", input.mimeType);
+  }
+  return url.toString();
+}
+
+function emptyBrowserResourceMigrationAnalysis(): ResourceMigrationAnalysisOutput {
+  return {
+    totalReferences: 0,
+    uniqueResources: 0,
+    documentCount: 0,
+    totalBytes: 0,
+    migratedResources: [],
+    skippedResources: [],
+    unreadableResources: [],
+    conflictResources: [],
+  };
+}
+
+function browserStorageId(settings: OssSettings): string {
+  if (settings.activeProvider === "local") {
+    return settings.local.storageId.trim() || "local";
+  }
+  if (settings.activeProvider === "webdav") {
+    return settings.webdav.storageId.trim() || "webdav";
+  }
+  return settings.bucket.trim() || "browser";
+}
+
+function trimSlashes(value: string): string {
+  return value.trim().replace(/^\/+|\/+$/g, "") || "files";
 }
 
 function downloadFileFilters(filename: string): Array<{ name: string; extensions: string[] }> {

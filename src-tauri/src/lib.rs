@@ -21,11 +21,13 @@ use commands::external::{download_external_file, open_external_url};
 use commands::resource_key::{
     get_resource_key_status, reset_resource_key, set_resource_key, verify_resource_key_status,
 };
+use commands::resource_migration::{analyze_resource_migration, run_resource_migration};
 use commands::resources::{
     create_temporary_resource_url, download_resource, prepare_resource_preview, read_resource_bytes,
 };
 use commands::settings::{
     get_database_location, get_oss_settings, save_database_location_settings, save_oss_settings,
+    test_storage_connection,
 };
 use commands::upload::{upload_file, upload_image};
 use commands::workspace::{
@@ -135,6 +137,7 @@ pub fn run() {
             create_temporary_resource_url,
             get_oss_settings,
             save_oss_settings,
+            test_storage_connection,
             get_database_location,
             save_database_location_settings,
             open_external_url,
@@ -144,6 +147,8 @@ pub fn run() {
             verify_resource_key_status,
             set_resource_key,
             reset_resource_key,
+            analyze_resource_migration,
+            run_resource_migration,
             get_backup_key_status,
             verify_backup_key_status,
             set_backup_key,

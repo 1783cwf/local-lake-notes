@@ -39,6 +39,8 @@ pub enum AppError {
     Walkdir(#[from] walkdir::Error),
     #[error("S3 上传失败：{0}")]
     S3(String),
+    #[error("WebDAV 存储失败：{0}")]
+    Webdav(String),
     #[error("{0}")]
     Export(String),
     #[error("{0}")]

@@ -67,6 +67,8 @@ pub struct MoveWorkspaceItemInput {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct OssSettings {
+    #[serde(default = "default_storage_provider")]
+    pub active_provider: StorageProviderKind,
     pub endpoint: String,
     pub bucket: String,
     pub region: String,
@@ -88,6 +90,90 @@ pub struct OssSettings {
     pub max_signed_url_ttl_seconds: u64,
     #[serde(default = "default_allow_signed_url_export")]
     pub allow_signed_url_export: bool,
+    #[serde(default = "default_resource_preview_concurrency")]
+    pub resource_preview_concurrency: u8,
+    #[serde(default)]
+    pub local: LocalStorageSettings,
+    #[serde(default)]
+    pub webdav: WebDavStorageSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum StorageProviderKind {
+    S3,
+    Local,
+    Webdav,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalStorageSettings {
+    #[serde(default)]
+    pub root_directory: String,
+    #[serde(default = "default_local_storage_id")]
+    pub storage_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WebDavStorageSettings {
+    #[serde(default)]
+    pub endpoint: String,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub password: String,
+    #[serde(default)]
+    pub root_path: String,
+    #[serde(default = "default_webdav_storage_id")]
+    pub storage_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageConnectionTestOutput {
+    pub provider: StorageProviderKind,
+    pub storage_id: String,
+    pub ok: bool,
+    pub message: String,
+}
+
+impl Default for StorageProviderKind {
+    fn default() -> Self {
+        Self::S3
+    }
+}
+
+impl Default for LocalStorageSettings {
+    fn default() -> Self {
+        Self {
+            root_directory: String::new(),
+            storage_id: default_local_storage_id(),
+        }
+    }
+}
+
+impl Default for WebDavStorageSettings {
+    fn default() -> Self {
+        Self {
+            endpoint: String::new(),
+            username: String::new(),
+            password: String::new(),
+            root_path: String::new(),
+            storage_id: default_webdav_storage_id(),
+        }
+    }
+}
+
+impl OssSettings {
+    pub fn active_storage_id(&self) -> String {
+        match self.active_provider {
+            StorageProviderKind::S3 => self.bucket.trim().to_string(),
+            StorageProviderKind::Local => normalized_storage_id(&self.local.storage_id, "local"),
+            StorageProviderKind::Webdav => normalized_storage_id(&self.webdav.storage_id, "webdav"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -274,8 +360,83 @@ pub struct DeleteBackupOutput {
     pub deleted_backup_ids: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceMigrationTargetInput {
+    pub provider: StorageProviderKind,
+    pub storage_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceMigrationInput {
+    pub source: ResourceMigrationTargetInput,
+    pub target: ResourceMigrationTargetInput,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceMigrationReference {
+    pub resource_ref: String,
+    pub provider: StorageProviderKind,
+    pub storage_id: String,
+    pub key: String,
+    pub document_path: String,
+    pub location: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceMigrationIssue {
+    pub resource_ref: String,
+    pub document_path: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceMigrationAnalysisOutput {
+    pub total_references: usize,
+    pub unique_resources: usize,
+    pub document_count: usize,
+    pub total_bytes: u64,
+    pub migrated_resources: Vec<ResourceMigrationReference>,
+    pub skipped_resources: Vec<ResourceMigrationReference>,
+    pub unreadable_resources: Vec<ResourceMigrationIssue>,
+    pub conflict_resources: Vec<ResourceMigrationIssue>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceMigrationRunOutput {
+    pub analysis: ResourceMigrationAnalysisOutput,
+    pub rewritten_documents: Vec<String>,
+    pub copied_resources: usize,
+}
+
 fn default_file_prefix() -> String {
     "files".to_string()
+}
+
+fn default_storage_provider() -> StorageProviderKind {
+    StorageProviderKind::S3
+}
+
+fn default_local_storage_id() -> String {
+    "local".to_string()
+}
+
+fn default_webdav_storage_id() -> String {
+    "webdav".to_string()
+}
+
+fn normalized_storage_id(value: &str, fallback: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        fallback.to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn default_backup_prefix() -> String {
@@ -296,4 +457,8 @@ fn default_max_signed_url_ttl_seconds() -> u64 {
 
 fn default_allow_signed_url_export() -> bool {
     true
+}
+
+pub fn default_resource_preview_concurrency() -> u8 {
+    6
 }

@@ -7,11 +7,16 @@ import type { LakeDocumentExportRequest } from "./lakeExport";
 import { createLakeEditor, destroyLakeEditor, hasLakeEditorRuntime } from "./lakeEditorAdapter";
 import { createEditorFileUpload, createEditorImageUpload } from "./uploadAdapter";
 import {
+  collectResourceReferences,
+  createLakeResourcePlaceholder,
   dehydrateLakeResources,
   dehydrateResourceText,
-  hydrateLakeResources,
+  hydrateLakeResourcesWithPreviews,
+  normalizeResourcePreviewConcurrency,
   parseResourceReference,
   resourceReferenceFromUpload,
+  runResourcePreviewQueue,
+  rewriteLakeResourceUrls,
   type ResourcePreview,
 } from "./resourceReference";
 import { useLakeAutosave } from "./useLakeAutosave";
@@ -27,6 +32,7 @@ interface LakeEditorProps {
   onUploadFile: (input: UploadImageInput) => Promise<UploadImageOutput>;
   onDownloadFile: (input: FileDownloadInput) => Promise<void>;
   onPrepareResourcePreview: (resourceRef: string) => Promise<string>;
+  resourcePreviewConcurrency?: number;
   onSaveStatusChange: (status: SaveStatus) => void;
   onRegisterSaveNow?: (saveNow: (() => Promise<void>) | null) => void;
 }
@@ -42,6 +48,7 @@ export function LakeEditor({
   onUploadFile,
   onDownloadFile,
   onPrepareResourcePreview,
+  resourcePreviewConcurrency,
   onSaveStatusChange,
   onRegisterSaveNow,
 }: LakeEditorProps) {
@@ -171,25 +178,48 @@ export function LakeEditor({
     let cancelled = false;
     resourcePreviewsRef.current = [];
     setLoadError(null);
-    void hydrateLakeResources(content, async (resourceRef) => {
-      const previewUrl = await onPrepareResourcePreview(resourceRef);
-      rememberPreview(resourceRef, previewUrl);
-      return previewUrl;
-    }).then((hydratedContent) => {
-      if (!cancelled && editorRef.current === editor) {
-        editor.setDocument("text/lake", hydratedContent);
-        setStatus({ state: "clean" });
-      }
-    }).catch((error) => {
-      if (!cancelled && editorRef.current === editor) {
-        setLoadError(toMessage(error));
-      }
-    });
+    const resourceRefs = Array.from(new Set(collectResourceReferences(content, { includeFileCards: true })));
+    const placeholderPreviews = resourceRefs.map((resourceRef) => ({
+      resourceRef,
+      previewUrl: createLakeResourcePlaceholder(resourceRef),
+    }));
+    resourcePreviewsRef.current = placeholderPreviews;
+    const placeholderContent = hydrateLakeResourcesWithPreviews(content, placeholderPreviews, { includeFileCards: true });
+    editor.setDocument("text/lake", placeholderContent);
+    setStatus({ state: "clean" });
+
+    void runResourcePreviewQueue(
+      resourceRefs,
+      normalizeResourcePreviewConcurrency(resourcePreviewConcurrency),
+      async (resourceRef) => {
+        try {
+          const previewUrl = await onPrepareResourcePreview(resourceRef);
+          if (cancelled || editorRef.current !== editor) {
+            return;
+          }
+          const previousPreview = resourcePreviewsRef.current.find((preview) => (
+            preview.resourceRef === resourceRef
+          ))?.previewUrl;
+          rememberPreview(resourceRef, previewUrl);
+          const currentContent = editor.getDocument("text/lake");
+          const nextContent = previousPreview
+            ? rewriteLakeResourceUrls(currentContent, (value) => (value === previousPreview ? previewUrl : value), { includeFileCards: true })
+            : hydrateLakeResourcesWithPreviews(currentContent, resourcePreviewsRef.current, { includeFileCards: true });
+          editor.setDocument("text/lake", nextContent);
+        } catch {
+          if (cancelled || editorRef.current !== editor) {
+            return;
+          }
+          // 单张远端图片失败不能阻塞文档打开，保留占位图让用户知道该资源仍未加载。
+          setStatus({ state: "clean" });
+        }
+      },
+    );
 
     return () => {
       cancelled = true;
     };
-  }, [content, documentPath, onPrepareResourcePreview, rememberPreview, setStatus]);
+  }, [content, documentPath, onPrepareResourcePreview, rememberPreview, resourcePreviewConcurrency, setStatus]);
 
   useEffect(() => {
     if (manualSaveRequest > 0) {

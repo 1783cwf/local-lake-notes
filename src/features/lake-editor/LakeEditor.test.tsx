@@ -68,6 +68,108 @@ test("打开文档时把 text/lake 内容设置进语雀编辑器", async () => 
   });
 });
 
+test("打开含资源文档时先显示占位内容再异步替换预览", async () => {
+  let resolvePreview!: (value: string) => void;
+  const resourceRef = "yuque-resource://webdav/images/a.png?provider=webdav&kind=image";
+  let editorContent = "";
+  const editor: LakeEditorInstance = {
+    setDocument: vi.fn((_, nextContent) => {
+      editorContent = nextContent;
+    }),
+    getDocument: vi.fn(() => editorContent),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+  const onPrepareResourcePreview = vi.fn(() => new Promise<string>((resolve) => {
+    resolvePreview = resolve;
+  }));
+
+  render(
+    <LakeEditor
+      document={documentEntry}
+      content={`<p>正文</p><p><img src="${resourceRef}"></p>`}
+      manualSaveRequest={0}
+      exportRequest={null}
+      onSave={vi.fn()}
+      onExportContent={vi.fn()}
+      onUploadImage={vi.fn()}
+      onUploadFile={vi.fn()}
+      onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={onPrepareResourcePreview}
+      onSaveStatusChange={vi.fn()}
+    />,
+  );
+
+  await waitFor(() => {
+    expect(editor.setDocument).toHaveBeenCalledWith(
+      "text/lake",
+      expect.stringContaining("正文"),
+    );
+  });
+  expect(editor.setDocument).toHaveBeenCalledWith(
+    "text/lake",
+    expect.stringContaining(encodeURIComponent("图片加载中...")),
+  );
+
+  resolvePreview("asset://preview/a.png");
+
+  await waitFor(() => {
+    expect(editor.setDocument).toHaveBeenLastCalledWith(
+      "text/lake",
+      expect.stringContaining("asset://preview/a.png"),
+    );
+  });
+});
+
+test("打开多图片文档时按配置并发准备资源预览", async () => {
+  const refs = Array.from({ length: 9 }, (_, index) => (
+    `yuque-resource://webdav/images/${index}.png?provider=webdav&kind=image`
+  ));
+  let activeRequests = 0;
+  let maxActiveRequests = 0;
+  const editor: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => refs.map((resourceRef) => `<img src="${resourceRef}">`).join("")),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+  const onPrepareResourcePreview = vi.fn(async (resourceRef: string) => {
+    activeRequests += 1;
+    maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+    await Promise.resolve();
+    activeRequests -= 1;
+    return `${resourceRef}&preview=1`;
+  });
+
+  render(
+    <LakeEditor
+      document={documentEntry}
+      content={refs.map((resourceRef) => `<img src="${resourceRef}">`).join("")}
+      manualSaveRequest={0}
+      exportRequest={null}
+      onSave={vi.fn()}
+      onExportContent={vi.fn()}
+      onUploadImage={vi.fn()}
+      onUploadFile={vi.fn()}
+      onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={onPrepareResourcePreview}
+      resourcePreviewConcurrency={6}
+      onSaveStatusChange={vi.fn()}
+    />,
+  );
+
+  await waitFor(() => {
+    expect(onPrepareResourcePreview).toHaveBeenCalledTimes(refs.length);
+  });
+  expect(maxActiveRequests).toBe(6);
+});
+
 test("同一路径文档元数据刷新时不重建语雀编辑器实例", async () => {
   const destroy = vi.fn();
   const editor: LakeEditorInstance = {

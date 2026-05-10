@@ -38,6 +38,7 @@ interface MultidimensionalTableEditorProps {
   onUploadFile?: (input: UploadImageInput) => Promise<UploadImageOutput>;
   onDownloadFile?: (input: FileDownloadInput) => Promise<void>;
   onPrepareResourcePreview?: (resourceRef: string) => Promise<string>;
+  resourcePreviewConcurrency?: number;
   onSaveStatusChange: (status: SaveStatus) => void;
   onRegisterSaveNow?: (saveNow: (() => Promise<void>) | null) => void;
 }
@@ -51,6 +52,7 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
   onUploadFile,
   onDownloadFile,
   onPrepareResourcePreview,
+  resourcePreviewConcurrency,
   onSaveStatusChange,
   onRegisterSaveNow,
 }, ref) => {
@@ -504,6 +506,7 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
           onUploadFile={onUploadFile}
           onDownloadFile={onDownloadFile}
           onPrepareResourcePreview={onPrepareResourcePreview}
+          resourcePreviewConcurrency={resourcePreviewConcurrency}
         />
       )}
     </section>
