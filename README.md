@@ -247,12 +247,13 @@ npm run build
 1. 在功能分支完成版本号、README 和代码修改，至少执行 `npm run build`、`npm run test:run`、`cd src-tauri && cargo test`。
 2. 提交功能分支并推送远程，先合并到 `devlop`，确认 `devlop` 已包含本次全部变更。
 3. 从最新 `devlop` 拉出 `release/vX.Y.Z` 分支并推送远程，作为本次发布候选分支。
-4. 将 `release/vX.Y.Z` 合并到 `main`，确认 `main` 的 `HEAD` 等于 `origin/main` 的发布合并提交。
-5. 只在 `main` 的发布合并提交上创建版本 tag，禁止直接在功能分支、`devlop` 或 release 分支 tag 发布。
-6. 推送 tag 后创建 GitHub Release，确认 Release 指向 `main` 的发布合并提交。
-7. Release 名称只使用版本号，例如 `v1.6.0`，不要使用应用名加版本号。
-8. Release notes 只描述当前版本相对上一版本的变化，不要把上一版本完整说明复制到本次 Release 中。
-9. 发布完成后确认 Release assets 已上传，Release 名称、Release notes、版本号和 tag 都一致。
+4. 从 `release/vX.Y.Z` 创建合并到 `main` 的 PR，必须通过 GitHub 合并请求完成，禁止本地直接 merge 后 push 到 `main`。
+5. PR 合并后切换到最新 `main`，确认 `main` 的 `HEAD` 等于 `origin/main` 的发布合并提交。
+6. 只在 `main` 的发布合并提交上创建版本 tag，禁止直接在功能分支、`devlop` 或 release 分支 tag 发布。
+7. 推送 tag 后创建 GitHub Release，确认 Release 指向 `main` 的发布合并提交。
+8. Release 名称只使用版本号，例如 `v1.6.0`，不要使用应用名加版本号。
+9. Release notes 只描述当前版本相对上一版本的变化，不要把上一版本完整说明复制到本次 Release 中。
+10. 发布完成后确认 Release assets 已上传，Release 名称、Release notes、版本号和 tag 都一致。
 
 示例：
 
