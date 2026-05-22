@@ -251,7 +251,7 @@ npm run build
 5. PR 合并后切换到最新 `main`，确认 `main` 的 `HEAD` 等于 `origin/main` 的发布合并提交。
 6. 只在 `main` 的发布合并提交上创建版本 tag，禁止直接在功能分支、`devlop` 或 release 分支 tag 发布。
 7. 推送 tag 后创建 GitHub Release，确认 Release 指向 `main` 的发布合并提交。
-8. Release 名称只使用版本号，例如 `v1.6.0`，不要使用应用名加版本号。
+8. Release 名称只使用版本号，例如 `v1.7.0`，不要使用应用名加版本号。
 9. Release notes 只描述当前版本相对上一版本的变化，不要把上一版本完整说明复制到本次 Release 中。
 10. 发布完成后确认 Release assets 已上传，Release 名称、Release notes、版本号和 tag 都一致。
 
@@ -260,8 +260,8 @@ npm run build
 ```bash
 git switch main
 git pull --ff-only origin main
-git tag v1.6.0
-git push origin v1.6.0
+git tag v1.7.0
+git push origin v1.7.0
 ```
 
 Release notes 格式：
@@ -285,17 +285,17 @@ v1.4.0
 本次 Release notes 草稿：
 
 ```text
-v1.6.0
+v1.7.0
 
-从 v1.5.1 到 v1.6.0 的主要变化：
+从 v1.6.0 到 v1.7.0 的主要变化：
 
-- 新增文件存储 provider 体系，支持 S3、本地目录和 WebDAV，并在设置页显示当前激活存储。
-- 新增存储连接测试、资源迁移 dry-run 和执行迁移，迁移过程提供 loading、清点统计和成功/失败提示。
-- 图片和附件预览改为先展示正文与加载占位，再按配置并发请求资源预览，支持 4-8 个并发访问请求。
-- 本地存储资源读取避免不必要的远端加解密链路，优化本地 provider 使用体验。
-- 设置页新增明确的保存存储设置按钮，并修复长表单底部不可见、不可滚动的问题。
-- 修复 Lake 文档滚动容器边界，避免编辑器大纲随外层页面滚动异常。
-- 更新 README 文件存储、资源迁移和发版流程说明，并更新应用、Tauri 配置和 Rust crate 版本号到 1.6.0。
+- 新增 AI 助手入口和设置页，支持 OpenAI Responses 与 Anthropic Messages 配置。
+- 新增文档 AI 操作，支持基于选中内容进行总结、改写、扩写、翻译和结构化处理。
+- 新增多维表格 AI 操作，支持根据正文内容生成记录，并默认只写入现有字段。
+- 新增电子表格 AI 操作，支持基于当前工作簿快照和选区生成表格修改建议。
+- 优化目录树视觉层级和选中态，弱化拖拽手柄与文档图标，整体更接近语雀目录体验。
+- 修复多维表格正文内容编辑器布局，嵌入式 Lake 编辑器关闭大纲，避免正文被压窄。
+- 更新 README 发版说明，并更新应用、Tauri 配置和 Rust crate 版本号到 1.7.0。
 
 验证：
 
@@ -404,7 +404,7 @@ images/2026/04/<uuid>.png
 
 WebDAV provider 需要配置服务地址、用户名、密码、根路径和存储标识。`.lake` 和多维表格文档只保存 provider、storageId 和相对 object key，不会写入 WebDAV 完整 URL 或凭据。
 
-使用 S3 或 WebDAV provider 上传图片和附件前，需要先在设置页配置本机资源加密密钥。新上传的远端资源会在 Tauri 后端使用本地密钥加密后再写入文件存储，provider 中的原始对象是密文，不能直接通过对象 URL 预览。密钥只保存在本机系统钥匙串中，SQLite 和 `.lake` 文档只保存 key fingerprint；如果换设备使用，需要后续导入对应资源密钥，否则旧加密资源无法解密。本地 provider 面向本机目录读写，不再额外执行资源级加解密。
+使用 S3 或 WebDAV provider 上传图片和附件前，需要先在设置页配置本机资源加密密钥。新上传的远端资源会在 Tauri 后端使用本地密钥加密后再写入文件存储，provider 中的原始对象是密文，不能直接通过对象 URL 预览。密钥保存在本机应用 SQLite 数据库中，`.lake` 文档只保存 key fingerprint；如果换设备使用，需要后续导入对应资源密钥，否则旧加密资源无法解密。本地 provider 面向本机目录读写，不再额外执行资源级加解密。
 
 导出资源有两种策略：
 
@@ -425,4 +425,4 @@ WebDAV provider 需要配置服务地址、用户名、密码、根路径和存�
 
 - 补充 `.lake` 与 HTML/Markdown 的导入能力。
 - 增强多维表格视图能力，例如字段顺序、表格字段显示隐藏和更多视图类型。
-- 支持多个存储 profile 列表和凭据 keyring 化。
+- 支持多个存储 profile 列表和凭据统一管理。

@@ -1,3 +1,4 @@
+pub mod ai_key;
 pub mod app_database;
 pub mod backup_archive;
 pub mod backup_key;

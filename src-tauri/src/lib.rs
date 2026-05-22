@@ -1,9 +1,15 @@
+pub mod ai;
 pub mod commands;
 pub mod error;
 pub mod models;
 pub mod state;
 pub mod storage;
 
+use commands::ai_settings::{
+    add_ai_model_to_profile, get_ai_settings, list_ai_models, run_ai_document_action,
+    run_ai_split_document, run_ai_spreadsheet_action, run_ai_table_action, save_ai_settings,
+    set_active_ai_model,
+};
 use commands::backup::{
     create_backup, delete_backup, get_backup_key_status, list_backups, reset_backup_key,
     restore_backup, set_backup_key, verify_backup_key_status,
@@ -157,6 +163,15 @@ pub fn run() {
             create_backup,
             restore_backup,
             delete_backup,
+            get_ai_settings,
+            save_ai_settings,
+            list_ai_models,
+            add_ai_model_to_profile,
+            set_active_ai_model,
+            run_ai_document_action,
+            run_ai_split_document,
+            run_ai_spreadsheet_action,
+            run_ai_table_action,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Local Lake Notes");

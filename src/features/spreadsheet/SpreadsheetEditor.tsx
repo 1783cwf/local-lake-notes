@@ -26,6 +26,10 @@ interface SpreadsheetEditorProps {
   onSave: (relativePath: string, content: string) => Promise<void>;
   onSaveStatusChange: (status: SaveStatus) => void;
   onRegisterSaveNow?: (saveNow: (() => Promise<void>) | null) => void;
+  onRegisterReadWorkbook?: (readWorkbook: (() => IWorkbookData | null) | null) => void;
+  aiWorkbookSnapshot?: IWorkbookData | null;
+  aiWorkbookSnapshotRequestId?: number;
+  onAiWorkbookSnapshotApplied?: () => void;
 }
 
 interface UniverRuntime {
@@ -59,6 +63,10 @@ export const SpreadsheetEditor = forwardRef<SpreadsheetEditorHandle, Spreadsheet
   onSave,
   onSaveStatusChange,
   onRegisterSaveNow,
+  onRegisterReadWorkbook,
+  aiWorkbookSnapshot,
+  aiWorkbookSnapshotRequestId = 0,
+  onAiWorkbookSnapshotApplied,
 }: SpreadsheetEditorProps, ref) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<UniverRuntime | null>(null);
@@ -130,12 +138,31 @@ export const SpreadsheetEditor = forwardRef<SpreadsheetEditorHandle, Spreadsheet
     onRegisterSaveNow?.(document ? saveNowOrThrow : null);
     return () => onRegisterSaveNow?.(null);
   }, [document, onRegisterSaveNow, saveNowOrThrow]);
+  useEffect(() => {
+    onRegisterReadWorkbook?.(document ? () => runtimeRef.current?.workbook.save() ?? workbookDataRef.current : null);
+    return () => onRegisterReadWorkbook?.(null);
+  }, [document, onRegisterReadWorkbook]);
 
   useEffect(() => {
     if (manualSaveRequest > 0) {
       void saveNow();
     }
   }, [manualSaveRequest, saveNow]);
+  useEffect(() => {
+    if (!document || !containerRef.current || !aiWorkbookSnapshot || aiWorkbookSnapshotRequestId <= 0) {
+      return;
+    }
+    const snapshot = aiWorkbookSnapshot;
+    // AI 只返回候选行列数据；本地转换为 Univer snapshot 后重建实例，避免模型直接写内部 workbook 结构。
+    cleanupRuntime(runtimeRef.current);
+    runtimeRef.current = createUniverRuntime(containerRef.current, snapshot, scheduleSave);
+    workbookDataRef.current = snapshot;
+    void saveContent(serializeSpreadsheetSnapshot(snapshot));
+    setLoadState("ready");
+    setLoadError(null);
+    setStatus({ state: "saved", savedAt: new Date().toISOString() });
+    onAiWorkbookSnapshotApplied?.();
+  }, [aiWorkbookSnapshot, aiWorkbookSnapshotRequestId, document, onAiWorkbookSnapshotApplied, saveContent, scheduleSave, setStatus]);
 
   useEffect(() => {
     let cancelled = false;

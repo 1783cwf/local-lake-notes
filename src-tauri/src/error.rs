@@ -41,6 +41,8 @@ pub enum AppError {
     S3(String),
     #[error("WebDAV 存储失败：{0}")]
     Webdav(String),
+    #[error("AI 设置失败：{0}")]
+    Ai(String),
     #[error("{0}")]
     Export(String),
     #[error("{0}")]

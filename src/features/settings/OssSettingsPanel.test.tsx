@@ -9,6 +9,7 @@ function renderPanel(overrides: Partial<Parameters<typeof OssSettingsPanel>[0]> 
     <OssSettingsPanel
       open
       settings={null}
+      aiSettings={{ profiles: [] }}
       databaseLocation={{
         directory: "/tmp/local-lake-db",
         databasePath: "/tmp/local-lake-db/yuque-lake-notes.sqlite3",
@@ -16,6 +17,10 @@ function renderPanel(overrides: Partial<Parameters<typeof OssSettingsPanel>[0]> 
       }}
       onClose={vi.fn()}
       onSave={vi.fn()}
+      onSaveAiSettings={vi.fn(async (input) => input.settings)}
+      onListAiModels={vi.fn(async () => [])}
+      onAddAiModel={vi.fn(async () => ({ profiles: [] }))}
+      onSetActiveAiModel={vi.fn(async () => ({ profiles: [] }))}
       onChooseDatabaseDirectory={vi.fn(async () => "/tmp/new-db")}
       onChooseStorageDirectory={vi.fn(async () => "/tmp/file-storage")}
       onSaveDatabaseLocation={vi.fn()}
