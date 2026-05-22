@@ -1,7 +1,8 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { MultidimensionalTableEditor } from "./MultidimensionalTableEditor";
+import type { LakeEditorInstance } from "../lake-editor/editorTypes";
 import {
   createDefaultMultidimensionalTableDocument,
   createEmptyMultidimensionalTableRecord,
@@ -9,6 +10,10 @@ import {
   type MultidimensionalTableField,
   serializeMultidimensionalTableDocument,
 } from "./multidimensionalTableDocument";
+
+afterEach(() => {
+  window.Doc = undefined;
+});
 
 const documentEntry = {
   id: "project.dbtable.json",
@@ -265,6 +270,31 @@ test("表格视图可以新增字段并修改字段分类", async () => {
   await waitFor(() => {
     expect(onSave).toHaveBeenCalledWith("project.dbtable.json", expect.stringContaining("\"type\": \"progress\""));
     expect(onSave).toHaveBeenCalledWith("project.dbtable.json", expect.stringContaining("完成比例"));
+  }, { timeout: 1400 });
+});
+
+test("表格视图可以粘贴导入并创建缺失字段", async () => {
+  const user = userEvent.setup();
+  let savedContent = "";
+  const onSave = vi.fn(async (_path: string, content: string) => {
+    savedContent = content;
+  });
+  renderEditor({ onSave });
+
+  await user.click(screen.getByRole("tab", { name: /表格/ }));
+  await user.click(screen.getByRole("button", { name: "导入" }));
+  fireEvent.change(screen.getByLabelText("粘贴表格数据"), {
+    target: { value: "标题\t负责人\n导入任务\t张三" },
+  });
+  await user.click(screen.getByRole("button", { name: "导入数据" }));
+
+  expect(screen.getByText(/已导入 1 条记录/)).toBeInTheDocument();
+  await waitFor(() => {
+    const savedDocument = JSON.parse(savedContent);
+    const ownerField = savedDocument.fields.find((field: { name: string }) => field.name === "负责人");
+    expect(ownerField).toBeTruthy();
+    expect(savedDocument.records.some((record: { values: Record<string, string> }) => record.values.title === "导入任务")).toBe(true);
+    expect(savedDocument.records.some((record: { values: Record<string, string> }) => record.values[ownerField.id] === "张三")).toBe(true);
   }, { timeout: 1400 });
 });
 
@@ -525,6 +555,48 @@ test("看板详情正文可以全屏编辑并保存", async () => {
 
   await user.click(screen.getByRole("button", { name: "关闭全屏正文编辑" }));
   expect(screen.queryByRole("dialog", { name: "正文全屏编辑" })).not.toBeInTheDocument();
+});
+
+test("看板详情正文全屏会开启 Lake 大纲", async () => {
+  const user = userEvent.setup();
+  const editor: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => "<h1>正文标题</h1>"),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+  renderEditor();
+
+  await user.click(screen.getByRole("button", { name: /测试记录1/ }));
+
+  await waitFor(() => {
+    expect(window.Doc?.createOpenEditor).toHaveBeenCalledWith(
+      expect.any(HTMLDivElement),
+      expect.objectContaining({
+        toc: {
+          enable: false,
+          normalView: false,
+        },
+      }),
+    );
+  });
+
+  await user.click(screen.getByRole("button", { name: "全屏编辑正文" }));
+
+  await waitFor(() => {
+    expect(window.Doc?.createOpenEditor).toHaveBeenCalledWith(
+      expect.any(HTMLDivElement),
+      expect.objectContaining({
+        toc: {
+          enable: true,
+          normalView: true,
+        },
+      }),
+    );
+  });
 });
 
 function renderEditor({

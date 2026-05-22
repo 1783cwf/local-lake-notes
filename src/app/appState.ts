@@ -96,7 +96,7 @@ export interface StorageConnectionTestOutput {
   message: string;
 }
 
-export type AiProtocol = "openai-responses" | "anthropic-messages";
+export type AiProtocol = "openai-responses" | "openai-chat-completions" | "anthropic-messages";
 
 export type AiModelCapabilityType = "vision" | "web" | "reasoning" | "tool" | "rerank" | "embedding";
 

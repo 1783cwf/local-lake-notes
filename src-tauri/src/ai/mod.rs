@@ -1,4 +1,5 @@
 mod anthropic_messages;
+mod openai_chat_completions;
 mod openai_responses;
 
 use std::time::Duration;
@@ -20,6 +21,9 @@ pub async fn list_models(
     match profile.protocol {
         AiProtocol::OpenaiResponses => {
             openai_responses::list_models(&client, profile, api_key).await
+        }
+        AiProtocol::OpenaiChatCompletions => {
+            openai_chat_completions::list_models(&client, profile, api_key).await
         }
         AiProtocol::AnthropicMessages => {
             anthropic_messages::list_models(&client, profile, api_key).await
@@ -51,6 +55,17 @@ pub async fn generate_text(
             )
             .await
         }
+        AiProtocol::OpenaiChatCompletions => {
+            openai_chat_completions::generate_text(
+                &client,
+                profile,
+                model,
+                api_key,
+                system_prompt,
+                user_prompt,
+            )
+            .await
+        }
         AiProtocol::AnthropicMessages => {
             anthropic_messages::generate_text(
                 &client,
@@ -68,6 +83,7 @@ pub async fn generate_text(
 pub fn default_ai_base_url(protocol: &AiProtocol) -> &'static str {
     match protocol {
         AiProtocol::OpenaiResponses => "https://api.openai.com",
+        AiProtocol::OpenaiChatCompletions => "https://api.openai.com",
         AiProtocol::AnthropicMessages => "https://api.anthropic.com",
     }
 }
@@ -108,6 +124,7 @@ pub fn normalize_ai_base_url(protocol: &AiProtocol, value: &str) -> AppResult<St
 pub fn protocol_models_url(profile: &AiModelProfile) -> AppResult<Url> {
     match profile.protocol {
         AiProtocol::OpenaiResponses => append_api_path(&profile.base_url, "/v1/models"),
+        AiProtocol::OpenaiChatCompletions => append_api_path(&profile.base_url, "/v1/models"),
         AiProtocol::AnthropicMessages => append_api_path(&profile.base_url, "/v1/models"),
     }
 }
@@ -115,6 +132,9 @@ pub fn protocol_models_url(profile: &AiModelProfile) -> AppResult<Url> {
 pub fn protocol_generation_url(profile: &AiModelProfile) -> AppResult<Url> {
     match profile.protocol {
         AiProtocol::OpenaiResponses => append_api_path(&profile.base_url, "/v1/responses"),
+        AiProtocol::OpenaiChatCompletions => {
+            append_api_path(&profile.base_url, "/v1/chat/completions")
+        }
         AiProtocol::AnthropicMessages => append_api_path(&profile.base_url, "/v1/messages"),
     }
 }
@@ -172,6 +192,24 @@ mod tests {
         assert_eq!(
             protocol_models_url(&profile).unwrap().as_str(),
             "https://proxy.example.com/custom/v1/models"
+        );
+    }
+
+    #[test]
+    fn builds_chat_completions_generation_url() {
+        let profile = AiModelProfile {
+            id: "profile".to_string(),
+            name: "OpenAI".to_string(),
+            protocol: AiProtocol::OpenaiChatCompletions,
+            base_url: "https://api.openai.com".to_string(),
+            enabled: true,
+            models: Vec::new(),
+            has_api_key: true,
+        };
+
+        assert_eq!(
+            super::protocol_generation_url(&profile).unwrap().as_str(),
+            "https://api.openai.com/v1/chat/completions"
         );
     }
 }

@@ -316,6 +316,130 @@ export function appendMultidimensionalField(
   };
 }
 
+export function reorderMultidimensionalFields(
+  document: MultidimensionalTableDocument,
+  activeFieldId: string,
+  overFieldId: string,
+): MultidimensionalTableDocument {
+  if (activeFieldId === overFieldId) {
+    return document;
+  }
+
+  const activeIndex = document.fields.findIndex((field) => field.id === activeFieldId);
+  const overIndex = document.fields.findIndex((field) => field.id === overFieldId);
+  if (activeIndex < 0 || overIndex < 0) {
+    return document;
+  }
+
+  const nextFields = [...document.fields];
+  const [activeField] = nextFields.splice(activeIndex, 1);
+  nextFields.splice(overIndex, 0, activeField);
+
+  return {
+    ...document,
+    fields: nextFields,
+  };
+}
+
+export interface MultidimensionalTableImportResult {
+  document: MultidimensionalTableDocument;
+  importedRecordCount: number;
+  createdFieldCount: number;
+  matchedFieldCount: number;
+}
+
+export function importPastedMultidimensionalTableData(
+  document: MultidimensionalTableDocument,
+  pastedText: string,
+): MultidimensionalTableImportResult {
+  // 粘贴导入以第一行作为字段名，后续行作为记录；空行会被忽略，避免 Excel 复制尾部空白生成无效记录。
+  const rows = parseDelimitedRows(pastedText)
+    .map((row) => row.map((cell) => cell.trim()))
+    .filter((row) => row.some((cell) => cell.length > 0));
+  if (rows.length < 2) {
+    throw new Error("请粘贴包含表头和至少一行数据的表格内容");
+  }
+
+  const [headerRow, ...dataRows] = rows;
+  const columnIndexes = activeImportColumnIndexes(headerRow, dataRows);
+  if (columnIndexes.length === 0) {
+    throw new Error("未识别到可导入的字段");
+  }
+
+  const normalizedDocument = normalizeMultidimensionalTableDocument(document);
+  const workingFields: MultidimensionalTableField[] = normalizedDocument.fields.map((field) => ({
+    ...field,
+    options: field.options ? field.options.map((option) => ({ ...option })) : field.options,
+  }));
+  const fieldByName = new Map(workingFields.map((field) => [normalizeImportName(field.name), field]));
+  const usedTargetNames = new Set<string>();
+  const createdFields: MultidimensionalTableField[] = [];
+  // 同名字段直接复用，未命中的表头创建文本字段；重复表头使用唯一名称，避免覆盖同一字段。
+  const columnFields = columnIndexes.map((columnIndex) => {
+    const rawHeaderName = headerRow[columnIndex]?.trim() || `导入字段 ${columnIndex + 1}`;
+    const normalizedHeaderName = normalizeImportName(rawHeaderName);
+    const existingField = usedTargetNames.has(normalizedHeaderName) ? undefined : fieldByName.get(normalizedHeaderName);
+
+    if (existingField) {
+      usedTargetNames.add(normalizeImportName(existingField.name));
+      return { columnIndex, field: existingField, created: false };
+    }
+
+    const field = createField(workingFields, "text");
+    field.name = uniqueImportFieldName(rawHeaderName, fieldByName);
+    workingFields.push(field);
+    createdFields.push(field);
+    fieldByName.set(normalizeImportName(field.name), field);
+    usedTargetNames.add(normalizeImportName(field.name));
+    return { columnIndex, field, created: true };
+  });
+
+  const records = dataRows
+    .filter((row) => columnFields.some(({ columnIndex }) => (row[columnIndex] ?? "").trim().length > 0))
+    .map((row) => {
+      const values: Record<string, MultidimensionalTableFieldValue> = {};
+
+      // 只写入非空单元格，空单元格保留字段默认值，避免把已有类型的空值解析成异常形态。
+      for (const { columnIndex, field } of columnFields) {
+        const cellText = row[columnIndex]?.trim() ?? "";
+        if (!cellText) {
+          continue;
+        }
+        values[field.id] = normalizeImportedCellValue(cellText, field);
+      }
+
+      return createEmptyMultidimensionalTableRecord(workingFields, values);
+    });
+  if (records.length === 0) {
+    throw new Error("未识别到可导入的记录");
+  }
+
+  const createdFieldDefaults = Object.fromEntries(createdFields.map((field) => [field.id, defaultValueForField(field)]));
+  const nextDocument = normalizeMultidimensionalTableDocument({
+    ...normalizedDocument,
+    fields: workingFields,
+    records: [
+      ...normalizedDocument.records.map((record) => ({
+        ...record,
+        values: { ...record.values, ...createdFieldDefaults },
+      })),
+      ...records,
+    ],
+    views: createdFields.length > 0
+      ? normalizedDocument.views.map((view) => view.type === "board"
+        ? { ...view, cardFieldIds: Array.from(new Set([...(view.cardFieldIds ?? []), ...createdFields.map((field) => field.id)])) }
+        : view)
+      : normalizedDocument.views,
+  });
+
+  return {
+    document: nextDocument,
+    importedRecordCount: records.length,
+    createdFieldCount: createdFields.length,
+    matchedFieldCount: columnFields.length - createdFields.length,
+  };
+}
+
 export function renameMultidimensionalField(
   document: MultidimensionalTableDocument,
   fieldId: string,
@@ -608,6 +732,116 @@ function normalizeFilterRules(value: unknown, fieldIds: Set<string>): Multidimen
 
 function normalizeFilterOperator(value: unknown): MultidimensionalTableFilterOperator {
   return isFilterOperator(value) ? value : "contains";
+}
+
+function parseDelimitedRows(value: string): string[][] {
+  const text = value.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const delimiter = text.includes("\t") ? "\t" : ",";
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    const nextCharacter = text[index + 1];
+
+    if (character === "\"") {
+      if (quoted && nextCharacter === "\"") {
+        cell += "\"";
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+      continue;
+    }
+
+    if (!quoted && character === delimiter) {
+      row.push(cell);
+      cell = "";
+      continue;
+    }
+
+    if (!quoted && character === "\n") {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = "";
+      continue;
+    }
+
+    cell += character;
+  }
+
+  row.push(cell);
+  rows.push(row);
+  return rows;
+}
+
+function activeImportColumnIndexes(headerRow: string[], dataRows: string[][]): number[] {
+  const columnCount = Math.max(headerRow.length, ...dataRows.map((row) => row.length));
+  return Array.from({ length: columnCount }, (_, index) => index)
+    .filter((index) => Boolean(headerRow[index]?.trim()) || dataRows.some((row) => Boolean(row[index]?.trim())));
+}
+
+function normalizeImportedCellValue(
+  value: string,
+  field: MultidimensionalTableField,
+): MultidimensionalTableFieldValue {
+  if (field.type === "singleSelect") {
+    return optionIdForImportedLabel(field, value);
+  }
+
+  if (field.type === "multiSelect") {
+    return splitImportedMultiValues(value)
+      .map((label) => optionIdForImportedLabel(field, label))
+      .filter(Boolean);
+  }
+
+  return normalizeFieldValueForType(value, field.type);
+}
+
+function optionIdForImportedLabel(field: MultidimensionalTableField, label: string): string {
+  const trimmedLabel = label.trim();
+  if (!trimmedLabel) {
+    return "";
+  }
+
+  const existingOption = field.options?.find((option) => normalizeImportName(option.label) === normalizeImportName(trimmedLabel));
+  if (existingOption) {
+    return existingOption.id;
+  }
+
+  const createdOption = createSelectOption(trimmedLabel);
+  field.options = [...(field.options ?? []), createdOption];
+  return createdOption.id;
+}
+
+function splitImportedMultiValues(value: string): string[] {
+  return value
+    .split(/[、,，;；]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function uniqueImportFieldName(
+  rawName: string,
+  fieldByName: Map<string, MultidimensionalTableField>,
+): string {
+  const baseName = rawName.trim() || "导入字段";
+  let candidateName = baseName;
+  let suffix = 2;
+
+  while (fieldByName.has(normalizeImportName(candidateName))) {
+    candidateName = `${baseName} ${suffix}`;
+    suffix += 1;
+  }
+
+  return candidateName;
+}
+
+function normalizeImportName(name: string): string {
+  return name.trim().toLocaleLowerCase("zh-Hans-CN");
 }
 
 function isFilterOperator(value: unknown): value is MultidimensionalTableFilterOperator {
