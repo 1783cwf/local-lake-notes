@@ -2,6 +2,19 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 
 import type {
+  AiAddModelInput,
+  AiListModelsInput,
+  AiListModelsOutput,
+  AiRunDocumentActionInput,
+  AiRunDocumentActionOutput,
+  AiRunSpreadsheetActionInput,
+  AiRunSpreadsheetActionOutput,
+  AiRunTableActionInput,
+  AiRunTableActionOutput,
+  AiSetActiveModelInput,
+  AiSettings,
+  AiSplitDocumentInput,
+  AiSplitDocumentOutput,
   BackupKeyStatus,
   BackupOperationOutput,
   BackupRecord,
@@ -17,6 +30,7 @@ import type {
   ResourceMigrationInput,
   ResourceMigrationRunOutput,
   ResourceKeyStatus,
+  SaveAiSettingsInput,
   StorageConnectionTestOutput,
   UploadImageInput,
   UploadImageOutput,
@@ -36,12 +50,14 @@ import {
   MULTIDIMENSIONAL_TABLE_EXTENSION,
   serializeMultidimensionalTableDocument,
 } from "../features/multidimensional-table/multidimensionalTableDocument";
+import { mergeAiSettings } from "../features/settings/aiSettingsStore";
 import { mergeOssSettings } from "../features/settings/ossSettingsStore";
 
 const browserWorkspaceKey = "yuque-lake-notes.browser-workspace";
 const browserCurrentWorkspaceRootKey = "yuque-lake-notes.browser-current-workspace-root";
 const browserKnownWorkspacesKey = "yuque-lake-notes.browser-known-workspaces";
 const browserSettingsKey = "yuque-lake-notes.browser-oss-settings";
+const browserAiSettingsKey = "yuque-lake-notes.browser-ai-settings";
 const browserDatabaseLocationKey = "yuque-lake-notes.browser-database-location";
 const browserBackupKeyStatusKey = "yuque-lake-notes.browser-backup-key-status";
 const browserResourceKeyStatusKey = "yuque-lake-notes.browser-resource-key-status";
@@ -324,6 +340,15 @@ export async function createLakeDocument(title: string, parentPath = ""): Promis
   if (!isTauriRuntime()) {
     const workspace = await listLakeDocuments();
     const path = nextBrowserDocumentPath(title, parentPath, workspace.documents.map((document) => document.path), "lake");
+    const parentDirectory = parentPath && !workspace.directories.some((directory) => directory.path === parentPath)
+      ? {
+          id: parentPath,
+          path: parentPath,
+          name: pathBasename(parentPath),
+          parentPath: parentDirname(parentPath),
+          isDocumentChildContainer: true,
+        }
+      : null;
     const createdDocument = {
       id: path,
       path,
@@ -334,9 +359,9 @@ export async function createLakeDocument(title: string, parentPath = ""): Promis
     };
     const payload: CreateDocumentPayload = {
       root: workspace.root,
-      directories: workspace.directories,
+      directories: parentDirectory ? [...workspace.directories, parentDirectory] : workspace.directories,
       documents: [...workspace.documents, createdDocument],
-      order: [...workspace.order, `document:${path}`],
+      order: [...workspace.order, ...(parentDirectory ? [`folder:${parentPath}`] : []), `document:${path}`],
       createdDocument,
     };
     saveBrowserWorkspace(payload);
@@ -665,6 +690,169 @@ export async function testStorageConnection(settings: OssSettings): Promise<Stor
   return invoke<StorageConnectionTestOutput>("test_storage_connection", { settings: normalized });
 }
 
+export async function getAiSettings(): Promise<AiSettings> {
+  if (!isTauriRuntime()) {
+    const stored = window.localStorage.getItem(browserAiSettingsKey);
+    return mergeAiSettings(stored ? JSON.parse(stored) as AiSettings : null);
+  }
+
+  return invoke<AiSettings>("get_ai_settings");
+}
+
+export async function saveAiSettings(input: SaveAiSettingsInput): Promise<AiSettings> {
+  const settings = mergeAiSettings(input.settings);
+  if (!isTauriRuntime()) {
+    const secretProfileIds = new Set((input.apiKeys ?? []).map((key) => key.profileId));
+    const sanitized: AiSettings = {
+      ...settings,
+      profiles: settings.profiles.map((profile) => ({
+        ...profile,
+        hasApiKey: profile.hasApiKey || secretProfileIds.has(profile.id),
+      })),
+    };
+    window.localStorage.setItem(browserAiSettingsKey, JSON.stringify(sanitized));
+    return sanitized;
+  }
+
+  return invoke<AiSettings>("save_ai_settings", {
+    input: {
+      ...input,
+      settings,
+    },
+  });
+}
+
+export async function listAiModels(input: AiListModelsInput): Promise<AiListModelsOutput> {
+  if (!isTauriRuntime()) {
+    const settings = await getAiSettings();
+    const profile = settings.profiles.find((item) => item.id === input.profileId);
+    if (!profile?.hasApiKey) {
+      throw new Error("请先保存模型 API Key");
+    }
+    return { profileId: input.profileId, models: [] };
+  }
+
+  return invoke<AiListModelsOutput>("list_ai_models", { input });
+}
+
+export async function addAiModelToProfile(input: AiAddModelInput): Promise<AiSettings> {
+  if (!isTauriRuntime()) {
+    const settings = await getAiSettings();
+    const nextSettings = mergeAiSettings({
+      ...settings,
+      profiles: settings.profiles.map((profile) => {
+        if (profile.id !== input.profileId) {
+          return profile;
+        }
+        const model = {
+          id: `${profile.id}:${input.modelId}`,
+          profileId: profile.id,
+          modelId: input.modelId,
+          displayName: input.displayName || input.modelId,
+          protocol: profile.protocol,
+          enabled: true,
+          capabilityTypes: input.capabilityTypes,
+          supportedInputModalities: input.capabilityTypes.includes("vision")
+            ? ["text" as const, "image" as const]
+            : ["text" as const],
+        };
+        return {
+          ...profile,
+          models: [...profile.models.filter((item) => item.id !== model.id), model],
+        };
+      }),
+    });
+    window.localStorage.setItem(browserAiSettingsKey, JSON.stringify(nextSettings));
+    return nextSettings;
+  }
+
+  return invoke<AiSettings>("add_ai_model_to_profile", { input });
+}
+
+export async function setActiveAiModel(input: AiSetActiveModelInput): Promise<AiSettings> {
+  if (!isTauriRuntime()) {
+    const settings = await getAiSettings();
+    const nextSettings = mergeAiSettings({
+      ...settings,
+      activeModelId: input.configuredModelId || undefined,
+    });
+    window.localStorage.setItem(browserAiSettingsKey, JSON.stringify(nextSettings));
+    return nextSettings;
+  }
+
+  return invoke<AiSettings>("set_active_ai_model", { input });
+}
+
+export async function runAiDocumentAction(input: AiRunDocumentActionInput): Promise<AiRunDocumentActionOutput> {
+  if (!isTauriRuntime()) {
+    const previewMode = previewModeForBrowserAction(input.actionType);
+    return {
+      actionType: input.actionType,
+      title: "AI 预览",
+      content: previewMode === "patch" ? "浏览器预览环境未连接真实模型，模拟追加修改。" : `浏览器预览环境未连接真实模型。\n\n${input.content.slice(0, 600)}`,
+      previewMode,
+      contentScope: input.contentScope,
+      patch: previewMode === "patch" ? {
+        summary: "模拟追加修改",
+        operations: [{ type: "append-document", markdown: input.instruction || "AI 模拟修改" }],
+      } : undefined,
+    };
+  }
+
+  return invoke<AiRunDocumentActionOutput>("run_ai_document_action", { input });
+}
+
+export async function runAiSplitDocument(input: AiSplitDocumentInput): Promise<AiSplitDocumentOutput> {
+  if (!isTauriRuntime()) {
+    const baseTitle = input.documentTitle.trim() || "拆分文档";
+    return {
+      title: "浏览器预览拆分方案",
+      parts: [
+        { title: `${baseTitle}-上`, content: input.content.slice(0, 600) || "第一部分内容" },
+        { title: `${baseTitle}-下`, content: input.content.slice(600, 1200) || "第二部分内容" },
+      ],
+    };
+  }
+
+  return invoke<AiSplitDocumentOutput>("run_ai_split_document", { input });
+}
+
+export async function runAiTableAction(input: AiRunTableActionInput): Promise<AiRunTableActionOutput> {
+  if (!isTauriRuntime()) {
+    const instruction = input.instruction?.trim() ?? "";
+    return {
+      actionType: input.actionType,
+      title: "多维表格 AI 预览",
+      summary: "浏览器预览环境未连接真实模型。",
+      patch: input.actionType === "summarize-table" ? undefined : {
+        fields: [{ name: "AI 标签", type: "multiSelect", options: ["待确认"] }],
+        records: instruction ? [{ title: "待确认任务", values: { "AI 标签": ["待确认"] }, body: instruction }] : [],
+        preferBoard: input.actionType === "meeting-to-task-board",
+      },
+    };
+  }
+
+  return invoke<AiRunTableActionOutput>("run_ai_table_action", { input });
+}
+
+export async function runAiSpreadsheetAction(input: AiRunSpreadsheetActionInput): Promise<AiRunSpreadsheetActionOutput> {
+  if (!isTauriRuntime()) {
+    const instruction = input.instruction?.trim() ?? "";
+    return {
+      actionType: input.actionType,
+      title: "表格 AI 预览",
+      summary: "浏览器预览环境未连接真实模型。",
+      patch: input.actionType === "summarize-spreadsheet" ? undefined : input.actionType === "append-rows" ? {
+        appendRows: instruction ? [[instruction, "待确认"]] : [],
+      } : {
+        sheets: [{ name: "AI 生成表", rows: [["内容", "状态"], [instruction || "示例内容", "待确认"]] }],
+      },
+    };
+  }
+
+  return invoke<AiRunSpreadsheetActionOutput>("run_ai_spreadsheet_action", { input });
+}
+
 function activeStorageId(settings: OssSettings): string {
   if (settings.activeProvider === "local") {
     return settings.local.storageId.trim() || "local";
@@ -673,6 +861,22 @@ function activeStorageId(settings: OssSettings): string {
     return settings.webdav.storageId.trim() || "webdav";
   }
   return settings.bucket.trim();
+}
+
+function previewModeForBrowserAction(actionType: AiRunDocumentActionInput["actionType"]): AiRunDocumentActionOutput["previewMode"] {
+  return [
+    "rewrite",
+    "polish",
+    "expand",
+    "compress",
+    "organize-headings",
+    "outline-to-draft",
+    "notes-to-article",
+    "tech-to-tutorial",
+    "tech-to-readme",
+    "tech-to-release-notes",
+    "custom-edit",
+  ].includes(actionType) ? "patch" : "informational";
 }
 
 export async function getDatabaseLocation(): Promise<DatabaseLocationSettings> {
@@ -1439,6 +1643,12 @@ function replacePathPrefix(path: string, fromPath: string, toPath: string): stri
 
 function pathBasename(path: string): string {
   return path.split("/").filter(Boolean).pop() ?? path;
+}
+
+function parentDirname(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  parts.pop();
+  return parts.join("/");
 }
 
 function documentChildContainerPath(path: string): string {

@@ -1,15 +1,19 @@
 import { beforeEach, describe, expect, test } from "vitest";
 
 import {
+  addAiModelToProfile,
   createLakeDocument,
   createWorkspaceRoot,
   forgetWorkspaceRoot,
+  getAiSettings,
   getOssSettings,
   getRecentWorkspace,
   listKnownWorkspaces,
   listLakeDocuments,
   readLakeDocument,
+  saveAiSettings,
   saveOssSettings,
+  setActiveAiModel,
   setWorkspaceRoot,
   uploadImage,
   writeLakeDocument,
@@ -84,6 +88,18 @@ describe("tauri browser workspace fallback", () => {
     expect(await readLakeDocument("同名.lake")).toBe("<p>b</p>");
   });
 
+  test("浏览器 fallback 支持在文档子级容器中新建文档", async () => {
+    await setWorkspaceRoot("/browser-preview/work");
+    await createLakeDocument("长文", "");
+    const payload = await createLakeDocument("第一部分", "长文");
+
+    expect(payload.createdDocument.path).toBe("长文/第一部分.lake");
+    expect(payload.directories).toEqual([
+      expect.objectContaining({ path: "长文", isDocumentChildContainer: true }),
+    ]);
+    expect(await readLakeDocument("长文/第一部分.lake")).toContain("ne-text");
+  });
+
   test("从列表移除知识库不会影响其他知识库", async () => {
     await setWorkspaceRoot("/browser-preview/a");
     await createLakeDocument("A", "");
@@ -154,5 +170,59 @@ describe("tauri browser workspace fallback", () => {
 
     expect(output.resourceRef).toContain("provider=local");
     expect(output.resourceRef).toContain("yuque-resource://local/images");
+  });
+
+  test("浏览器 AI 设置不会持久化明文 API Key", async () => {
+    const saved = await saveAiSettings({
+      settings: {
+        profiles: [{
+          id: "openai",
+          name: "OpenAI",
+          protocol: "openai-responses",
+          baseUrl: "https://api.openai.com/v1",
+          enabled: true,
+          hasApiKey: false,
+          models: [],
+        }],
+      },
+      apiKeys: [{ profileId: "openai", apiKey: "sk-secret" }],
+    });
+
+    expect(saved.profiles[0].hasApiKey).toBe(true);
+    expect(window.localStorage.getItem("yuque-lake-notes.browser-ai-settings")).not.toContain("sk-secret");
+  });
+
+  test("浏览器 AI 设置支持添加并启用模型", async () => {
+    await saveAiSettings({
+      settings: {
+        profiles: [{
+          id: "openai",
+          name: "OpenAI",
+          protocol: "openai-responses",
+          baseUrl: "https://api.openai.com",
+          enabled: true,
+          hasApiKey: true,
+          models: [],
+        }],
+      },
+    });
+
+    await addAiModelToProfile({
+      profileId: "openai",
+      modelId: "gpt-5.5",
+      displayName: "gpt-5.5",
+      capabilityTypes: ["vision", "reasoning"],
+    });
+    await setActiveAiModel({ configuredModelId: "openai:gpt-5.5" });
+
+    await expect(getAiSettings()).resolves.toMatchObject({
+      activeModelId: "openai:gpt-5.5",
+      profiles: [{
+        models: [{
+          modelId: "gpt-5.5",
+          supportedInputModalities: ["text", "image"],
+        }],
+      }],
+    });
   });
 });

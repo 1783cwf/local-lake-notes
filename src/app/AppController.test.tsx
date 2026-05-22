@@ -43,6 +43,75 @@ const getDatabaseLocation = vi.fn(async () => ({
   custom: false,
 }));
 const getBackupKeyStatus = vi.fn(async () => ({ configured: false, needsKey: false }));
+const getAiSettings = vi.fn(async () => ({ profiles: [] }));
+const listAiModels = vi.fn<(input: { profileId: string }) => Promise<{ profileId: string; models: [] }>>(
+  async (input) => ({ profileId: input.profileId, models: [] }),
+);
+const runAiDocumentAction = vi.fn<(input: unknown) => Promise<{
+  actionType: "summarize-document" | "rewrite" | "custom-edit";
+  title: string;
+  content: string;
+  previewMode: "informational" | "replace-document" | "patch";
+  contentScope?: "document" | "selection";
+  patch?: {
+    summary?: string;
+    operations: Array<
+      | { type: "append-document"; markdown: string; summary?: string }
+      | { type: "prepend-document"; markdown: string; summary?: string }
+      | { type: "insert-after"; anchor: string; markdown: string; summary?: string }
+      | { type: "replace-selection"; markdown: string; summary?: string }
+    >;
+  };
+}>>(async () => ({
+  actionType: "summarize-document",
+  title: "文档总结",
+  content: "AI 总结",
+  previewMode: "informational",
+}));
+const runAiSplitDocument = vi.fn<(input: unknown) => Promise<{
+  title: string;
+  parts: Array<{ title: string; content: string }>;
+}>>(async () => ({
+  title: "拆分方案",
+  parts: [
+    { title: "第一部分", content: "# 第一部分" },
+    { title: "第二部分", content: "# 第二部分" },
+  ],
+}));
+const runAiTableAction = vi.fn<(input: unknown) => Promise<{
+  actionType: "generate-fields";
+  title: string;
+  summary: string;
+  patch?: {
+    fields?: Array<{ name: string; type: "text"; options?: string[] }>;
+    records?: Array<{ title?: string; values?: Record<string, string>; body?: string }>;
+    preferBoard?: boolean;
+  };
+}>>(async () => ({
+  actionType: "generate-fields",
+  title: "字段建议",
+  summary: "建议新增字段",
+  patch: { fields: [{ name: "优先级", type: "text" }] },
+}));
+const runAiSpreadsheetAction = vi.fn<(input: unknown) => Promise<{
+  actionType: "create-sheet";
+  title: string;
+  summary: string;
+  patch?: {
+    sheets?: Array<{ name: string; rows: Array<Array<string | number | boolean | null>> }>;
+    appendRows?: Array<Array<string | number | boolean | null>>;
+  };
+}>>(async () => ({
+  actionType: "create-sheet",
+  title: "工作表建议",
+  summary: "建议新增工作表",
+  patch: { sheets: [{ name: "AI 表", rows: [["标题", "状态"], ["任务", "待办"]] }] },
+}));
+const saveAiSettings = vi.fn(async (input: { settings: { profiles: unknown[] } }) => input.settings);
+const addAiModelToProfile = vi.fn<(input: unknown) => Promise<{ profiles: [] }>>(async () => ({ profiles: [] }));
+const setActiveAiModel = vi.fn<(input: { configuredModelId: string }) => Promise<{ profiles: [] }>>(
+  async () => ({ profiles: [] }),
+);
 const getResourceKeyStatus = vi.fn(async () => ({ configured: false, needsKey: false, knownFingerprints: [] }));
 const verifyBackupKeyStatus = vi.fn(async () => ({ configured: false, needsKey: false }));
 const verifyResourceKeyStatus = vi.fn(async () => ({ configured: false, needsKey: false, knownFingerprints: [] }));
@@ -220,6 +289,10 @@ vi.mock("../features/spreadsheet/SpreadsheetEditor", () => ({
     onSave,
     onSaveStatusChange,
     onRegisterSaveNow,
+    onRegisterReadWorkbook,
+    aiWorkbookSnapshot,
+    aiWorkbookSnapshotRequestId,
+    onAiWorkbookSnapshotApplied,
   }: {
     document: { path: string; name: string } | null;
     content: string;
@@ -227,6 +300,10 @@ vi.mock("../features/spreadsheet/SpreadsheetEditor", () => ({
     onSave: (relativePath: string, content: string) => Promise<void>;
     onSaveStatusChange: (status: { state: "clean" | "saved" }) => void;
     onRegisterSaveNow?: (saveNow: (() => Promise<void>) | null) => void;
+    onRegisterReadWorkbook?: (readWorkbook: (() => unknown) | null) => void;
+    aiWorkbookSnapshot?: unknown;
+    aiWorkbookSnapshotRequestId?: number;
+    onAiWorkbookSnapshotApplied?: () => void;
   }, ref: Ref<{
     importExcel: (file: File) => Promise<string>;
     exportExcel: () => Promise<File>;
@@ -258,6 +335,16 @@ vi.mock("../features/spreadsheet/SpreadsheetEditor", () => ({
       return () => onRegisterSaveNow?.(null);
     }, [content, document, onRegisterSaveNow, onSave]);
     useEffect(() => {
+      onRegisterReadWorkbook?.(() => JSON.parse(content));
+      return () => onRegisterReadWorkbook?.(null);
+    }, [content, onRegisterReadWorkbook]);
+    useEffect(() => {
+      if (aiWorkbookSnapshot && aiWorkbookSnapshotRequestId && document) {
+        void onSave(document.path, JSON.stringify(aiWorkbookSnapshot));
+        onAiWorkbookSnapshotApplied?.();
+      }
+    }, [aiWorkbookSnapshot, aiWorkbookSnapshotRequestId, document, onAiWorkbookSnapshotApplied, onSave]);
+    useEffect(() => {
       if (manualSaveRequest > 0 && document) {
         void onSave(document.path, content);
       }
@@ -274,6 +361,10 @@ vi.mock("../features/multidimensional-table/MultidimensionalTableEditor", () => 
     onSave,
     onSaveStatusChange,
     onRegisterSaveNow,
+    onRegisterReadTable,
+    aiTablePatch,
+    aiTablePatchRequestId,
+    onAiTablePatchApplied,
   }: {
     document: { path: string; name: string } | null;
     content: string;
@@ -281,6 +372,10 @@ vi.mock("../features/multidimensional-table/MultidimensionalTableEditor", () => 
     onSave: (relativePath: string, content: string) => Promise<void>;
     onSaveStatusChange: (status: { state: "clean" | "saved" }) => void;
     onRegisterSaveNow?: (saveNow: (() => Promise<void>) | null) => void;
+    onRegisterReadTable?: (readTable: (() => unknown) | null) => void;
+    aiTablePatch?: unknown;
+    aiTablePatchRequestId?: number;
+    onAiTablePatchApplied?: () => void;
   }, ref: Ref<{ saveNow: () => Promise<void> }>) => {
     useEffect(() => {
       onSaveStatusChange({ state: "clean" });
@@ -301,6 +396,16 @@ vi.mock("../features/multidimensional-table/MultidimensionalTableEditor", () => 
       onRegisterSaveNow?.(saveNow);
       return () => onRegisterSaveNow?.(null);
     }, [content, document, onRegisterSaveNow, onSave]);
+    useEffect(() => {
+      onRegisterReadTable?.(() => JSON.parse(content));
+      return () => onRegisterReadTable?.(null);
+    }, [content, onRegisterReadTable]);
+    useEffect(() => {
+      if (aiTablePatch && aiTablePatchRequestId && document) {
+        void onSave(document.path, JSON.stringify({ appliedPatch: aiTablePatch }));
+        onAiTablePatchApplied?.();
+      }
+    }, [aiTablePatch, aiTablePatchRequestId, document, onAiTablePatchApplied, onSave]);
     useEffect(() => {
       if (manualSaveRequest > 0 && document) {
         void onSave(document.path, content);
@@ -341,6 +446,7 @@ vi.mock("../lib/tauri", () => ({
   deleteSpreadsheetDocument: (path: string) => deleteSpreadsheetDocument(path),
   downloadResourceFile: (input: { url: string; filename: string; resourceRef?: string }) => downloadResourceFile(input),
   getDatabaseLocation: () => getDatabaseLocation(),
+  getAiSettings: () => getAiSettings(),
   getOssSettings: vi.fn(async () => null),
   getBackupKeyStatus: () => getBackupKeyStatus(),
   getResourceKeyStatus: () => getResourceKeyStatus(),
@@ -361,6 +467,7 @@ vi.mock("../lib/tauri", () => ({
   renameMultidimensionalTableDocument: (path: string, name: string) => renameMultidimensionalTableDocument(path, name),
   renameSpreadsheetDocument: (path: string, name: string) => renameSpreadsheetDocument(path, name),
   renameWorkspace: vi.fn(),
+  saveAiSettings: (input: { settings: { profiles: unknown[] } }) => saveAiSettings(input),
   saveOssSettings: vi.fn(),
   saveBinaryExport: (defaultPath: string, bytes: Uint8Array, filters: Array<{ name: string; extensions: string[] }>) => saveBinaryExport(defaultPath, bytes, filters),
   savePdfExport: (defaultPath: string, html: string, filters: Array<{ name: string; extensions: string[] }>) => savePdfExport(defaultPath, html, filters),
@@ -393,9 +500,16 @@ vi.mock("../lib/tauri", () => ({
     rewrittenDocuments: [],
     copiedResources: 0,
   })),
+  runAiDocumentAction: (input: unknown) => runAiDocumentAction(input),
+  runAiSplitDocument: (input: unknown) => runAiSplitDocument(input),
+  runAiSpreadsheetAction: (input: unknown) => runAiSpreadsheetAction(input),
+  runAiTableAction: (input: unknown) => runAiTableAction(input),
   readResourceBytes: vi.fn(async () => new Uint8Array([1, 2, 3])),
   saveWorkspaceOrder: vi.fn(),
   setBackupKey: vi.fn(async () => ({ configured: true, needsKey: false, fingerprint: "fingerprint" })),
+  setActiveAiModel: (input: { configuredModelId: string }) => setActiveAiModel(input),
+  addAiModelToProfile: (input: unknown) => addAiModelToProfile(input),
+  listAiModels: (input: { profileId: string }) => listAiModels(input),
   setResourceKey: vi.fn(async () => ({ configured: true, needsKey: false, fingerprint: "resource-fingerprint", knownFingerprints: ["resource-fingerprint"] })),
   setWorkspaceRoot: (path: string) => setWorkspaceRoot(path),
   uploadFile: vi.fn(),
@@ -444,6 +558,45 @@ beforeEach(() => {
   });
   getBackupKeyStatus.mockReset();
   getBackupKeyStatus.mockResolvedValue({ configured: false, needsKey: false });
+  getAiSettings.mockReset();
+  getAiSettings.mockResolvedValue({ profiles: [] });
+  listAiModels.mockReset();
+  listAiModels.mockResolvedValue({ profileId: "openai", models: [] });
+  runAiDocumentAction.mockReset();
+  runAiDocumentAction.mockResolvedValue({
+    actionType: "summarize-document",
+    title: "文档总结",
+    content: "AI 总结",
+    previewMode: "informational",
+  });
+  runAiSplitDocument.mockReset();
+  runAiSplitDocument.mockResolvedValue({
+    title: "拆分方案",
+    parts: [
+      { title: "第一部分", content: "# 第一部分" },
+      { title: "第二部分", content: "# 第二部分" },
+    ],
+  });
+  runAiTableAction.mockReset();
+  runAiTableAction.mockResolvedValue({
+    actionType: "generate-fields",
+    title: "字段建议",
+    summary: "建议新增字段",
+    patch: { fields: [{ name: "优先级", type: "text" }] },
+  });
+  runAiSpreadsheetAction.mockReset();
+  runAiSpreadsheetAction.mockResolvedValue({
+    actionType: "create-sheet",
+    title: "工作表建议",
+    summary: "建议新增工作表",
+    patch: { sheets: [{ name: "AI 表", rows: [["标题", "状态"], ["任务", "待办"]] }] },
+  });
+  saveAiSettings.mockReset();
+  saveAiSettings.mockImplementation(async (input) => input.settings);
+  addAiModelToProfile.mockReset();
+  addAiModelToProfile.mockResolvedValue({ profiles: [] });
+  setActiveAiModel.mockReset();
+  setActiveAiModel.mockResolvedValue({ profiles: [] });
   getResourceKeyStatus.mockReset();
   getResourceKeyStatus.mockResolvedValue({ configured: false, needsKey: false, knownFingerprints: [] });
   verifyBackupKeyStatus.mockReset();
@@ -633,6 +786,50 @@ test("再次打开已经存在的标签只激活已有标签", async () => {
   });
 });
 
+test("文档导出完成后切换标签不会重复消费旧导出请求", async () => {
+  const user = userEvent.setup();
+  const editor = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn((type: string) => (type === "text/markdown" ? "## A" : "<p>A</p>")),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [
+      { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+      { id: "b.lake", path: "b.lake", name: "b", parentPath: "", size: 1, kind: "lake" },
+    ],
+    order: ["document:a.lake", "document:b.lake"],
+  });
+  readLakeDocument.mockImplementation(async (path) => `<p>${path}</p>`);
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "a" }));
+  await user.pointer({ keys: "[MouseRight]", target: await screen.findByRole("tab", { name: "a" }) });
+  await user.click(screen.getByRole("menuitem", { name: "锁定标签" }));
+  await user.click(screen.getByRole("button", { name: "导出文档" }));
+  await user.click(screen.getByRole("menuitem", { name: "Markdown" }));
+
+  await waitFor(() => {
+    expect(saveBinaryExport).toHaveBeenCalledTimes(1);
+    expect(saveBinaryExport.mock.calls[0][0]).toBe("a.zip");
+  });
+
+  await user.click(screen.getByRole("treeitem", { name: "b" }));
+  await waitFor(() => {
+    expect(screen.getByTestId("current-path")).toHaveTextContent("b.lake");
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  expect(saveBinaryExport).toHaveBeenCalledTimes(1);
+});
+
 test("关闭活动未锁定标签后切换到相邻标签", async () => {
   const user = userEvent.setup();
   getRecentWorkspace.mockResolvedValue({
@@ -744,7 +941,7 @@ test("移除当前知识库后回到未选择目录状态", async () => {
   });
 });
 
-test("启动时只读取备份密钥元数据，不触发钥匙串验证", async () => {
+test("启动时只读取备份密钥元数据，不触发额外验证", async () => {
   getBackupKeyStatus.mockResolvedValue({ configured: true, needsKey: false });
 
   render(<AppController />);
@@ -1218,6 +1415,309 @@ test("创建备份前先保存当前打开文档的最新内容", async () => {
     expect(createBackup).toHaveBeenCalledWith({ forceFull: false });
   });
   expect(writeLakeDocument.mock.invocationCallOrder[0]).toBeLessThan(createBackup.mock.invocationCallOrder[0]);
+});
+
+test("AI 选中文本动作使用显式 Lake 选区并确认后替换选区", async () => {
+  const user = userEvent.setup();
+  const editor = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => "<p>全文</p>"),
+    getSelectionDocument: vi.fn(() => "旧选区"),
+    replaceSelection: vi.fn(),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" }],
+    order: ["document:a.lake"],
+  });
+  runAiDocumentAction.mockResolvedValue({
+    actionType: "rewrite",
+    title: "改写预览",
+    content: "替换当前选区",
+    previewMode: "patch",
+    contentScope: "selection",
+    patch: {
+      summary: "替换当前选区",
+      operations: [{ type: "replace-selection", markdown: "新选区" }],
+    },
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "a" }));
+  await user.click(await screen.findByRole("button", { name: "AI 文档助手" }));
+  await user.click(screen.getByRole("button", { name: "改写" }));
+  await user.click(screen.getByRole("button", { name: "选中区域" }));
+  await user.click(screen.getByRole("button", { name: "生成预览" }));
+  await screen.findByText("新选区");
+  await user.click(screen.getByRole("button", { name: "允许并替换选中区域" }));
+
+  expect(runAiDocumentAction).toHaveBeenCalledWith(expect.objectContaining({
+    actionType: "rewrite",
+    content: "旧选区",
+    contentScope: "selection",
+  }));
+  expect(editor.replaceSelection).toHaveBeenCalledWith("text/markdown", "新选区");
+});
+
+test("AI 文档助手支持自然语言修改并确认写回当前文档", async () => {
+  const user = userEvent.setup();
+  const editor = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn((type: string) => type === "text/markdown" ? "# 原文" : "<p>原文</p>"),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" }],
+    order: ["document:a.lake"],
+  });
+  runAiDocumentAction.mockResolvedValue({
+    actionType: "custom-edit",
+    title: "文档修改预览",
+    content: "新增一个表格",
+    previewMode: "patch",
+    contentScope: "document",
+    patch: {
+      summary: "新增一个表格",
+      operations: [{
+        type: "append-document",
+        markdown: "| 列 A | 列 B |\n| --- | --- |\n| 示例 | 内容 |",
+      }],
+    },
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "a" }));
+  await user.click(await screen.findByRole("button", { name: "AI 文档助手" }));
+  await user.type(screen.getByLabelText("你想怎么改"), "新增一个表格，任意内容都行");
+  await user.click(screen.getByRole("button", { name: "生成修改预览" }));
+  await waitFor(() => expect(screen.getAllByText("+").length).toBeGreaterThan(0));
+  await screen.findByText(/列 A/);
+  expect(screen.getByRole("region", { name: "文档修改预览" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "允许并应用修改" }));
+
+  expect(runAiDocumentAction).toHaveBeenCalledWith(expect.objectContaining({
+    actionType: "custom-edit",
+    instruction: "新增一个表格，任意内容都行",
+    content: "# 原文",
+    contentScope: "document",
+  }));
+  expect(editor.setDocument).toHaveBeenCalledWith(
+    "text/html",
+    expect.stringContaining("<table>"),
+  );
+});
+
+test("AI 文档助手自动模式生成 patch 后直接应用", async () => {
+  const user = userEvent.setup();
+  const editor = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn((type: string) => type === "text/markdown" ? "# 原文" : "<p>原文</p>"),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" }],
+    order: ["document:a.lake"],
+  });
+  runAiDocumentAction.mockResolvedValue({
+    actionType: "custom-edit",
+    title: "文档修改预览",
+    content: "开头新增背景",
+    previewMode: "patch",
+    contentScope: "document",
+    patch: {
+      summary: "补充背景",
+      operations: [{ type: "prepend-document", markdown: "背景说明" }],
+    },
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "a" }));
+  await user.click(await screen.findByRole("button", { name: "AI 文档助手" }));
+  await user.click(screen.getByLabelText("自动模式"));
+  await user.type(screen.getByLabelText("你想怎么改"), "开头新增背景");
+  await user.click(screen.getByRole("button", { name: "生成修改预览" }));
+
+  await waitFor(() => expect(editor.setDocument).toHaveBeenCalledWith("text/markdown", "背景说明\n# 原文"));
+});
+
+test("AI 长文拆分确认后创建当前文档子文档", async () => {
+  const user = userEvent.setup();
+  const editor = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn((type: string) => type === "text/markdown" ? "长文内容" : "<p>长文内容</p>"),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" }],
+    order: ["document:a.lake"],
+  });
+  createLakeDocument
+    .mockResolvedValueOnce({
+      root: "/tmp/kb",
+      directories: [{ id: "a", path: "a", name: "a", parentPath: "", isDocumentChildContainer: true }],
+      documents: [
+        { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+        { id: "a/第一部分.lake", path: "a/第一部分.lake", name: "第一部分", parentPath: "a", size: 1, kind: "lake" },
+      ],
+      order: ["document:a.lake", "folder:a", "document:a/第一部分.lake"],
+      createdDocument: { id: "a/第一部分.lake", path: "a/第一部分.lake", name: "第一部分", parentPath: "a", size: 1, kind: "lake" },
+    })
+    .mockResolvedValueOnce({
+      root: "/tmp/kb",
+      directories: [{ id: "a", path: "a", name: "a", parentPath: "", isDocumentChildContainer: true }],
+      documents: [
+        { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+        { id: "a/第一部分.lake", path: "a/第一部分.lake", name: "第一部分", parentPath: "a", size: 1, kind: "lake" },
+        { id: "a/第二部分.lake", path: "a/第二部分.lake", name: "第二部分", parentPath: "a", size: 1, kind: "lake" },
+      ],
+      order: ["document:a.lake", "folder:a", "document:a/第一部分.lake", "document:a/第二部分.lake"],
+      createdDocument: { id: "a/第二部分.lake", path: "a/第二部分.lake", name: "第二部分", parentPath: "a", size: 1, kind: "lake" },
+    });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "a" }));
+  await user.click(await screen.findByRole("button", { name: "AI 文档助手" }));
+  await user.click(screen.getByRole("button", { name: "拆分子文档" }));
+  await user.click(screen.getByRole("button", { name: "生成预览" }));
+  await screen.findByText("拆分方案");
+  await user.click(screen.getByRole("button", { name: "确认创建" }));
+
+  await waitFor(() => {
+    expect(createLakeDocument).toHaveBeenNthCalledWith(1, "第一部分", "a");
+    expect(createLakeDocument).toHaveBeenNthCalledWith(2, "第二部分", "a");
+    expect(writeLakeDocument).toHaveBeenCalledWith("a/第一部分.lake", "# 第一部分");
+    expect(writeLakeDocument).toHaveBeenCalledWith("a/第二部分.lake", "# 第二部分");
+  });
+});
+
+test("AI 多维表格助手确认后把 patch 应用到当前表格保存链路", async () => {
+  const user = userEvent.setup();
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "project.dbtable.json", path: "project.dbtable.json", name: "project", parentPath: "", size: 1, kind: "multidimensional-table" }],
+    order: ["document:project.dbtable.json"],
+  });
+  readMultidimensionalTableDocument.mockResolvedValue("{\"kind\":\"multidimensional-table\",\"version\":1,\"fields\":[],\"records\":[],\"views\":[],\"activeViewId\":\"view-table\"}");
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "project" }));
+  await user.click(await screen.findByRole("button", { name: "AI 多维表格助手" }));
+  await user.type(screen.getByLabelText("补充内容或要求"), "新增优先级字段");
+  await user.click(screen.getByRole("button", { name: "生成预览" }));
+  await waitFor(() => expect(screen.getByLabelText("AI 表格预览结果")).toHaveTextContent("建议新增字段"));
+  await user.click(screen.getByRole("button", { name: "应用到表格" }));
+
+  await waitFor(() => {
+    expect(runAiTableAction).toHaveBeenCalledWith(expect.objectContaining({
+      actionType: "generate-fields",
+      tableTitle: "project",
+      instruction: "新增优先级字段",
+    }));
+    expect(writeMultidimensionalTableDocument).toHaveBeenCalledWith(
+      "project.dbtable.json",
+      expect.stringContaining("appliedPatch"),
+    );
+  });
+});
+
+test("AI 多维表格助手支持根据输入创建新记录并默认不新增字段", async () => {
+  const user = userEvent.setup();
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "project.dbtable.json", path: "project.dbtable.json", name: "project", parentPath: "", size: 1, kind: "multidimensional-table" }],
+    order: ["document:project.dbtable.json"],
+  });
+  readMultidimensionalTableDocument.mockResolvedValue("{\"kind\":\"multidimensional-table\",\"version\":1,\"fields\":[{\"id\":\"title\",\"name\":\"标题\",\"type\":\"text\",\"primary\":true}],\"records\":[],\"views\":[{\"id\":\"view-table\",\"name\":\"表格\",\"type\":\"table\"}],\"activeViewId\":\"view-table\"}");
+  runAiTableAction.mockResolvedValue({
+    actionType: "generate-fields",
+    title: "记录建议",
+    summary: "建议新增记录",
+    patch: { records: [{ title: "跟进发布", values: { 标题: "跟进发布" }, body: "下周完成" }] },
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "project" }));
+  await user.click(await screen.findByRole("button", { name: "AI 多维表格助手" }));
+  await user.click(screen.getByRole("button", { name: "创建记录" }));
+  await user.type(screen.getByLabelText("补充内容或要求"), "跟进发布，下周完成");
+  await user.click(screen.getByRole("button", { name: "生成预览" }));
+  await waitFor(() => expect(screen.getByLabelText("AI 表格预览结果")).toHaveTextContent("建议新增记录"));
+  await user.click(screen.getByRole("button", { name: "应用到表格" }));
+
+  await waitFor(() => {
+    expect(runAiTableAction).toHaveBeenCalledWith(expect.objectContaining({
+      actionType: "create-records",
+      instruction: "跟进发布，下周完成",
+    }));
+    expect(writeMultidimensionalTableDocument).toHaveBeenCalledWith(
+      "project.dbtable.json",
+      expect.stringContaining("跟进发布"),
+    );
+  });
+});
+
+test("AI Univer 表格助手确认后应用工作表候选", async () => {
+  const user = userEvent.setup();
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "budget.sheet.json", path: "budget.sheet.json", name: "budget", parentPath: "", size: 1, kind: "spreadsheet" }],
+    order: ["document:budget.sheet.json"],
+  });
+  readSpreadsheetDocument.mockResolvedValue("{\"name\":\"budget\",\"sheetOrder\":[\"sheet-0001\"],\"sheets\":{\"sheet-0001\":{\"id\":\"sheet-0001\",\"name\":\"Sheet1\",\"cellData\":{}}}}");
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "budget" }));
+  await user.click(await screen.findByRole("button", { name: "AI 表格助手" }));
+  await user.type(screen.getByLabelText("补充内容或要求"), "创建预算表");
+  await user.click(screen.getByRole("button", { name: "生成预览" }));
+  await waitFor(() => expect(screen.getByLabelText("AI 表格预览结果")).toHaveTextContent("建议新增工作表"));
+  await user.click(screen.getByRole("button", { name: "应用到表格" }));
+
+  await waitFor(() => {
+    expect(runAiSpreadsheetAction).toHaveBeenCalledWith(expect.objectContaining({
+      actionType: "create-sheet",
+      spreadsheetTitle: "budget.sheet",
+      instruction: "创建预算表",
+    }));
+    expect(writeSpreadsheetDocument).toHaveBeenCalledWith(
+      "budget.sheet.json",
+      expect.stringContaining("AI 表"),
+    );
+  });
 });
 
 test("恢复备份后刷新当前打开文档内容", async () => {

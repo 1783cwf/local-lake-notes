@@ -1,11 +1,14 @@
 use tempfile::tempdir;
-use yuque_lake_notes_lib::models::{OssSettings, StorageProviderKind};
+use yuque_lake_notes_lib::models::{
+    AiModelProfile, AiProtocol, AiSettings, OssSettings, StorageProviderKind,
+};
 use yuque_lake_notes_lib::storage::app_database::{
     clear_recent_workspace_root_at, clone_database_to_directory_at, forget_known_workspace_at,
-    list_known_workspaces_at, load_oss_settings_at, load_recent_workspace_root_at,
-    prune_workspace_order_path_at, read_workspace_order_at, rewrite_workspace_order_items,
-    rewrite_workspace_order_path_at, save_oss_settings_at, set_recent_workspace_root_at,
-    set_workspace_order_at,
+    list_known_workspaces_at, load_ai_profile_secrets_at, load_ai_settings_at,
+    load_oss_settings_at, load_recent_workspace_root_at, prune_workspace_order_path_at,
+    read_workspace_order_at, rewrite_workspace_order_items, rewrite_workspace_order_path_at,
+    save_ai_profile_secrets_at, save_ai_settings_at, save_oss_settings_at,
+    set_recent_workspace_root_at, set_workspace_order_at,
 };
 
 fn valid_settings() -> OssSettings {
@@ -31,6 +34,21 @@ fn valid_settings() -> OssSettings {
     }
 }
 
+fn valid_ai_settings() -> AiSettings {
+    AiSettings {
+        active_model_id: None,
+        profiles: vec![AiModelProfile {
+            id: "openai".to_string(),
+            name: "OpenAI".to_string(),
+            protocol: AiProtocol::OpenaiResponses,
+            base_url: "https://api.openai.com".to_string(),
+            enabled: true,
+            models: Vec::new(),
+            has_api_key: true,
+        }],
+    }
+}
+
 #[test]
 fn stores_app_settings_in_sqlite() {
     let dir = tempdir().unwrap();
@@ -48,6 +66,29 @@ fn stores_app_settings_in_sqlite() {
         load_oss_settings_at(&database).unwrap(),
         Some(valid_settings())
     );
+}
+
+#[test]
+fn stores_ai_settings_in_sqlite_without_plaintext_api_key() {
+    let dir = tempdir().unwrap();
+    let database = dir.path().join("app.sqlite3");
+    let settings = valid_ai_settings();
+
+    save_ai_settings_at(&database, &settings).unwrap();
+
+    assert_eq!(load_ai_settings_at(&database).unwrap(), settings);
+}
+
+#[test]
+fn stores_ai_profile_secrets_in_sqlite_setting() {
+    let dir = tempdir().unwrap();
+    let database = dir.path().join("app.sqlite3");
+    let mut secrets = std::collections::HashMap::new();
+    secrets.insert("openai".to_string(), "sk-secret".to_string());
+
+    save_ai_profile_secrets_at(&database, &secrets).unwrap();
+
+    assert_eq!(load_ai_profile_secrets_at(&database).unwrap(), secrets);
 }
 
 #[test]

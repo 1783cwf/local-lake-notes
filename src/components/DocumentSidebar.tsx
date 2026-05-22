@@ -26,8 +26,6 @@ import {
   Download,
   FilePlus,
   FileSpreadsheet,
-  FileText,
-  Folder,
   FolderPlus,
   GripVertical,
   LayoutGrid,
@@ -469,8 +467,7 @@ function SortableTreeRow({
             label={node.hasChildren ? `${expanded ? "收起" : "展开"}目录 ${node.name}` : `空目录 ${node.name}`}
             onToggle={() => onToggleFolder(node.itemId)}
           />
-          <Folder size={15} />
-          <span>{node.name}</span>
+          <span className="tree-row__label">{node.name}</span>
           {node.directory ? (
             <RowActions>
               <RowButton label="新建子目录" onClick={() => onCreateDirectory(node.path)} icon={<FolderPlus size={14} />} />
@@ -490,9 +487,11 @@ function SortableTreeRow({
               label={`${expanded ? "收起" : "展开"}子文档 ${node.name}`}
               onToggle={() => onToggleFolder(node.itemId)}
             />
-          ) : null}
+          ) : (
+            <span className="tree-toggle-spacer" aria-hidden="true" />
+          )}
           {documentIcon(node.document)}
-          <span>{node.name}</span>
+          <span className="tree-row__label">{node.name}</span>
           {node.document ? (
             <RowActions>
               <RowButton label="重命名文档" onClick={() => onRenameDocument(node.document!)} icon={<Pencil size={14} />} />
@@ -529,7 +528,7 @@ function TreeToggleButton({
         }
       }}
     >
-      {!disabled && expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+      {disabled ? <span className="tree-toggle-button__placeholder" /> : expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
     </button>
   );
 }
@@ -553,12 +552,12 @@ function RootDropZone({
 
 function documentIcon(document: WorkspaceDocument | undefined) {
   if (document?.kind === "spreadsheet") {
-    return <FileSpreadsheet size={15} />;
+    return <span className="tree-row__kind-icon" aria-hidden="true"><FileSpreadsheet size={15} /></span>;
   }
   if (document?.kind === "multidimensional-table") {
-    return <LayoutGrid size={15} />;
+    return <span className="tree-row__kind-icon" aria-hidden="true"><LayoutGrid size={15} /></span>;
   }
-  return <FileText size={15} />;
+  return null;
 }
 
 function RowActions({ children }: { children: ReactNode }) {

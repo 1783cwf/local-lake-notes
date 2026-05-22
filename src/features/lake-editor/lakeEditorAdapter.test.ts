@@ -74,6 +74,36 @@ test("创建编辑器时配置 Lake 图片、附件上传和大纲能力", () =>
   destroyLakeEditor(created);
 });
 
+test("嵌入式 Lake 编辑器可以关闭大纲", () => {
+  const editor: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => ""),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+
+  createLakeEditor(document.createElement("div"), {
+    tocEnabled: false,
+    onContentChange: vi.fn(),
+    uploadImage: vi.fn(),
+    uploadFile: vi.fn(),
+    downloadFile: vi.fn(),
+  });
+
+  expect(window.Doc.createOpenEditor).toHaveBeenCalledWith(
+    expect.any(HTMLDivElement),
+    expect.objectContaining({
+      toc: {
+        enable: false,
+        normalView: false,
+      },
+    }),
+  );
+});
+
 test("第三方销毁移除编辑器挂载节点时保留外层容器", () => {
   let mountElement: HTMLElement | null = null;
   const shell = document.createElement("div");

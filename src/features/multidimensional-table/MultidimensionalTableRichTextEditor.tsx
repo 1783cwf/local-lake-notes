@@ -94,6 +94,7 @@ export function MultidimensionalTableRichTextEditor({
     let editor: LakeEditorInstance;
     try {
       editor = createLakeEditor(containerRef.current, {
+        tocEnabled: false,
         onContentChange: () => {
           if (settingDocumentRef.current) {
             return;

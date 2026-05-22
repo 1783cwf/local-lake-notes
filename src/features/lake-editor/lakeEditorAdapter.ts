@@ -6,6 +6,7 @@ export interface CreateLakeEditorOptions {
   uploadFile: (file: unknown) => Promise<UploadImageOutput>;
   downloadFile: (file: LakeFileDownload) => void | Promise<void>;
   onContentChange: () => void;
+  tocEnabled?: boolean;
 }
 
 export interface LakeFileDownload {
@@ -42,8 +43,8 @@ export function createLakeEditor(
     input: {},
     defaultFontsize: 19,
     toc: {
-      enable: true,
-      normalView: true,
+      enable: options.tocEnabled ?? true,
+      normalView: options.tocEnabled ?? true,
     },
     codeblock: {
       codemirrorURL: "/vendor/lakex-doc/codemirror.js",

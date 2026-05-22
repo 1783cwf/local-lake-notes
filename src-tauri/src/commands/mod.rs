@@ -1,3 +1,4 @@
+pub mod ai_settings;
 pub mod backup;
 pub mod documents;
 pub mod external;

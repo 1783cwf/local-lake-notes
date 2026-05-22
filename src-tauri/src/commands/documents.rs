@@ -35,8 +35,8 @@ pub fn create_lake_document(
     state: State<'_, AppState>,
 ) -> AppResult<CreateDocumentPayload> {
     let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
-    let created_path =
-        create_document_at(&root, parent_path.as_deref().unwrap_or_default(), &title)?;
+    let parent_path = parent_path.unwrap_or_default();
+    let created_path = create_document_at(&root, &parent_path, &title)?;
     push_workspace_order_item(&app, &root, format!("document:{created_path}"))?;
     let payload = workspace_payload_for_app(&app, &root)?;
     let created_document = payload
@@ -52,6 +52,37 @@ pub fn create_lake_document(
         order: payload.order,
         created_document,
     })
+}
+
+fn ensure_document_child_container_parent(root: &Path, parent_path: &str) -> AppResult<()> {
+    if parent_path.trim().is_empty() || root.join(parent_path).is_dir() {
+        return Ok(());
+    }
+    validate_parent_child_container_path(parent_path)?;
+    let has_parent_document = [".lake", ".json", ".dbtable.json"]
+        .iter()
+        .any(|extension| root.join(format!("{parent_path}{extension}")).is_file());
+    if !has_parent_document {
+        return Ok(());
+    }
+    let parent = root.join(parent_path);
+    fs::create_dir_all(&parent)?;
+    // 由拆分文档创建出的同名目录是文档子级容器，不应作为普通目录暴露。
+    mark_document_child_container(&parent)
+}
+
+fn validate_parent_child_container_path(parent_path: &str) -> AppResult<()> {
+    let path = Path::new(parent_path);
+    if path.is_absolute() {
+        return Err(AppError::PathOutsideWorkspace);
+    }
+    for component in path.components() {
+        match component {
+            Component::Normal(_) => {}
+            _ => return Err(AppError::PathOutsideWorkspace),
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -313,6 +344,7 @@ pub fn create_multidimensional_table(root: &Path, title: &str) -> AppResult<Stri
 
 pub fn create_document_at(root: &Path, parent_path: &str, title: &str) -> AppResult<String> {
     let stem = safe_file_stem(title)?;
+    ensure_document_child_container_parent(root, parent_path)?;
     let parent = resolve_existing_directory_path(root, parent_path)?;
     let normalized_parent = if parent_path.trim().is_empty() {
         String::new()

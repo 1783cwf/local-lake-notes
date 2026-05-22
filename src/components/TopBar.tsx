@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Cloud, Download, FileSpreadsheet, FileText, Grid2X2, Loader2, Pin, Save, Share2, X } from "lucide-react";
+import { Bot, ChevronDown, Cloud, Download, FileSpreadsheet, FileText, Grid2X2, Loader2, Pin, Save, Share2, X } from "lucide-react";
 
 import type { OpenDocumentTab, SaveStatus } from "../app/appState";
 import type { DocumentExportFormat, ExportResourceStrategy } from "../features/lake-editor/lakeExport";
@@ -17,6 +17,7 @@ interface TopBarProps {
   activeTabId?: string | null;
   saveStatus: SaveStatus;
   onManualSave: () => void;
+  onOpenAiAssistant?: () => void;
   onActivateTab?: (tabId: string) => void | Promise<void>;
   onToggleTabLocked?: (tabId: string) => void;
   onCloseTab?: (tabId: string) => void | Promise<void>;
@@ -37,6 +38,7 @@ export function TopBar({
   activeTabId = null,
   saveStatus,
   onManualSave,
+  onOpenAiAssistant,
   onActivateTab,
   onToggleTabLocked,
   onCloseTab,
@@ -269,6 +271,15 @@ export function TopBar({
         </span>
       </div>
       <div className="top-bar__actions">
+        {document?.kind === "lake" || document?.kind === "multidimensional-table" || document?.kind === "spreadsheet" ? (
+          <IconButton
+            label={document.kind === "multidimensional-table" ? "AI 多维表格助手" : document.kind === "spreadsheet" ? "AI 表格助手" : "AI 文档助手"}
+            onClick={() => onOpenAiAssistant?.()}
+            disabled={!document}
+          >
+            <Bot size={18} />
+          </IconButton>
+        ) : null}
         <IconButton label="保存" onClick={onManualSave} disabled={!document}>
           <Save size={18} />
         </IconButton>
