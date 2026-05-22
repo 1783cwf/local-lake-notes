@@ -5,7 +5,9 @@ import {
   deleteMultidimensionalField,
   deleteMultidimensionalRecord,
   formatTimeFieldValue,
+  importPastedMultidimensionalTableData,
   parseMultidimensionalTableDocument,
+  reorderMultidimensionalFields,
   serializeMultidimensionalTableDocument,
   updateMultidimensionalFieldOptions,
   updateMultidimensionalFieldTimeFormat,
@@ -111,6 +113,51 @@ test("字段删除会同步清理记录值和看板视图引用", () => {
   expect(deleted.fields.some((field) => field.id === "date")).toBe(false);
   expect(deleted.records[0].values).not.toHaveProperty("date");
   expect(deleted.views.find((view) => view.type === "board")?.cardFieldIds).not.toContain("date");
+});
+
+test("字段排序只调整字段顺序并保留记录值", () => {
+  const source = createDefaultMultidimensionalTableDocument();
+  const record = createEmptyMultidimensionalTableRecord(source.fields, {
+    title: "排序测试",
+    attachment: "/tmp/demo.pdf",
+  });
+  const nextDocument = reorderMultidimensionalFields({ ...source, records: [record] }, "attachment", "title");
+
+  expect(nextDocument.fields.map((field) => field.id).slice(0, 2)).toEqual(["attachment", "title"]);
+  expect(nextDocument.records[0].values.title).toBe("排序测试");
+  expect(nextDocument.records[0].values.attachment).toBe("/tmp/demo.pdf");
+});
+
+test("粘贴导入会匹配已有字段并创建缺失字段", () => {
+  const source = createDefaultMultidimensionalTableDocument();
+  const result = importPastedMultidimensionalTableData(
+    source,
+    "标题\t附件\t负责人\n导入任务1\t/tmp/demo.pdf\t张三\n导入任务2\t\t李四",
+  );
+  const ownerField = result.document.fields.find((field) => field.name === "负责人");
+
+  expect(result.importedRecordCount).toBe(2);
+  expect(result.matchedFieldCount).toBe(2);
+  expect(result.createdFieldCount).toBe(1);
+  expect(ownerField?.type).toBe("text");
+  expect(result.document.records).toHaveLength(2);
+  expect(result.document.records[0].values.title).toBe("导入任务1");
+  expect(result.document.records[0].values.attachment).toEqual(expect.arrayContaining([
+    expect.objectContaining({ name: "demo.pdf" }),
+  ]));
+  expect(ownerField ? result.document.records[0].values[ownerField.id] : "").toBe("张三");
+});
+
+test("导入单选字段会按文本匹配或创建选项", () => {
+  const source = createDefaultMultidimensionalTableDocument();
+  const result = importPastedMultidimensionalTableData(source, "标题\t状态\n任务1\t单选1\n任务2\t进行中");
+  const statusField = result.document.fields.find((field) => field.id === "status")!;
+  const createdOption = statusField.options?.find((option) => option.label === "进行中");
+
+  expect(result.createdFieldCount).toBe(0);
+  expect(createdOption).toBeTruthy();
+  expect(result.document.records[0].values.status).toBe("status-single-1");
+  expect(result.document.records[1].values.status).toBe(createdOption?.id);
 });
 
 test("删除单选和多选字段选项会同步清理记录值", () => {

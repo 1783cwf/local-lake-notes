@@ -143,6 +143,7 @@ pub struct StorageConnectionTestOutput {
 #[serde(rename_all = "kebab-case")]
 pub enum AiProtocol {
     OpenaiResponses,
+    OpenaiChatCompletions,
     AnthropicMessages,
 }
 

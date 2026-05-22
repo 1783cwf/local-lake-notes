@@ -586,6 +586,7 @@ function RecordBodyFullscreenEditor({
           <MultidimensionalTableRichTextEditor
             value={value}
             ariaLabel="全屏记录正文内容"
+            tocEnabled
             onChange={onChange}
             onUploadImage={onUploadImage}
             onUploadFile={onUploadFile}

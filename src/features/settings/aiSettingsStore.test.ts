@@ -33,4 +33,15 @@ describe("aiSettingsStore", () => {
       supportedInputModalities: ["text"],
     });
   });
+
+  test("支持创建 OpenAI Chat Completions 配置", () => {
+    const profile = createAiProfile("openai-chat-completions");
+    const settings = mergeAiSettings({ profiles: [profile] });
+
+    expect(profile.name).toBe("OpenAI");
+    expect(settings.profiles[0]).toMatchObject({
+      protocol: "openai-chat-completions",
+      baseUrl: "https://api.openai.com",
+    });
+  });
 });

@@ -1877,7 +1877,8 @@ button {
 }
 
 .multitable-toolbar-panel input,
-.multitable-toolbar-panel select {
+.multitable-toolbar-panel select,
+.multitable-toolbar-panel textarea {
   height: 34px;
   min-width: 220px;
   padding: 0 10px;
@@ -1893,7 +1894,8 @@ button {
 }
 
 .multitable-toolbar-panel input:focus,
-.multitable-toolbar-panel select:focus {
+.multitable-toolbar-panel select:focus,
+.multitable-toolbar-panel textarea:focus {
   border-color: #8fb0ff;
   box-shadow: 0 0 0 3px rgb(51 112 255 / 12%);
 }
@@ -2054,6 +2056,98 @@ button {
   font-weight: 500;
 }
 
+.multitable-import-panel {
+  align-items: stretch;
+  gap: 16px;
+  padding: 14px 30px 16px;
+}
+
+.multitable-import-panel__intro {
+  display: grid;
+  align-content: start;
+  width: 120px;
+  flex: none;
+}
+
+.multitable-import-panel__intro strong {
+  color: #1f2329;
+  font-size: 14px;
+}
+
+.multitable-import-panel__input {
+  display: grid;
+  min-width: min(520px, 52vw) !important;
+  flex: 1;
+  gap: 8px !important;
+}
+
+.multitable-import-panel__input textarea {
+  width: 100%;
+  min-height: 116px;
+  padding: 10px 12px;
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.multitable-import-panel__actions {
+  display: flex;
+  width: 176px;
+  flex: none;
+  flex-direction: column;
+  justify-content: end;
+  gap: 8px;
+}
+
+.multitable-import-panel__actions p {
+  margin: 0 0 auto;
+  color: #d14343;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.multitable-import-panel__actions > span {
+  flex: 1;
+}
+
+.multitable-import-panel__actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #dfe5ee;
+  border-radius: 8px;
+  color: #4e5969;
+  background: #ffffff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+
+.multitable-import-panel__actions button:hover {
+  border-color: #cfd8e8;
+  background: #f8fafc;
+}
+
+.multitable-import-panel__actions .is-primary {
+  border-color: var(--multitable-blue);
+  color: #ffffff;
+  background: var(--multitable-blue);
+}
+
+.multitable-import-panel__actions .is-primary:hover {
+  background: #245bd6;
+}
+
+.multitable-import-summary {
+  padding: 8px 30px 10px;
+  border-top: 1px solid #eef1f5;
+  color: #067647;
+  background: #f3fbf6;
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .multitable-grid {
   flex: 1;
   min-height: 0;
@@ -2075,6 +2169,15 @@ button {
   border-radius: 10px 10px 0 0;
   background: var(--multitable-header);
   overflow: visible;
+}
+
+.multitable-grid__sortable-field {
+  min-width: 0;
+}
+
+.multitable-grid__sortable-field.is-dragging {
+  z-index: 40;
+  opacity: 0.88;
 }
 
 .multitable-grid__body {
@@ -2103,6 +2206,10 @@ button {
 .multitable-grid__cell--header {
   position: relative;
   overflow: visible;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
   padding: 7px 9px;
 }
 
@@ -2230,6 +2337,31 @@ button {
     color 0.16s ease,
     background 0.16s ease,
     box-shadow 0.16s ease;
+}
+
+.multitable-grid-field-drag-handle {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 32px;
+  border: 0;
+  border-radius: 6px;
+  color: #a1a9b3;
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+}
+
+.multitable-grid-field-drag-handle:hover,
+.multitable-grid-field-drag-handle:focus-visible {
+  color: #4e5969;
+  background: #ffffff;
+  outline: none;
+  box-shadow: 0 1px 2px rgb(31 35 41 / 6%);
+}
+
+.multitable-grid-field-drag-handle:active {
+  cursor: grabbing;
 }
 
 .multitable-grid-field-button:hover,
@@ -4340,13 +4472,19 @@ button {
 .ai-settings__fetched-model {
   display: grid;
   min-width: 0;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 10px;
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fbfcfc;
+}
+
+.ai-settings__model.is-active {
+  border-color: #a4d8bd;
+  background: #f1fbf6;
+  box-shadow: 0 0 0 1px rgb(41 160 99 / 12%);
 }
 
 .ai-settings__fetched-model {
@@ -4366,8 +4504,48 @@ button {
 }
 
 .ai-settings__active.is-active {
+  color: #ffffff;
+  background: var(--green);
+}
+
+.ai-settings__model strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-settings__current-badge {
+  display: inline-flex;
+  flex: none;
+  min-height: 22px;
+  align-items: center;
+  padding: 0 8px;
+  border-radius: 999px;
   color: var(--green-dark);
   background: #dff4e8;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ai-settings__delete-model {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 8px;
+  color: #9aa3a0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ai-settings__delete-model:hover:not(:disabled) {
+  color: #d14343;
+  background: #fff1f0;
+}
+
+.ai-settings__delete-model:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .ai-capability-selector,
