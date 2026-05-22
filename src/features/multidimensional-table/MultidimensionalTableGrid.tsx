@@ -1,4 +1,22 @@
-import { ChevronDown, Plus, Trash2 } from "lucide-react";
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DraggableAttributes,
+  type DraggableSyntheticListeners,
+} from "@dnd-kit/core";
+import {
+  horizontalListSortingStrategy,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { ChevronDown, GripVertical, Plus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 import type { FileDownloadInput, UploadImageInput, UploadImageOutput } from "../../app/appState";
@@ -13,6 +31,7 @@ import {
   appendMultidimensionalField,
   createField,
   fieldTypeLabel,
+  reorderMultidimensionalFields,
   updateMultidimensionalFieldOptions,
 } from "./multidimensionalTableDocument";
 import { FieldTypeIcon, MultidimensionalTableFieldConfigPanel } from "./MultidimensionalTableFieldConfigPanel";
@@ -45,27 +64,45 @@ export function MultidimensionalTableGrid({
     gridTemplateColumns: `repeat(${document.fields.length}, minmax(168px, 1fr)) 116px`,
     minWidth: `${document.fields.length * 168 + 116}px`,
   } satisfies CSSProperties;
+  const fieldIds = document.fields.map((field) => field.id);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
   const addField = () => {
     const field = createField(document.fields);
     onChange(appendMultidimensionalField(document, field));
   };
+  const reorderField = (event: DragEndEvent) => {
+    const activeFieldId = String(event.active.id);
+    const overFieldId = event.over?.id ? String(event.over.id) : "";
+    if (!overFieldId || activeFieldId === overFieldId) {
+      return;
+    }
+
+    onChange(reorderMultidimensionalFields(document, activeFieldId, overFieldId));
+  };
 
   return (
     <div className="multitable-grid" data-testid="multitable-grid">
-      <div className="multitable-grid__header" style={headerGridStyle}>
-        {document.fields.map((field) => (
-          <FieldHeader
-            key={field.id}
-            document={document}
-            field={field}
-            onChange={onChange}
-          />
-        ))}
-        <button type="button" className="multitable-grid__add-field" onClick={addField}>
-          <Plus size={14} />
-          新字段
-        </button>
-      </div>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={reorderField}>
+        <SortableContext items={fieldIds} strategy={horizontalListSortingStrategy}>
+          <div className="multitable-grid__header" style={headerGridStyle}>
+            {document.fields.map((field) => (
+              <SortableFieldHeader
+                key={field.id}
+                document={document}
+                field={field}
+                onChange={onChange}
+              />
+            ))}
+            <button type="button" className="multitable-grid__add-field" onClick={addField}>
+              <Plus size={14} />
+              新字段
+            </button>
+          </div>
+        </SortableContext>
+      </DndContext>
       <div className="multitable-grid__body">
         {records.map((record) => (
           <div key={record.id} className="multitable-grid__row" style={rowGridStyle}>
@@ -113,13 +150,59 @@ function recordTitle(record: MultidimensionalTableRecord, fields: Multidimension
   return typeof value === "string" && value.trim() ? value.trim() : "未命名记录";
 }
 
-function FieldHeader({
+function SortableFieldHeader({
   document,
   field,
   onChange,
 }: {
   document: MultidimensionalTableDocument;
   field: MultidimensionalTableField;
+  onChange: (document: MultidimensionalTableDocument) => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: field.id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  } satisfies CSSProperties;
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`multitable-grid__sortable-field${isDragging ? " is-dragging" : ""}`}
+    >
+      <FieldHeader
+        document={document}
+        field={field}
+        dragHandleProps={{
+          attributes,
+          listeners,
+        }}
+        onChange={onChange}
+      />
+    </div>
+  );
+}
+
+function FieldHeader({
+  document,
+  field,
+  dragHandleProps,
+  onChange,
+}: {
+  document: MultidimensionalTableDocument;
+  field: MultidimensionalTableField;
+  dragHandleProps?: {
+    attributes: DraggableAttributes;
+    listeners: DraggableSyntheticListeners | undefined;
+  };
   onChange: (document: MultidimensionalTableDocument) => void;
 }) {
   const [panelOpen, setPanelOpen] = useState(false);
@@ -142,6 +225,15 @@ function FieldHeader({
 
   return (
     <div ref={rootRef} className="multitable-grid__cell multitable-grid__cell--header">
+      <button
+        type="button"
+        className="multitable-grid-field-drag-handle"
+        aria-label={`拖拽排序字段 ${field.name}`}
+        {...(dragHandleProps?.attributes ?? {})}
+        {...(dragHandleProps?.listeners ?? {})}
+      >
+        <GripVertical size={14} />
+      </button>
       <button
         type="button"
         className="multitable-grid-field-button"

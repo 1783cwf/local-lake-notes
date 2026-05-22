@@ -271,6 +271,65 @@ test("文件存储顶部展示明确的保存按钮", () => {
   expect(screen.getByRole("button", { name: "保存存储设置" })).toBeInTheDocument();
 });
 
+test("AI 已配置模型会明确展示当前使用模型并支持删除", async () => {
+  const user = userEvent.setup();
+  const onSaveAiSettings = vi.fn(async (input) => input.settings);
+
+  renderPanel({
+    aiSettings: {
+      activeModelId: "openai:gpt-4o",
+      profiles: [{
+        id: "openai",
+        name: "OpenAI",
+        protocol: "openai-responses",
+        baseUrl: "https://api.openai.com",
+        enabled: true,
+        hasApiKey: true,
+        models: [
+          {
+            id: "openai:gpt-4o",
+            profileId: "openai",
+            modelId: "gpt-4o",
+            displayName: "gpt-4o",
+            protocol: "openai-responses",
+            enabled: true,
+            capabilityTypes: ["vision"],
+            supportedInputModalities: ["text", "image"],
+          },
+          {
+            id: "openai:gpt-4o-mini",
+            profileId: "openai",
+            modelId: "gpt-4o-mini",
+            displayName: "gpt-4o-mini",
+            protocol: "openai-responses",
+            enabled: true,
+            capabilityTypes: [],
+            supportedInputModalities: ["text"],
+          },
+        ],
+      }],
+    },
+    onSaveAiSettings,
+  });
+
+  await user.click(screen.getByRole("button", { name: "AI 模型" }));
+
+  expect(screen.getByRole("button", { name: "当前使用 gpt-4o" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByText("当前使用")).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "删除模型 gpt-4o" }));
+  await user.click(screen.getByRole("button", { name: "保存 AI 设置" }));
+
+  expect(onSaveAiSettings).toHaveBeenCalledWith(expect.objectContaining({
+    settings: expect.objectContaining({
+      activeModelId: undefined,
+      profiles: [expect.objectContaining({
+        models: [expect.objectContaining({ id: "openai:gpt-4o-mini" })],
+      })],
+    }),
+  }));
+});
+
 test("S3 和 WebDAV 页签内都可以配置资源并发访问请求数", async () => {
   const user = userEvent.setup();
 

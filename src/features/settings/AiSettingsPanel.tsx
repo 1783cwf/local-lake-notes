@@ -1,6 +1,6 @@
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { Bot, Check, Circle, Eye, Globe2, Plus, RefreshCw, Sparkles, Wrench, X } from "lucide-react";
+import { Bot, Check, Circle, Eye, Globe2, Plus, RefreshCw, Sparkles, Trash2, Wrench, X } from "lucide-react";
 
 import type {
   AiFetchedModel,
@@ -94,6 +94,18 @@ export function AiSettingsPanel({
     setDeletedProfileIds((current) => [...new Set([...current, profileId])]);
     setSelectedProfileId((current) => current === profileId ? null : current);
     setFetchedModels([]);
+  };
+
+  const removeConfiguredModel = (profileId: string, modelId: string) => {
+    setDraft((current) => ({
+      ...current,
+      activeModelId: current.activeModelId === modelId ? undefined : current.activeModelId,
+      profiles: current.profiles.map((profile) => profile.id === profileId
+        ? { ...profile, models: profile.models.filter((model) => model.id !== modelId) }
+        : profile),
+    }));
+    setMessage(null);
+    setError(null);
   };
 
   const submit = async (event: FormEvent) => {
@@ -205,7 +217,7 @@ export function AiSettingsPanel({
             <Bot size={16} />
             未配置模型
           </div>
-          <p className="settings-card__text">添加 OpenAI Responses 或 Anthropic Messages 配置后即可获取模型列表。</p>
+          <p className="settings-card__text">添加 OpenAI 或 Anthropic 配置后即可获取模型列表。</p>
         </div>
       ) : (
         <div className="ai-settings__layout">
@@ -291,23 +303,40 @@ export function AiSettingsPanel({
                 <h4>已配置模型</h4>
                 {selectedProfile.models.length === 0 ? (
                   <p className="settings-card__muted">暂无模型</p>
-                ) : selectedProfile.models.map((model) => (
-                  <div key={model.id} className="ai-settings__model">
-                    <button
-                      type="button"
-                      className={`ai-settings__active${draft.activeModelId === model.id ? " is-active" : ""}`}
-                      onClick={() => setActiveModel(model.id)}
-                      aria-label={`启用 ${model.displayName}`}
-                    >
-                      <Circle size={12} />
-                    </button>
-                    <div>
-                      <strong>{model.displayName}</strong>
-                      <small>{model.modelId}</small>
+                ) : selectedProfile.models.map((model) => {
+                  const active = draft.activeModelId === model.id;
+                  return (
+                    <div key={model.id} className={`ai-settings__model${active ? " is-active" : ""}`}>
+                      <button
+                        type="button"
+                        className={`ai-settings__active${active ? " is-active" : ""}`}
+                        onClick={() => setActiveModel(model.id)}
+                        aria-label={active ? `当前使用 ${model.displayName}` : `启用 ${model.displayName}`}
+                        aria-pressed={active}
+                      >
+                        {active ? <Check size={15} /> : <Circle size={12} />}
+                      </button>
+                      <div>
+                        <strong>
+                          {model.displayName}
+                          {active ? <span className="ai-settings__current-badge">当前使用</span> : null}
+                        </strong>
+                        <small>{model.modelId}</small>
+                      </div>
+                      <CapabilityTags capabilities={model.capabilityTypes} />
+                      <button
+                        type="button"
+                        className="ai-settings__delete-model"
+                        aria-label={`删除模型 ${model.displayName}`}
+                        title="删除模型"
+                        disabled={saving}
+                        onClick={() => removeConfiguredModel(selectedProfile.id, model.id)}
+                      >
+                        <Trash2 size={15} />
+                      </button>
                     </div>
-                    <CapabilityTags capabilities={model.capabilityTypes} />
-                  </div>
-                ))}
+                  );
+                })}
               </section>
 
               <section className="ai-settings__models" aria-label="可添加模型">

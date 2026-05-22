@@ -18,11 +18,13 @@ export const aiCapabilityOptions: Array<{ value: AiModelCapabilityType; label: s
 
 export const aiProtocolOptions: Array<{ value: AiProtocol; label: string }> = [
   { value: "openai-responses", label: "OpenAI Responses" },
+  { value: "openai-chat-completions", label: "OpenAI Chat Completions" },
   { value: "anthropic-messages", label: "Anthropic Messages" },
 ];
 
 export const defaultAiBaseUrls: Record<AiProtocol, string> = {
   "openai-responses": "https://api.openai.com",
+  "openai-chat-completions": "https://api.openai.com",
   "anthropic-messages": "https://api.anthropic.com",
 };
 
@@ -47,7 +49,7 @@ export function createAiProfile(protocol: AiProtocol = "openai-responses"): AiMo
   const id = `ai-${Date.now().toString(36)}`;
   return {
     id,
-    name: protocol === "openai-responses" ? "OpenAI" : "Anthropic",
+    name: protocol.startsWith("openai-") ? "OpenAI" : "Anthropic",
     protocol,
     baseUrl: defaultAiBaseUrls[protocol],
     enabled: true,
@@ -119,7 +121,7 @@ export function validateAiSettings(settings: AiSettings): string | null {
 }
 
 function isAiProtocol(value: unknown): value is AiProtocol {
-  return value === "openai-responses" || value === "anthropic-messages";
+  return value === "openai-responses" || value === "openai-chat-completions" || value === "anthropic-messages";
 }
 
 function uniqueCapabilityTypes(capabilities: AiModelCapabilityType[]): AiModelCapabilityType[] {

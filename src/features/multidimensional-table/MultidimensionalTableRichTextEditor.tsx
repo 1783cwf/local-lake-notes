@@ -26,6 +26,7 @@ interface MultidimensionalTableRichTextEditorProps {
   onDownloadFile?: (input: FileDownloadInput) => Promise<void>;
   onPrepareResourcePreview?: (resourceRef: string) => Promise<string>;
   resourcePreviewConcurrency?: number;
+  tocEnabled?: boolean;
 }
 
 export function MultidimensionalTableRichTextEditor({
@@ -37,6 +38,7 @@ export function MultidimensionalTableRichTextEditor({
   onDownloadFile,
   onPrepareResourcePreview,
   resourcePreviewConcurrency,
+  tocEnabled = false,
 }: MultidimensionalTableRichTextEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<LakeEditorInstance | null>(null);
@@ -94,7 +96,8 @@ export function MultidimensionalTableRichTextEditor({
     let editor: LakeEditorInstance;
     try {
       editor = createLakeEditor(containerRef.current, {
-        tocEnabled: false,
+        // 记录详情内嵌正文需要保持紧凑；全屏正文则复用 Lake 自带大纲，方便长正文导航。
+        tocEnabled,
         onContentChange: () => {
           if (settingDocumentRef.current) {
             return;

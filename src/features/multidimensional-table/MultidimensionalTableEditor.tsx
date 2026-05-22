@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Filter, Kanban, ListFilter, MoreHorizontal, Pencil, Plus, Search, Settings2, Table2, Trash2, X } from "lucide-react";
+import { ClipboardPaste, Filter, Kanban, ListFilter, MoreHorizontal, Pencil, Plus, Search, Settings2, Table2, Trash2, X } from "lucide-react";
 
 import type { AiTablePatch, FileDownloadInput, SaveStatus, UploadImageInput, UploadImageOutput } from "../../app/appState";
 import { applyAiTablePatch } from "../ai/multidimensionalTableAi";
@@ -13,6 +13,7 @@ import {
   createEmptyMultidimensionalTableRecord,
   deleteMultidimensionalRecord,
   formatTimeFieldValue,
+  importPastedMultidimensionalTableData,
   optionById,
   parseMultidimensionalTableDocument,
   serializeMultidimensionalTableDocument,
@@ -68,6 +69,10 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
   const documentPath = document.path;
   const [tableDocument, setTableDocument] = useState<MultidimensionalTableDocument>(() => parseMultidimensionalTableDocument(content));
   const [toolbarPanel, setToolbarPanel] = useState<"filter" | "sort" | "search" | null>(null);
+  const [importPanelOpen, setImportPanelOpen] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importError, setImportError] = useState("");
+  const [importSummary, setImportSummary] = useState("");
   const [searchText, setSearchText] = useState("");
   const [sortFieldId, setSortFieldId] = useState("");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
@@ -164,7 +169,7 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
     onAiTablePatchApplied?.();
   }, [aiTablePatch, aiTablePatchRequestId, commitChange, onAiTablePatchApplied]);
   useEffect(() => {
-    if (!toolbarPanel && !boardConfigOpen) {
+    if (!toolbarPanel && !boardConfigOpen && !importPanelOpen) {
       return;
     }
 
@@ -175,13 +180,14 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
       }
       setToolbarPanel(null);
       setBoardConfigOpen(false);
+      setImportPanelOpen(false);
     };
 
     window.document.addEventListener("pointerdown", closeToolbarPanelsByOutsideClick);
     return () => {
       window.document.removeEventListener("pointerdown", closeToolbarPanelsByOutsideClick);
     };
-  }, [boardConfigOpen, toolbarPanel]);
+  }, [boardConfigOpen, importPanelOpen, toolbarPanel]);
   useEffect(() => {
     if (!viewMenuId) {
       return;
@@ -324,7 +330,31 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
   };
   const toggleToolbarPanel = (panel: "filter" | "sort" | "search") => {
     setBoardConfigOpen(false);
+    setImportPanelOpen(false);
     setToolbarPanel((current) => current === panel ? null : panel);
+  };
+  const toggleImportPanel = () => {
+    setToolbarPanel(null);
+    setBoardConfigOpen(false);
+    setImportSummary("");
+    setImportPanelOpen((current) => !current);
+  };
+  const importPastedData = () => {
+    try {
+      const result = importPastedMultidimensionalTableData(tableDocumentRef.current, importText);
+      const tableView = result.document.views.find((view) => view.type === "table");
+      const nextDocument = tableView && result.document.activeViewId !== tableView.id
+        ? { ...result.document, activeViewId: tableView.id }
+        : result.document;
+      commitChange(nextDocument);
+      setImportError("");
+      setImportText("");
+      setImportSummary(`已导入 ${result.importedRecordCount} 条记录，匹配 ${result.matchedFieldCount} 个字段，新建 ${result.createdFieldCount} 个字段`);
+      setImportPanelOpen(false);
+    } catch (error) {
+      setImportSummary("");
+      setImportError(error instanceof Error ? error.message : String(error));
+    }
   };
   const toggleBoardConfigField = (fieldId: string) => {
     const nextBoardView = activeBoardView;
@@ -430,6 +460,7 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
                     aria-expanded={boardConfigOpen}
                     onClick={() => {
                       setToolbarPanel(null);
+                      setImportPanelOpen(false);
                       setBoardConfigOpen((current) => !current);
                     }}
                   >
@@ -465,6 +496,12 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
                 <Search size={16} />
                 搜索
               </button>
+              {activeViewType === "table" ? (
+                <button type="button" aria-expanded={importPanelOpen} onClick={toggleImportPanel}>
+                  <ClipboardPaste size={16} />
+                  导入
+                </button>
+              ) : null}
               {activeConditionCount > 0 ? (
                 <button type="button" className="multitable-actionbar__clear" onClick={clearViewConditions}>
                   <X size={15} />
@@ -486,6 +523,24 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
                 : defaultBoardCardFieldIds(tableDocument.fields, boardGroupField)}
               onToggleField={toggleBoardConfigField}
             />
+          ) : null}
+          {importPanelOpen && activeViewType === "table" ? (
+            <ImportPastePanel
+              value={importText}
+              error={importError}
+              onValueChange={(value) => {
+                setImportText(value);
+                setImportError("");
+              }}
+              onCancel={() => {
+                setImportPanelOpen(false);
+                setImportError("");
+              }}
+              onImport={importPastedData}
+            />
+          ) : null}
+          {importSummary ? (
+            <div className="multitable-import-summary" role="status">{importSummary}</div>
           ) : null}
           {toolbarPanel ? (
             <ToolbarPanel
@@ -677,6 +732,42 @@ function BoardConfigPanel({
             </span>
           </label>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function ImportPastePanel({
+  value,
+  error,
+  onValueChange,
+  onCancel,
+  onImport,
+}: {
+  value: string;
+  error: string;
+  onValueChange: (value: string) => void;
+  onCancel: () => void;
+  onImport: () => void;
+}) {
+  return (
+    <div className="multitable-toolbar-panel multitable-import-panel" role="region" aria-label="导入表格数据">
+      <div className="multitable-import-panel__intro">
+        <strong>粘贴导入</strong>
+      </div>
+      <label className="multitable-import-panel__input">
+        <span>Excel / CSV 内容</span>
+        <textarea
+          value={value}
+          aria-label="粘贴表格数据"
+          placeholder={"标题\t附件\t负责人\n整理文档\t/tmp/demo.pdf\t张三"}
+          onChange={(event) => onValueChange(event.target.value)}
+        />
+      </label>
+      <div className="multitable-import-panel__actions">
+        {error ? <p role="alert">{error}</p> : <span />}
+        <button type="button" onClick={onCancel}>取消导入</button>
+        <button type="button" className="is-primary" onClick={onImport}>导入数据</button>
       </div>
     </div>
   );
