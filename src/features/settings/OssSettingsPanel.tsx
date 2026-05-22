@@ -1,8 +1,11 @@
 import type { FormEvent, MouseEvent } from "react";
 import { useEffect, useState } from "react";
-import { Check, CloudUpload, Database, DatabaseBackup, FolderOpen, ShieldCheck, X } from "lucide-react";
+import { Bot, Check, CloudUpload, Database, DatabaseBackup, FolderOpen, ShieldCheck, X } from "lucide-react";
 
 import type {
+  AiFetchedModel,
+  AiModelCapabilityType,
+  AiSettings,
   BackupKeyStatus,
   BackupRecord,
   DatabaseLocationSettings,
@@ -12,9 +15,11 @@ import type {
   ResourceMigrationRunOutput,
   RestoreBackupOutput,
   ResourceKeyStatus,
+  SaveAiSettingsInput,
   StorageConnectionTestOutput,
   StorageProviderKind,
 } from "../../app/appState";
+import { AiSettingsPanel } from "./AiSettingsPanel";
 import { BackupSettingsPanel } from "./BackupSettingsPanel";
 import { mergeOssSettings, validateOssSettings } from "./ossSettingsStore";
 import { ResourceSecurityPanel } from "./ResourceSecurityPanel";
@@ -27,9 +32,14 @@ type StorageConnectionNotice = {
 interface OssSettingsPanelProps {
   open: boolean;
   settings: OssSettings | null;
+  aiSettings: AiSettings;
   databaseLocation: DatabaseLocationSettings | null;
   onClose: () => void;
   onSave: (settings: OssSettings) => Promise<void>;
+  onSaveAiSettings: (input: SaveAiSettingsInput) => Promise<AiSettings>;
+  onListAiModels: (profileId: string) => Promise<AiFetchedModel[]>;
+  onAddAiModel: (profileId: string, model: AiFetchedModel, capabilityTypes: AiModelCapabilityType[]) => Promise<AiSettings>;
+  onSetActiveAiModel: (configuredModelId: string) => Promise<AiSettings>;
   onChooseDatabaseDirectory: () => Promise<string | null>;
   onChooseStorageDirectory: () => Promise<string | null>;
   onSaveDatabaseLocation: (directory: string) => Promise<void>;
@@ -53,9 +63,14 @@ interface OssSettingsPanelProps {
 export function OssSettingsPanel({
   open,
   settings,
+  aiSettings,
   databaseLocation,
   onClose,
   onSave,
+  onSaveAiSettings,
+  onListAiModels,
+  onAddAiModel,
+  onSetActiveAiModel,
   onChooseDatabaseDirectory,
   onChooseStorageDirectory,
   onSaveDatabaseLocation,
@@ -85,7 +100,7 @@ export function OssSettingsPanel({
   const [databaseSaving, setDatabaseSaving] = useState(false);
   const [databaseError, setDatabaseError] = useState<string | null>(null);
   const [databaseMessage, setDatabaseMessage] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"upload" | "storage" | "security" | "backup">("upload");
+  const [activeTab, setActiveTab] = useState<"ai" | "upload" | "storage" | "security" | "backup">("upload");
 
   useEffect(() => {
     if (open) {
@@ -256,6 +271,14 @@ export function OssSettingsPanel({
           <nav className="settings-menu" aria-label="设置菜单">
             <button
               type="button"
+              className={`settings-menu__item${activeTab === "ai" ? " is-active" : ""}`}
+              onClick={() => setActiveTab("ai")}
+            >
+              <Bot size={16} />
+              AI 模型
+            </button>
+            <button
+              type="button"
               className={`settings-menu__item${activeTab === "upload" ? " is-active" : ""}`}
               onClick={() => setActiveTab("upload")}
             >
@@ -288,7 +311,15 @@ export function OssSettingsPanel({
             </button>
           </nav>
 
-          {activeTab === "upload" ? <form className="settings-content" onSubmit={submit} aria-labelledby="upload-settings-title">
+          {activeTab === "ai" ? (
+            <AiSettingsPanel
+              settings={aiSettings}
+              onSave={onSaveAiSettings}
+              onListModels={onListAiModels}
+              onAddModel={onAddAiModel}
+              onSetActiveModel={onSetActiveAiModel}
+            />
+          ) : activeTab === "upload" ? <form className="settings-content" onSubmit={submit} aria-labelledby="upload-settings-title">
             <div className="settings-content__heading">
               <h3 id="upload-settings-title">文件存储</h3>
               <button type="submit" className="primary-button settings-content__save" disabled={saving}>

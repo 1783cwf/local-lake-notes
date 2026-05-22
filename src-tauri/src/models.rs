@@ -139,6 +139,391 @@ pub struct StorageConnectionTestOutput {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AiProtocol {
+    OpenaiResponses,
+    AnthropicMessages,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum AiModelCapabilityType {
+    Vision,
+    Web,
+    Reasoning,
+    Tool,
+    Rerank,
+    Embedding,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AiInputModality {
+    Text,
+    Image,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSettings {
+    #[serde(default)]
+    pub active_model_id: Option<String>,
+    #[serde(default)]
+    pub profiles: Vec<AiModelProfile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiModelProfile {
+    pub id: String,
+    pub name: String,
+    pub protocol: AiProtocol,
+    pub base_url: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub models: Vec<AiConfiguredModel>,
+    #[serde(default)]
+    pub has_api_key: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiConfiguredModel {
+    pub id: String,
+    pub profile_id: String,
+    pub model_id: String,
+    pub display_name: String,
+    pub protocol: AiProtocol,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub capability_types: Vec<AiModelCapabilityType>,
+    #[serde(default)]
+    pub supported_input_modalities: Vec<AiInputModality>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiProfileApiKeyInput {
+    pub profile_id: String,
+    pub api_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveAiSettingsInput {
+    pub settings: AiSettings,
+    #[serde(default)]
+    pub api_keys: Vec<AiProfileApiKeyInput>,
+    #[serde(default)]
+    pub deleted_profile_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiListModelsInput {
+    pub profile_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiFetchedModel {
+    pub model_id: String,
+    pub display_name: String,
+    #[serde(default)]
+    pub capability_types: Vec<AiModelCapabilityType>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiListModelsOutput {
+    pub profile_id: String,
+    pub models: Vec<AiFetchedModel>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiAddModelInput {
+    pub profile_id: String,
+    pub model_id: String,
+    pub display_name: String,
+    #[serde(default)]
+    pub capability_types: Vec<AiModelCapabilityType>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSetActiveModelInput {
+    pub configured_model_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AiDocumentContentScope {
+    Document,
+    Selection,
+}
+
+impl Default for AiDocumentContentScope {
+    fn default() -> Self {
+        Self::Document
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AiDocumentActionType {
+    SummarizeDocument,
+    AnswerQuestion,
+    GenerateTitle,
+    GenerateAbstract,
+    GenerateTodos,
+    GenerateMeetingMinutes,
+    Rewrite,
+    Polish,
+    Expand,
+    Compress,
+    OrganizeHeadings,
+    OutlineToDraft,
+    NotesToArticle,
+    LongFormStructure,
+    TechToTutorial,
+    TechToReadme,
+    TechToReleaseNotes,
+    CustomEdit,
+    SplitDocument,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AiActionPreviewMode {
+    Informational,
+    ReplaceDocument,
+    Patch,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiRunDocumentActionInput {
+    pub action_type: AiDocumentActionType,
+    pub document_title: String,
+    pub content: String,
+    #[serde(default)]
+    pub instruction: String,
+    #[serde(default)]
+    pub content_scope: AiDocumentContentScope,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiRunDocumentActionOutput {
+    pub action_type: AiDocumentActionType,
+    pub title: String,
+    pub content: String,
+    pub preview_mode: AiActionPreviewMode,
+    pub content_scope: AiDocumentContentScope,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patch: Option<AiDocumentPatch>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiDocumentPatch {
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub operations: Vec<AiDocumentPatchOperation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum AiDocumentPatchOperation {
+    ReplaceSelection {
+        markdown: String,
+        #[serde(default)]
+        summary: String,
+    },
+    InsertBefore {
+        anchor: String,
+        markdown: String,
+        #[serde(default)]
+        summary: String,
+    },
+    InsertAfter {
+        anchor: String,
+        markdown: String,
+        #[serde(default)]
+        summary: String,
+    },
+    ReplaceText {
+        anchor: String,
+        markdown: String,
+        #[serde(default)]
+        summary: String,
+    },
+    DeleteText {
+        anchor: String,
+        #[serde(default)]
+        summary: String,
+    },
+    PrependDocument {
+        markdown: String,
+        #[serde(default)]
+        summary: String,
+    },
+    AppendDocument {
+        markdown: String,
+        #[serde(default)]
+        summary: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSplitDocumentInput {
+    pub document_title: String,
+    pub content: String,
+    #[serde(default)]
+    pub instruction: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSplitDocumentPart {
+    pub title: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSplitDocumentOutput {
+    pub title: String,
+    pub parts: Vec<AiSplitDocumentPart>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AiTableActionType {
+    GenerateFields,
+    CreateRecords,
+    ExtractTasks,
+    SummarizeTable,
+    SuggestTagsStatus,
+    MeetingToTaskBoard,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiRunTableActionInput {
+    pub action_type: AiTableActionType,
+    pub table_title: String,
+    pub table_json: String,
+    #[serde(default)]
+    pub instruction: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiRunTableActionOutput {
+    pub action_type: AiTableActionType,
+    pub title: String,
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patch: Option<AiTablePatch>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiTablePatch {
+    #[serde(default)]
+    pub fields: Vec<AiTableFieldCandidate>,
+    #[serde(default)]
+    pub records: Vec<AiTableRecordCandidate>,
+    #[serde(default)]
+    pub prefer_board: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiTableFieldCandidate {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub field_type: AiTableFieldCandidateType,
+    #[serde(default)]
+    pub options: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AiTableFieldCandidateType {
+    Text,
+    LongText,
+    SingleSelect,
+    MultiSelect,
+    Number,
+    Progress,
+    Time,
+    Url,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiTableRecordCandidate {
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub values: serde_json::Map<String, serde_json::Value>,
+    #[serde(default)]
+    pub body: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AiSpreadsheetActionType {
+    CreateSheet,
+    AppendRows,
+    SummarizeSpreadsheet,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiRunSpreadsheetActionInput {
+    pub action_type: AiSpreadsheetActionType,
+    pub spreadsheet_title: String,
+    pub workbook_json: String,
+    #[serde(default)]
+    pub instruction: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiRunSpreadsheetActionOutput {
+    pub action_type: AiSpreadsheetActionType,
+    pub title: String,
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patch: Option<AiSpreadsheetPatch>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSpreadsheetPatch {
+    #[serde(default)]
+    pub sheets: Vec<AiSpreadsheetSheetCandidate>,
+    #[serde(default)]
+    pub append_rows: Vec<Vec<serde_json::Value>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSpreadsheetSheetCandidate {
+    pub name: String,
+    #[serde(default)]
+    pub rows: Vec<Vec<serde_json::Value>>,
+}
+
 impl Default for StorageProviderKind {
     fn default() -> Self {
         Self::S3
@@ -461,4 +846,8 @@ fn default_allow_signed_url_export() -> bool {
 
 pub fn default_resource_preview_concurrency() -> u8 {
     6
+}
+
+fn default_true() -> bool {
+    true
 }

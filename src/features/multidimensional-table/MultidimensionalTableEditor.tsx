@@ -2,7 +2,8 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRe
 import type { ReactNode } from "react";
 import { Filter, Kanban, ListFilter, MoreHorizontal, Pencil, Plus, Search, Settings2, Table2, Trash2, X } from "lucide-react";
 
-import type { FileDownloadInput, SaveStatus, UploadImageInput, UploadImageOutput } from "../../app/appState";
+import type { AiTablePatch, FileDownloadInput, SaveStatus, UploadImageInput, UploadImageOutput } from "../../app/appState";
+import { applyAiTablePatch } from "../ai/multidimensionalTableAi";
 import type { WorkspaceDocument } from "../workspace/workspaceStore";
 import { documentTitleFromPath } from "../workspace/workspaceStore";
 import { useLakeAutosave } from "../lake-editor/useLakeAutosave";
@@ -41,6 +42,10 @@ interface MultidimensionalTableEditorProps {
   resourcePreviewConcurrency?: number;
   onSaveStatusChange: (status: SaveStatus) => void;
   onRegisterSaveNow?: (saveNow: (() => Promise<void>) | null) => void;
+  onRegisterReadTable?: (readTable: (() => MultidimensionalTableDocument) | null) => void;
+  aiTablePatch?: AiTablePatch | null;
+  aiTablePatchRequestId?: number;
+  onAiTablePatchApplied?: () => void;
 }
 
 export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEditorHandle, MultidimensionalTableEditorProps>(({
@@ -55,6 +60,10 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
   resourcePreviewConcurrency,
   onSaveStatusChange,
   onRegisterSaveNow,
+  onRegisterReadTable,
+  aiTablePatch,
+  aiTablePatchRequestId = 0,
+  onAiTablePatchApplied,
 }, ref) => {
   const documentPath = document.path;
   const [tableDocument, setTableDocument] = useState<MultidimensionalTableDocument>(() => parseMultidimensionalTableDocument(content));
@@ -89,6 +98,11 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
     readContent,
     saveContent,
   });
+  const commitChange = useCallback((nextDocument: MultidimensionalTableDocument) => {
+    tableDocumentRef.current = nextDocument;
+    setTableDocument(nextDocument);
+    scheduleSave();
+  }, [scheduleSave]);
   const activeView = useMemo(
     () => tableDocument.views.find((view) => view.id === tableDocument.activeViewId) ?? tableDocument.views[0],
     [tableDocument.activeViewId, tableDocument.views],
@@ -133,10 +147,22 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
     return () => onRegisterSaveNow?.(null);
   }, [onRegisterSaveNow, saveNowOrThrow]);
   useEffect(() => {
+    onRegisterReadTable?.(() => tableDocumentRef.current);
+    return () => onRegisterReadTable?.(null);
+  }, [onRegisterReadTable]);
+  useEffect(() => {
     if (manualSaveRequest > 0) {
       void saveNow();
     }
   }, [manualSaveRequest, saveNow]);
+  useEffect(() => {
+    if (!aiTablePatch || aiTablePatchRequestId <= 0) {
+      return;
+    }
+    // AI 只提供候选语义；字段、选项和记录 ID 均由本地生成后进入现有保存链路。
+    commitChange(applyAiTablePatch(tableDocumentRef.current, aiTablePatch));
+    onAiTablePatchApplied?.();
+  }, [aiTablePatch, aiTablePatchRequestId, commitChange, onAiTablePatchApplied]);
   useEffect(() => {
     if (!toolbarPanel && !boardConfigOpen) {
       return;
@@ -175,11 +201,6 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
     };
   }, [viewMenuId]);
 
-  const commitChange = useCallback((nextDocument: MultidimensionalTableDocument) => {
-    tableDocumentRef.current = nextDocument;
-    setTableDocument(nextDocument);
-    scheduleSave();
-  }, [scheduleSave]);
   const setActiveViewType = (viewType: "table" | "board") => {
     const nextView = tableDocument.views.find((view) => view.type === viewType);
     if (!nextView) {

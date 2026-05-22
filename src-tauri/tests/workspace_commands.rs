@@ -220,6 +220,17 @@ fn lists_empty_directories_and_creates_document_inside_directory() {
 }
 
 #[test]
+fn creates_document_inside_missing_document_child_container() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("长文.lake"), "<p>a</p>").unwrap();
+
+    let path = create_document_at(dir.path(), "长文", "第一部分").unwrap();
+
+    assert_eq!(path, "长文/第一部分.lake");
+    assert!(dir.path().join("长文").join("第一部分.lake").exists());
+}
+
+#[test]
 fn creates_spreadsheet_inside_directory() {
     let dir = tempdir().unwrap();
     fs::create_dir_all(dir.path().join("reports")).unwrap();

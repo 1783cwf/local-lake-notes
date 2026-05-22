@@ -214,6 +214,187 @@ test("同一路径文档元数据刷新时不重建语雀编辑器实例", async
   expect(destroy).not.toHaveBeenCalled();
 });
 
+test("注册当前 Lake 内容读取函数并应用 AI 预览内容", async () => {
+  let editorContent = "<p>原文</p>";
+  const onRegisterReadContent = vi.fn();
+  const editor: LakeEditorInstance = {
+    setDocument: vi.fn((_, nextContent) => {
+      editorContent = nextContent;
+    }),
+    getDocument: vi.fn(() => editorContent),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+
+  const { rerender } = render(
+    <LakeEditor
+      document={documentEntry}
+      content="<p>原文</p>"
+      manualSaveRequest={0}
+      exportRequest={null}
+      onSave={vi.fn()}
+      onExportContent={vi.fn()}
+      onUploadImage={vi.fn()}
+      onUploadFile={vi.fn()}
+      onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={vi.fn(async (resourceRef) => resourceRef)}
+      onSaveStatusChange={vi.fn()}
+      onRegisterReadContent={onRegisterReadContent}
+    />,
+  );
+
+  await waitFor(() => expect(onRegisterReadContent).toHaveBeenCalledWith(expect.any(Function)));
+  expect(onRegisterReadContent.mock.calls.at(-1)?.[0]()).toBe("<p>原文</p>");
+
+  rerender(
+    <LakeEditor
+      document={documentEntry}
+      content="<p>原文</p>"
+      manualSaveRequest={0}
+      exportRequest={null}
+      onSave={vi.fn()}
+      onExportContent={vi.fn()}
+      onUploadImage={vi.fn()}
+      onUploadFile={vi.fn()}
+      onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={vi.fn(async (resourceRef) => resourceRef)}
+      onSaveStatusChange={vi.fn()}
+      onRegisterReadContent={onRegisterReadContent}
+      aiPreviewContent="<h1>AI 预览</h1>"
+      aiPreviewRequestId={1}
+    />,
+  );
+
+  await waitFor(() => {
+    expect(editor.setDocument).toHaveBeenLastCalledWith("text/markdown", "<h1>AI 预览</h1>");
+  });
+});
+
+test("AI 预览可按 HTML 导入以保留表格结构", async () => {
+  const editor: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => "<p>原文</p>"),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+
+  render(
+    <LakeEditor
+      document={documentEntry}
+      content="<p>原文</p>"
+      manualSaveRequest={0}
+      exportRequest={null}
+      onSave={vi.fn()}
+      onExportContent={vi.fn()}
+      onUploadImage={vi.fn()}
+      onUploadFile={vi.fn()}
+      onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={vi.fn(async (resourceRef) => resourceRef)}
+      onSaveStatusChange={vi.fn()}
+      aiPreviewContent="<table><thead><tr><th>A</th></tr></thead></table>"
+      aiPreviewContentType="text/html"
+      aiPreviewRequestId={1}
+    />,
+  );
+
+  await waitFor(() => {
+    expect(editor.setDocument).toHaveBeenLastCalledWith(
+      "text/html",
+      "<table><thead><tr><th>A</th></tr></thead></table>",
+    );
+  });
+});
+
+test("注册显式选区读取和替换函数", async () => {
+  const onRegisterReadSelection = vi.fn();
+  const onRegisterReplaceSelection = vi.fn();
+  const onSelectionCapabilityChange = vi.fn();
+  const editor: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => "<p>原文</p>"),
+    getSelectionDocument: vi.fn(() => "选中文本"),
+    replaceSelection: vi.fn(),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+
+  render(
+    <LakeEditor
+      document={documentEntry}
+      content="<p>原文</p>"
+      manualSaveRequest={0}
+      exportRequest={null}
+      onSave={vi.fn()}
+      onExportContent={vi.fn()}
+      onUploadImage={vi.fn()}
+      onUploadFile={vi.fn()}
+      onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={vi.fn(async (resourceRef) => resourceRef)}
+      onSaveStatusChange={vi.fn()}
+      onRegisterReadSelection={onRegisterReadSelection}
+      onRegisterReplaceSelection={onRegisterReplaceSelection}
+      onSelectionCapabilityChange={onSelectionCapabilityChange}
+    />,
+  );
+
+  await waitFor(() => expect(onRegisterReadSelection).toHaveBeenCalledWith(expect.any(Function)));
+  expect(onRegisterReadSelection.mock.calls.at(-1)?.[0]()).toBe("选中文本");
+  expect(onRegisterReplaceSelection.mock.calls.at(-1)?.[0]("新文本")).toBe(true);
+  expect(editor.replaceSelection).toHaveBeenCalledWith("text/markdown", "新文本");
+  expect(onSelectionCapabilityChange).toHaveBeenCalledWith({
+    canReadSelection: true,
+    canReplaceSelection: true,
+  });
+});
+
+test("AI 面板抢焦点后仍可读取最近一次显式 Lake 选区", async () => {
+  const onRegisterReadSelection = vi.fn();
+  const editor: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => "<p>原文</p>"),
+    getSelectionDocument: vi.fn()
+      .mockReturnValueOnce("缓存选区")
+      .mockReturnValue(""),
+    replaceSelection: vi.fn(),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+
+  render(
+    <LakeEditor
+      document={documentEntry}
+      content="<p>原文</p>"
+      manualSaveRequest={0}
+      exportRequest={null}
+      onSave={vi.fn()}
+      onExportContent={vi.fn()}
+      onUploadImage={vi.fn()}
+      onUploadFile={vi.fn()}
+      onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={vi.fn(async (resourceRef) => resourceRef)}
+      onSaveStatusChange={vi.fn()}
+      onRegisterReadSelection={onRegisterReadSelection}
+    />,
+  );
+
+  await waitFor(() => expect(onRegisterReadSelection).toHaveBeenCalledWith(expect.any(Function)));
+  document.dispatchEvent(new Event("selectionchange"));
+
+  expect(onRegisterReadSelection.mock.calls.at(-1)?.[0]()).toBe("缓存选区");
+});
+
 test("关闭当前文档时在编辑器容器移除前销毁 Lake 实例", () => {
   const destroyCalls: boolean[] = [];
   window.Doc = {
@@ -385,4 +566,53 @@ test("收到 Markdown 导出请求时读取语雀原生 Markdown 内容", async 
     );
   });
   expect(editor.getDocument).toHaveBeenCalledWith("text/markdown");
+});
+
+test("忽略不属于当前文档的导出请求", async () => {
+  const onExportContent = vi.fn();
+  const editor: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn((type) => type === "text/markdown" ? "## 旧文档内容" : "<p>当前内容</p>"),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  const otherDocumentEntry = {
+    ...documentEntry,
+    id: "b.lake",
+    path: "b.lake",
+    name: "b",
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+
+  render(
+    <LakeEditor
+      document={documentEntry}
+      content="<p>当前内容</p>"
+      manualSaveRequest={0}
+      exportRequest={{
+        id: 1,
+        format: "markdown",
+        document: otherDocumentEntry,
+        resourceStrategy: "bundle",
+        signedUrlTtlSeconds: 86400,
+      }}
+      onSave={vi.fn()}
+      onExportContent={onExportContent}
+      onUploadImage={vi.fn()}
+      onUploadFile={vi.fn()}
+      onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={vi.fn(async (resourceRef) => resourceRef)}
+      onSaveStatusChange={vi.fn()}
+    />,
+  );
+
+  await waitFor(() => {
+    expect(editor.setDocument).toHaveBeenCalledWith("text/lake", "<p>当前内容</p>");
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  expect(onExportContent).not.toHaveBeenCalled();
+  expect(editor.getDocument).not.toHaveBeenCalledWith("text/markdown");
 });

@@ -1,6 +1,6 @@
 [package]
 name = "local-lake-notes"
-version = "1.6.0"
+version = "1.7.0"
 description = "Lake-first local notes app powered by Lake editor"
 authors = ["weifeng"]
 edition = "2021"
@@ -21,10 +21,8 @@ age = "0.11.3"
 base64 = "0.22"
 blake3 = "1"
 chrono = { version = "0.4", features = ["serde"] }
-keyring = "4.0.0"
-keyring-core = "1.0.0"
 mime_guess = "2"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 rusqlite = { version = "0.39.0", features = ["bundled", "backup"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

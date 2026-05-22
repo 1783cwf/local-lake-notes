@@ -3,8 +3,16 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import type { FileDownloadInput, SaveStatus, UploadImageInput, UploadImageOutput } from "../../app/appState";
 import type { WorkspaceDocument } from "../workspace/workspaceStore";
 import type { LakeEditorInstance } from "./editorTypes";
+import type { LakeAiImportContentType } from "./lakeAiImport";
 import type { LakeDocumentExportRequest } from "./lakeExport";
 import { createLakeEditor, destroyLakeEditor, hasLakeEditorRuntime } from "./lakeEditorAdapter";
+import { prepareAiMarkdownForLakeImport } from "./lakeAiImport";
+import {
+  lakeSelectionCapability,
+  readLakeEditorSelection,
+  replaceLakeEditorSelection,
+  type LakeSelectionCapability,
+} from "./lakeSelectionAdapter";
 import { createEditorFileUpload, createEditorImageUpload } from "./uploadAdapter";
 import {
   collectResourceReferences,
@@ -35,6 +43,14 @@ interface LakeEditorProps {
   resourcePreviewConcurrency?: number;
   onSaveStatusChange: (status: SaveStatus) => void;
   onRegisterSaveNow?: (saveNow: (() => Promise<void>) | null) => void;
+  onRegisterReadContent?: (readContent: (() => string) | null) => void;
+  onRegisterReadSelection?: (readSelection: (() => string | null) | null) => void;
+  onRegisterReplaceSelection?: (replaceSelection: ((content: string) => boolean) | null) => void;
+  onSelectionCapabilityChange?: (capability: LakeSelectionCapability) => void;
+  aiPreviewContent?: string | null;
+  aiPreviewContentType?: LakeAiImportContentType;
+  aiPreviewRequestId?: number;
+  onAiPreviewApplied?: () => void;
 }
 
 export function LakeEditor({
@@ -51,11 +67,20 @@ export function LakeEditor({
   resourcePreviewConcurrency,
   onSaveStatusChange,
   onRegisterSaveNow,
+  onRegisterReadContent,
+  onRegisterReadSelection,
+  onRegisterReplaceSelection,
+  onSelectionCapabilityChange,
+  aiPreviewContent,
+  aiPreviewContentType = "text/markdown",
+  aiPreviewRequestId = 0,
+  onAiPreviewApplied,
 }: LakeEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<LakeEditorInstance | null>(null);
   const handledExportRequestRef = useRef(0);
   const resourcePreviewsRef = useRef<ResourcePreview[]>([]);
+  const lastAssistantSelectionRef = useRef<string | null>(null);
   const documentPath = document?.path ?? null;
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -93,6 +118,18 @@ export function LakeEditor({
   const readContent = useCallback(() => {
     return readLakeContent();
   }, [readLakeContent]);
+  const readAssistantContent = useCallback(() => {
+    return dehydrateResourceText(editorRef.current?.getDocument("text/markdown") ?? readLakeContent(), resourcePreviewsRef.current);
+  }, [readLakeContent]);
+  const readAssistantSelection = useCallback(() => {
+    const selection = readLakeEditorSelection(editorRef.current);
+    if (selection) {
+      const markdown = dehydrateResourceText(selection.markdown, resourcePreviewsRef.current);
+      lastAssistantSelectionRef.current = markdown;
+      return markdown;
+    }
+    return lastAssistantSelectionRef.current;
+  }, []);
   const readExportContent = useCallback((request: LakeDocumentExportRequest) => {
     if (request.format === "html" || request.format === "pdf") {
       return dehydrateLakeResources(editorRef.current?.getDocument("text/html") ?? content, resourcePreviewsRef.current);
@@ -128,16 +165,42 @@ export function LakeEditor({
     return () => onRegisterSaveNow?.(null);
   }, [documentPath, onRegisterSaveNow, saveNowOrThrow]);
 
+  useEffect(() => {
+    onRegisterReadContent?.(documentPath ? readAssistantContent : null);
+    return () => onRegisterReadContent?.(null);
+  }, [documentPath, onRegisterReadContent, readAssistantContent]);
+
+  useEffect(() => {
+    onRegisterReadSelection?.(documentPath ? readAssistantSelection : null);
+    return () => onRegisterReadSelection?.(null);
+  }, [documentPath, onRegisterReadSelection, readAssistantSelection]);
+
+  useEffect(() => {
+    const replaceSelection = (markdown: string) => {
+      const preparedContent = prepareAiMarkdownForLakeImport(markdown);
+      const replaced = replaceLakeEditorSelection(editorRef.current, preparedContent.type, preparedContent.content);
+      if (replaced) {
+        lastAssistantSelectionRef.current = null;
+        scheduleSave();
+      }
+      return replaced;
+    };
+    onRegisterReplaceSelection?.(documentPath ? replaceSelection : null);
+    return () => onRegisterReplaceSelection?.(null);
+  }, [documentPath, onRegisterReplaceSelection, scheduleSave]);
+
   // Lake 实例只跟容器和文档路径绑定；内容刷新单独处理，避免 workspace 刷新时销毁编辑器导致右侧空白。
   useLayoutEffect(() => {
     if (!documentPath || !containerRef.current) {
       destroyLakeEditor(editorRef.current);
       editorRef.current = null;
+      onSelectionCapabilityChange?.({ canReadSelection: false, canReplaceSelection: false });
       setLoadError(null);
       return;
     }
 
     if (!hasLakeEditorRuntime()) {
+      onSelectionCapabilityChange?.({ canReadSelection: false, canReplaceSelection: false });
       setLoadError("语雀编辑器资源未加载，请检查本地 vendor 文件");
       return;
     }
@@ -155,8 +218,10 @@ export function LakeEditor({
         downloadFile: (file) => onDownloadFile({ url: file.src, filename: file.name, resourceRef: resolveResourceRef(file.src) }),
       });
       editorRef.current = editor;
+      onSelectionCapabilityChange?.(lakeSelectionCapability(editor));
     } catch (error) {
       editorRef.current = null;
+      onSelectionCapabilityChange?.({ canReadSelection: false, canReplaceSelection: false });
       setLoadError(toMessage(error));
       return;
     }
@@ -166,8 +231,33 @@ export function LakeEditor({
       if (editorRef.current === editor) {
         editorRef.current = null;
       }
+      onSelectionCapabilityChange?.({ canReadSelection: false, canReplaceSelection: false });
     };
-  }, [documentPath, onDownloadFile, onUploadFile, onUploadImage, registerUploadPreview, resolveResourceRef, scheduleSave]);
+  }, [documentPath, onDownloadFile, onSelectionCapabilityChange, onUploadFile, onUploadImage, registerUploadPreview, resolveResourceRef, scheduleSave]);
+
+  useEffect(() => {
+    if (!documentPath) {
+      lastAssistantSelectionRef.current = null;
+      return;
+    }
+    const rememberCurrentSelection = () => {
+      const selection = readLakeEditorSelection(editorRef.current);
+      if (!selection) {
+        return;
+      }
+      // AI 面板会抢走焦点，Lake 运行时可能随后清空选区；这里只缓存显式 API 返回的内容，不读取 DOM 选区。
+      lastAssistantSelectionRef.current = dehydrateResourceText(selection.markdown, resourcePreviewsRef.current);
+    };
+
+    window.document.addEventListener("selectionchange", rememberCurrentSelection);
+    containerRef.current?.addEventListener("mouseup", rememberCurrentSelection);
+    containerRef.current?.addEventListener("keyup", rememberCurrentSelection);
+    return () => {
+      window.document.removeEventListener("selectionchange", rememberCurrentSelection);
+      containerRef.current?.removeEventListener("mouseup", rememberCurrentSelection);
+      containerRef.current?.removeEventListener("keyup", rememberCurrentSelection);
+    };
+  }, [documentPath]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -177,6 +267,7 @@ export function LakeEditor({
 
     let cancelled = false;
     resourcePreviewsRef.current = [];
+    lastAssistantSelectionRef.current = null;
     setLoadError(null);
     const resourceRefs = Array.from(new Set(collectResourceReferences(content, { includeFileCards: true })));
     const placeholderPreviews = resourceRefs.map((resourceRef) => ({
@@ -228,13 +319,26 @@ export function LakeEditor({
   }, [manualSaveRequest, saveNow]);
 
   useEffect(() => {
-    if (!exportRequest || handledExportRequestRef.current === exportRequest.id) {
+    if (!aiPreviewContent || aiPreviewRequestId <= 0 || !documentPath || !editorRef.current) {
+      return;
+    }
+    editorRef.current.setDocument(aiPreviewContentType, aiPreviewContent);
+    scheduleSave();
+    onAiPreviewApplied?.();
+  }, [aiPreviewContent, aiPreviewContentType, aiPreviewRequestId, documentPath, onAiPreviewApplied, scheduleSave]);
+
+  useEffect(() => {
+    if (
+      !exportRequest
+      || exportRequest.document.path !== documentPath
+      || handledExportRequestRef.current === exportRequest.id
+    ) {
       return;
     }
 
     handledExportRequestRef.current = exportRequest.id;
     void onExportContent(exportRequest, readExportContent(exportRequest));
-  }, [exportRequest, onExportContent, readExportContent]);
+  }, [documentPath, exportRequest, onExportContent, readExportContent]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

@@ -8,12 +8,16 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 use crate::error::{AppError, AppResult};
-use crate::models::{DatabaseLocationSettings, KnownWorkspace, OssSettings, WorkspaceOrder};
+use crate::models::{
+    AiSettings, DatabaseLocationSettings, KnownWorkspace, OssSettings, WorkspaceOrder,
+};
 
 pub const DATABASE_FILE: &str = "yuque-lake-notes.sqlite3";
 const DATABASE_LOCATION_FILE: &str = "database-location.json";
 const RECENT_WORKSPACE_KEY: &str = "recent_workspace";
 const OSS_SETTINGS_KEY: &str = "oss_settings";
+const AI_SETTINGS_KEY: &str = "ai_settings";
+const AI_PROFILE_SECRETS_KEY: &str = "ai_profile_secrets";
 const BACKUP_KEY_METADATA_KEY: &str = "backup_key_metadata";
 const RESOURCE_KEY_METADATA_KEY: &str = "resource_key_metadata";
 const BACKUP_DEVICE_ID_KEY: &str = "backup_device_id";
@@ -152,6 +156,16 @@ pub fn save_oss_settings(app: &AppHandle, settings: &OssSettings) -> AppResult<(
     save_oss_settings_at(&database_path(app)?, settings)
 }
 
+pub fn load_ai_settings(app: &AppHandle) -> AppResult<AiSettings> {
+    let path = database_path(app)?;
+    migrate_legacy_app_settings(app, &path)?;
+    load_ai_settings_at(&path)
+}
+
+pub fn save_ai_settings(app: &AppHandle, settings: &AiSettings) -> AppResult<()> {
+    save_ai_settings_at(&database_path(app)?, settings)
+}
+
 pub fn read_workspace_order(app: &AppHandle, root: &Path) -> AppResult<Vec<String>> {
     let path = database_path(app)?;
     let order = read_workspace_order_at(&path, root)?;
@@ -277,6 +291,54 @@ pub fn save_oss_settings_at(database_path: &Path, settings: &OssSettings) -> App
         database_path,
         OSS_SETTINGS_KEY,
         &serde_json::to_string(settings)?,
+    )
+}
+
+pub fn load_ai_settings_at(database_path: &Path) -> AppResult<AiSettings> {
+    Ok(get_setting_at(database_path, AI_SETTINGS_KEY)?
+        .map(|content| serde_json::from_str(&content))
+        .transpose()?
+        .unwrap_or_default())
+}
+
+pub fn save_ai_settings_at(database_path: &Path, settings: &AiSettings) -> AppResult<()> {
+    set_setting_at(
+        database_path,
+        AI_SETTINGS_KEY,
+        &serde_json::to_string(settings)?,
+    )
+}
+
+pub fn load_ai_profile_secrets(
+    app: &AppHandle,
+) -> AppResult<std::collections::HashMap<String, String>> {
+    load_ai_profile_secrets_at(&database_path(app)?)
+}
+
+pub fn save_ai_profile_secrets(
+    app: &AppHandle,
+    secrets: &std::collections::HashMap<String, String>,
+) -> AppResult<()> {
+    save_ai_profile_secrets_at(&database_path(app)?, secrets)
+}
+
+pub fn load_ai_profile_secrets_at(
+    database_path: &Path,
+) -> AppResult<std::collections::HashMap<String, String>> {
+    Ok(get_setting_at(database_path, AI_PROFILE_SECRETS_KEY)?
+        .map(|content| serde_json::from_str(&content))
+        .transpose()?
+        .unwrap_or_default())
+}
+
+pub fn save_ai_profile_secrets_at(
+    database_path: &Path,
+    secrets: &std::collections::HashMap<String, String>,
+) -> AppResult<()> {
+    set_setting_at(
+        database_path,
+        AI_PROFILE_SECRETS_KEY,
+        &serde_json::to_string(secrets)?,
     )
 }
 

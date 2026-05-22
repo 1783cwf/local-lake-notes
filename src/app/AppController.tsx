@@ -5,8 +5,17 @@ import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { AppRail } from "../components/AppRail";
 import { DocumentSidebar } from "../components/DocumentSidebar";
 import { TopBar } from "../components/TopBar";
+import { AiDocumentAssistant } from "../features/ai/AiDocumentAssistant";
+import { AiDocumentPatchDiff } from "../features/ai/AiDocumentPatchDiff";
+import { AiSpreadsheetAssistant, AiTableAssistant } from "../features/ai/AiTableAssistant";
+import { previewAiDocumentPatch, type AiDocumentPatchPreview } from "../features/ai/documentPatch";
+import { applyAiSpreadsheetPatch } from "../features/ai/spreadsheetAi";
+import { prepareAiMarkdownForLakeImport } from "../features/lake-editor/lakeAiImport";
 import { LakeEditor } from "../features/lake-editor/LakeEditor";
+import type { LakeSelectionCapability } from "../features/lake-editor/lakeSelectionAdapter";
 import type { MultidimensionalTableEditorHandle } from "../features/multidimensional-table/MultidimensionalTableEditor";
+import type { MultidimensionalTableDocument } from "../features/multidimensional-table/multidimensionalTableDocument";
+import { serializeMultidimensionalTableDocument } from "../features/multidimensional-table/multidimensionalTableDocument";
 import type { SpreadsheetEditorHandle } from "../features/spreadsheet/SpreadsheetEditor";
 import {
   createOfficialLakeMarkdownConverter,
@@ -26,6 +35,7 @@ import {
 import { OssSettingsPanel } from "../features/settings/OssSettingsPanel";
 import { exportXlsxWorkbookData } from "../features/spreadsheet/spreadsheetXlsxBridge";
 import { parseSpreadsheetSnapshot } from "../features/spreadsheet/spreadsheetSnapshot";
+import type { SpreadsheetWorkbookData } from "../features/spreadsheet/spreadsheetDocument";
 import type {
   WorkspaceDocument,
   WorkspaceDropIntent,
@@ -36,11 +46,13 @@ import type {
 import {
   applyWorkspaceMove,
   buildDocumentTree,
+  documentChildContainerPath,
   documentTitleFromPath,
   flattenDocumentTree,
   resolveWorkspaceMove,
 } from "../features/workspace/workspaceStore";
 import {
+  addAiModelToProfile,
   chooseWorkspaceDirectory,
   analyzeResourceMigration,
   chooseExcelImportFile,
@@ -61,6 +73,7 @@ import {
   downloadResourceFile,
   prepareResourcePreview,
   readResourceBytes,
+  getAiSettings,
   getOssSettings,
   getRecentWorkspace,
   listKnownWorkspaces,
@@ -78,6 +91,7 @@ import {
   renameMultidimensionalTableDocument,
   renameSpreadsheetDocument,
   renameWorkspace,
+  saveAiSettings,
   saveOssSettings,
   saveBinaryExport,
   saveDatabaseLocation,
@@ -87,7 +101,12 @@ import {
   resetResourceKey,
   restoreBackup,
   runResourceMigration,
+  runAiDocumentAction,
+  runAiSplitDocument,
+  runAiSpreadsheetAction,
+  runAiTableAction,
   setBackupKey,
+  setActiveAiModel,
   setResourceKey,
   setWorkspaceRoot,
   testStorageConnection,
@@ -98,8 +117,23 @@ import {
   writeLakeDocument,
   writeMultidimensionalTableDocument,
   writeSpreadsheetDocument,
+  listAiModels,
 } from "../lib/tauri";
 import type {
+  AiFetchedModel,
+  AiDocumentPatch,
+  AiDocumentContentScope,
+  AiRunDocumentActionOutput,
+  AiRunSpreadsheetActionOutput,
+  AiDocumentActionType,
+  AiRunTableActionOutput,
+  AiSplitDocumentOutput,
+  AiTableActionType,
+  AiTablePatch,
+  AiSpreadsheetActionType,
+  AiSpreadsheetPatch,
+  AiModelCapabilityType,
+  AiSettings,
   CurrentDocumentState,
   BackupKeyStatus,
   BackupRecord,
@@ -110,6 +144,7 @@ import type {
   ResourceKeyStatus,
   RestoreBackupOutput,
   SaveStatus,
+  SaveAiSettingsInput,
   UploadImageInput,
   UploadImageOutput,
 } from "./appState";
@@ -137,6 +172,28 @@ interface AppOperationState {
   count?: number;
 }
 
+const selectionActionTypes = new Set<AiDocumentActionType>([
+  "rewrite",
+  "polish",
+  "expand",
+  "compress",
+  "organize-headings",
+  "outline-to-draft",
+  "notes-to-article",
+  "tech-to-tutorial",
+  "tech-to-readme",
+  "tech-to-release-notes",
+  "custom-edit",
+]);
+
+function previewCurrentAiDocumentPatch(
+  content: string,
+  patch: AiDocumentPatch | undefined,
+  contentScope: AiDocumentContentScope,
+): AiDocumentPatchPreview | null {
+  return patch ? previewAiDocumentPatch(content, patch, contentScope) : null;
+}
+
 export function AppController() {
   const [workspace, setWorkspace] = useState<WorkspacePayload | null>(null);
   const [knownWorkspaces, setKnownWorkspaces] = useState<KnownWorkspace[]>([]);
@@ -147,7 +204,25 @@ export function AppController() {
   const [manualSaveRequest, setManualSaveRequest] = useState(0);
   const [exportRequest, setExportRequest] = useState<LakeDocumentExportRequest | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
+  const [aiResult, setAiResult] = useState<AiRunDocumentActionOutput | null>(null);
+  const [aiSplitResult, setAiSplitResult] = useState<AiSplitDocumentOutput | null>(null);
+  const [aiTableResult, setAiTableResult] = useState<AiRunTableActionOutput | null>(null);
+  const [aiSpreadsheetResult, setAiSpreadsheetResult] = useState<AiRunSpreadsheetActionOutput | null>(null);
+  const [aiRunning, setAiRunning] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiContentScope, setAiContentScope] = useState<AiDocumentContentScope>("document");
+  const [aiAutoApply, setAiAutoApply] = useState(false);
+  const [aiPatchPreview, setAiPatchPreview] = useState<AiDocumentPatchPreview | null>(null);
+  const [aiPreviewRequest, setAiPreviewRequest] = useState<{ id: number; content: string; contentType: "text/markdown" | "text/html" } | null>(null);
+  const [aiTablePatchRequest, setAiTablePatchRequest] = useState<{ id: number; patch: AiTablePatch } | null>(null);
+  const [aiSpreadsheetSnapshotRequest, setAiSpreadsheetSnapshotRequest] = useState<{ id: number; workbook: SpreadsheetWorkbookData } | null>(null);
+  const [lakeSelectionCapability, setLakeSelectionCapability] = useState<LakeSelectionCapability>({
+    canReadSelection: false,
+    canReplaceSelection: false,
+  });
   const [ossSettings, setOssSettings] = useState<OssSettings | null>(null);
+  const [aiSettings, setAiSettings] = useState<AiSettings>({ profiles: [] });
   const [databaseLocation, setDatabaseLocation] = useState<DatabaseLocationSettings | null>(null);
   const [backupKeyStatus, setBackupKeyStatus] = useState<BackupKeyStatus>({ configured: false, needsKey: false });
   const [resourceKeyStatus, setResourceKeyStatus] = useState<ResourceKeyStatus>({
@@ -166,8 +241,24 @@ export function AppController() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [textDialog, setTextDialog] = useState<TextDialogState | null>(null);
   const saveCurrentEditorNowRef = useRef<(() => Promise<void>) | null>(null);
+  const readCurrentLakeContentRef = useRef<(() => string) | null>(null);
+  const readCurrentLakeSelectionRef = useRef<(() => string | null) | null>(null);
+  const replaceCurrentLakeSelectionRef = useRef<((content: string) => boolean) | null>(null);
+  const readCurrentTableDocumentRef = useRef<(() => MultidimensionalTableDocument) | null>(null);
+  const readCurrentSpreadsheetWorkbookRef = useRef<(() => SpreadsheetWorkbookData | null) | null>(null);
   const spreadsheetEditorRef = useRef<SpreadsheetEditorHandle | null>(null);
   const multidimensionalTableEditorRef = useRef<MultidimensionalTableEditorHandle | null>(null);
+
+  useEffect(() => {
+    setAiAssistantOpen(false);
+    setAiResult(null);
+    setAiSplitResult(null);
+    setAiTableResult(null);
+    setAiSpreadsheetResult(null);
+    setAiPatchPreview(null);
+    setAiError(null);
+    setAiContentScope("document");
+  }, [currentDocument?.entry.path]);
 
   useEffect(() => {
     void boot();
@@ -187,10 +278,11 @@ export function AppController() {
 
   const boot = async () => {
     try {
-      const [recentWorkspace, knownWorkspaceList, settings, keyStatus, resourceStatus, database] = await Promise.all([
+      const [recentWorkspace, knownWorkspaceList, settings, aiModelSettings, keyStatus, resourceStatus, database] = await Promise.all([
         getRecentWorkspace(),
         listKnownWorkspaces(),
         getOssSettings(),
+        getAiSettings(),
         getBackupKeyStatus(),
         getResourceKeyStatus(),
         getDatabaseLocation(),
@@ -198,6 +290,7 @@ export function AppController() {
       setWorkspace(recentWorkspace);
       setKnownWorkspaces(knownWorkspaceList);
       setOssSettings(settings);
+      setAiSettings(aiModelSettings);
       setBackupKeyStatus(keyStatus);
       setResourceKeyStatus(resourceStatus);
       setDatabaseLocation(database);
@@ -237,12 +330,34 @@ export function AppController() {
   const registerEditorSaveNow = useCallback((saveNow: (() => Promise<void>) | null) => {
     saveCurrentEditorNowRef.current = saveNow;
   }, []);
+  const registerLakeReadContent = useCallback((readContent: (() => string) | null) => {
+    readCurrentLakeContentRef.current = readContent;
+  }, []);
+  const registerLakeReadSelection = useCallback((readSelection: (() => string | null) | null) => {
+    readCurrentLakeSelectionRef.current = readSelection;
+  }, []);
+  const registerLakeReplaceSelection = useCallback((replaceSelection: ((content: string) => boolean) | null) => {
+    replaceCurrentLakeSelectionRef.current = replaceSelection;
+  }, []);
+  const registerTableReadDocument = useCallback((readTable: (() => MultidimensionalTableDocument) | null) => {
+    readCurrentTableDocumentRef.current = readTable;
+  }, []);
+  const registerSpreadsheetReadWorkbook = useCallback((readWorkbook: (() => SpreadsheetWorkbookData | null) | null) => {
+    readCurrentSpreadsheetWorkbookRef.current = readWorkbook;
+  }, []);
 
   const clearOpenDocumentTabs = useCallback(() => {
     setOpenTabs([]);
     setActiveTabId(null);
     setCurrentDocument(null);
     setSaveStatus(emptySaveStatus);
+    setAiAssistantOpen(false);
+    setAiResult(null);
+    setAiSplitResult(null);
+    setAiTableResult(null);
+    setAiSpreadsheetResult(null);
+    setAiPatchPreview(null);
+    setAiError(null);
   }, []);
 
   const saveBeforeLeavingCurrentTab = useCallback(async (errorMessage: string): Promise<boolean> => {
@@ -869,6 +984,8 @@ export function AppController() {
       setAppError(toMessage(error));
     } finally {
       setActiveAppOperation(null);
+      // 导出请求是一次性指令，完成后清空，避免切换标签时新编辑器实例重复消费旧请求。
+      setExportRequest((current) => (current?.id === request.id ? null : current));
     }
   }, [createResourceExportOptions]);
 
@@ -921,6 +1038,287 @@ export function AppController() {
     setOssSettings(saved);
   }, []);
 
+  const saveModelSettings = useCallback(async (input: SaveAiSettingsInput): Promise<AiSettings> => {
+    const saved = await saveAiSettings(input);
+    setAiSettings(saved);
+    return saved;
+  }, []);
+
+  const fetchAiModels = useCallback(async (profileId: string): Promise<AiFetchedModel[]> => {
+    const output = await listAiModels({ profileId });
+    return output.models;
+  }, []);
+
+  const addModelToProfile = useCallback(async (
+    profileId: string,
+    model: AiFetchedModel,
+    capabilityTypes: AiModelCapabilityType[],
+  ): Promise<AiSettings> => {
+    const saved = await addAiModelToProfile({
+      profileId,
+      modelId: model.modelId,
+      displayName: model.displayName,
+      capabilityTypes,
+    });
+    setAiSettings(saved);
+    return saved;
+  }, []);
+
+  const activateAiModel = useCallback(async (configuredModelId: string): Promise<AiSettings> => {
+    const saved = await setActiveAiModel({ configuredModelId });
+    setAiSettings(saved);
+    return saved;
+  }, []);
+
+  const openAiAssistant = useCallback(() => {
+    setAiAssistantOpen(true);
+    setAiError(null);
+    setAiResult(null);
+    setAiSplitResult(null);
+    setAiTableResult(null);
+    setAiSpreadsheetResult(null);
+    setAiPatchPreview(null);
+    const selectedContent = readCurrentLakeSelectionRef.current?.();
+    setAiContentScope(selectedContent?.trim() ? "selection" : "document");
+  }, []);
+
+  const applyAiDocumentPatchResult = useCallback((
+    patch: AiDocumentPatch | undefined,
+    patchedContent: string,
+    contentScope: AiDocumentContentScope,
+  ) => {
+    if (!patch) {
+      setAiError("AI 没有返回可应用的文档修改");
+      return false;
+    }
+
+    if (contentScope === "selection") {
+      const replaced = replaceCurrentLakeSelectionRef.current?.(patchedContent) ?? false;
+      if (!replaced) {
+        setAiError("当前 Lake 运行时未暴露稳定选区替换 API，无法直接替换选中区域");
+        return false;
+      }
+      setAiPatchPreview(null);
+      setAiAssistantOpen(false);
+      return true;
+    }
+
+    const preparedContent = prepareAiMarkdownForLakeImport(patchedContent);
+    // 文档级 patch 先在 Markdown 层定位，再交给 Lake 导入链路写回；表格类内容用 HTML 导入避免被识别成代码块。
+    setAiPreviewRequest({ id: Date.now(), content: preparedContent.content, contentType: preparedContent.type });
+    setAiPatchPreview(null);
+    setAiAssistantOpen(false);
+    return true;
+  }, []);
+
+  const runCurrentDocumentAiAction = useCallback(async (
+    actionType: AiDocumentActionType,
+    instruction: string,
+  ) => {
+    if (currentDocument?.kind !== "lake") {
+      setAiError("请先打开 .lake 文档");
+      return;
+    }
+    const shouldUseSelection = aiContentScope === "selection" && selectionActionTypes.has(actionType);
+    const selectedContent = shouldUseSelection ? readCurrentLakeSelectionRef.current?.() ?? null : null;
+    if (shouldUseSelection && !selectedContent?.trim()) {
+      setAiError(lakeSelectionCapability.canReadSelection
+        ? "请先在当前文档中选中一段区域"
+        : "当前 Lake 运行时未暴露稳定选区读取 API");
+      return;
+    }
+    const contentScope: AiDocumentContentScope = shouldUseSelection ? "selection" : "document";
+    const content = selectedContent ?? readCurrentLakeContentRef.current?.() ?? currentDocument.content;
+    setAiRunning(true);
+    setAiError(null);
+    setAiResult(null);
+    setAiSplitResult(null);
+    setAiTableResult(null);
+    setAiSpreadsheetResult(null);
+    setAiPatchPreview(null);
+    try {
+      if (actionType === "split-document") {
+        setAiSplitResult(await runAiSplitDocument({
+          documentTitle: documentTitleFromPath(currentDocument.entry.path),
+          content,
+          instruction,
+        }));
+      } else {
+        const result = await runAiDocumentAction({
+          actionType,
+          documentTitle: documentTitleFromPath(currentDocument.entry.path),
+          content,
+          instruction,
+          contentScope,
+        });
+        const patchPreview = previewCurrentAiDocumentPatch(content, result.patch, contentScope);
+        setAiResult(result);
+        setAiPatchPreview(patchPreview);
+        if (aiAutoApply && result.previewMode === "patch" && patchPreview && !patchPreview.errors.length) {
+          applyAiDocumentPatchResult(result.patch, patchPreview.after, contentScope);
+        }
+      }
+    } catch (error) {
+      setAiError(toMessage(error));
+    } finally {
+      setAiRunning(false);
+    }
+  }, [aiAutoApply, aiContentScope, applyAiDocumentPatchResult, currentDocument, lakeSelectionCapability.canReadSelection]);
+
+  const applyAiResultToCurrentDocument = useCallback(() => {
+    if (!aiResult) {
+      return;
+    }
+    if (aiResult.previewMode === "patch") {
+      if (!aiPatchPreview) {
+        setAiError("AI 修改预览不存在，无法应用");
+        return;
+      }
+      if (aiPatchPreview.errors.length) {
+        setAiError(aiPatchPreview.errors.join("；"));
+        return;
+      }
+      applyAiDocumentPatchResult(aiResult.patch, aiPatchPreview.after, aiResult.contentScope ?? "document");
+      return;
+    }
+    if (aiResult.previewMode !== "replace-document") {
+      return;
+    }
+    if (aiResult.contentScope === "selection") {
+      const replaced = replaceCurrentLakeSelectionRef.current?.(aiResult.content) ?? false;
+      if (!replaced) {
+        setAiError("当前 Lake 运行时未暴露稳定选区替换 API，无法直接替换选中区域");
+        return;
+      }
+      setAiAssistantOpen(false);
+      return;
+    }
+    // AI 生成内容先进入编辑器预览和自动保存链路，表格内容转为 HTML 导入以保留 Lake 表格结构。
+    const preparedContent = prepareAiMarkdownForLakeImport(aiResult.content);
+    setAiPreviewRequest({ id: Date.now(), content: preparedContent.content, contentType: preparedContent.type });
+    setAiAssistantOpen(false);
+  }, [aiPatchPreview, aiResult, applyAiDocumentPatchResult]);
+
+  const confirmSplitCurrentDocument = useCallback(async () => {
+    if (!aiSplitResult || currentDocument?.kind !== "lake") {
+      return;
+    }
+
+    setAiRunning(true);
+    setAiError(null);
+    try {
+      await saveCurrentEditorNowRef.current?.();
+      const parentPath = documentChildContainerPath(currentDocument.entry.path);
+      let latestWorkspace: WorkspacePayload | null = workspace;
+      let firstCreatedDocument: WorkspaceDocument | null = null;
+      for (const part of aiSplitResult.parts) {
+        const payload = await createLakeDocument(part.title, parentPath);
+        latestWorkspace = {
+          root: payload.root,
+          directories: payload.directories,
+          documents: payload.documents,
+          order: payload.order,
+        };
+        firstCreatedDocument ??= payload.createdDocument;
+        await writeLakeDocument(payload.createdDocument.path, part.content);
+      }
+      if (latestWorkspace) {
+        setWorkspace(latestWorkspace);
+      }
+      if (firstCreatedDocument && latestWorkspace) {
+        await openDocumentInTabs(firstCreatedDocument, latestWorkspace, { skipSaveBeforeSwitch: true });
+      }
+      setAiAssistantOpen(false);
+      setAiSplitResult(null);
+    } catch (error) {
+      setAiError(toMessage(error));
+    } finally {
+      setAiRunning(false);
+    }
+  }, [aiSplitResult, currentDocument, openDocumentInTabs, workspace]);
+
+  const runCurrentTableAiAction = useCallback(async (
+    actionType: AiTableActionType,
+    instruction: string,
+  ) => {
+    if (currentDocument?.kind !== "multidimensional-table") {
+      setAiError("请先打开多维表格");
+      return;
+    }
+    const tableDocument = readCurrentTableDocumentRef.current?.();
+    const tableJson = tableDocument
+      ? serializeMultidimensionalTableDocument(tableDocument)
+      : currentDocument.content;
+    setAiRunning(true);
+    setAiError(null);
+    setAiResult(null);
+    setAiSplitResult(null);
+    setAiTableResult(null);
+    setAiSpreadsheetResult(null);
+    try {
+      setAiTableResult(await runAiTableAction({
+        actionType,
+        tableTitle: documentTitleFromPath(currentDocument.entry.path),
+        tableJson,
+        instruction,
+      }));
+    } catch (error) {
+      setAiError(toMessage(error));
+    } finally {
+      setAiRunning(false);
+    }
+  }, [currentDocument]);
+
+  const runCurrentSpreadsheetAiAction = useCallback(async (
+    actionType: AiSpreadsheetActionType,
+    instruction: string,
+  ) => {
+    if (currentDocument?.kind !== "spreadsheet") {
+      setAiError("请先打开 Univer 表格");
+      return;
+    }
+    const workbook = readCurrentSpreadsheetWorkbookRef.current?.() ?? parseSpreadsheetSnapshot(currentDocument.content, documentTitleFromPath(currentDocument.entry.path));
+    const workbookJson = JSON.stringify(workbook, null, 2);
+    setAiRunning(true);
+    setAiError(null);
+    setAiResult(null);
+    setAiSplitResult(null);
+    setAiTableResult(null);
+    setAiSpreadsheetResult(null);
+    try {
+      setAiSpreadsheetResult(await runAiSpreadsheetAction({
+        actionType,
+        spreadsheetTitle: documentTitleFromPath(currentDocument.entry.path),
+        workbookJson,
+        instruction,
+      }));
+    } catch (error) {
+      setAiError(toMessage(error));
+    } finally {
+      setAiRunning(false);
+    }
+  }, [currentDocument]);
+
+  const applyAiSpreadsheetPatchToCurrentSpreadsheet = useCallback((patch: AiSpreadsheetPatch) => {
+    if (currentDocument?.kind !== "spreadsheet") {
+      return;
+    }
+    const workbook = readCurrentSpreadsheetWorkbookRef.current?.() ?? parseSpreadsheetSnapshot(currentDocument.content, documentTitleFromPath(currentDocument.entry.path));
+    setAiSpreadsheetSnapshotRequest({
+      id: Date.now(),
+      workbook: applyAiSpreadsheetPatch(workbook, patch),
+    });
+    setAiAssistantOpen(false);
+  }, [currentDocument]);
+
+  const applyAiTablePatchToCurrentTable = useCallback((patch: AiTablePatch) => {
+    if (currentDocument?.kind !== "multidimensional-table") {
+      return;
+    }
+    setAiTablePatchRequest({ id: Date.now(), patch });
+    setAiAssistantOpen(false);
+  }, [currentDocument?.kind]);
+
   const saveDatabaseDirectory = useCallback(async (directory: string) => {
     const saved = await saveDatabaseLocation(directory);
     setDatabaseLocation(saved);
@@ -951,7 +1349,7 @@ export function AppController() {
   const verifyResourceKey = useCallback(async (): Promise<ResourceKeyStatus> => {
     setResourceKeyBusy(true);
     try {
-      // 用户主动点击时才访问系统钥匙串，避免应用启动或普通浏览文档时反复弹授权窗口。
+      // 用户主动点击时才做密钥完整性检查，避免应用启动或普通浏览文档时触发不必要状态刷新。
       const status = await verifyResourceKeyStatus();
       setResourceKeyStatus(status);
       return status;
@@ -1143,9 +1541,11 @@ export function AppController() {
     window.addEventListener("pointerup", onPointerUp);
   }, [sidebarCollapsed, sidebarWidth]);
 
+  const aiDocumentAssistantVisible = Boolean(aiAssistantOpen && currentDocument?.kind === "lake");
+
   return (
     <div
-      className={`app-shell${sidebarCollapsed ? " is-sidebar-collapsed" : ""}`}
+      className={`app-shell${sidebarCollapsed ? " is-sidebar-collapsed" : ""}${aiDocumentAssistantVisible ? " is-ai-assistant-open" : ""}`}
       style={{
         gridTemplateColumns: `var(--rail-width) ${sidebarCollapsed ? 0 : sidebarWidth}px 12px minmax(0, 1fr)`,
       }}
@@ -1193,6 +1593,7 @@ export function AppController() {
           activeTabId={activeTabId}
           saveStatus={saveStatus}
           onManualSave={() => setManualSaveRequest((current) => current + 1)}
+          onOpenAiAssistant={openAiAssistant}
           onActivateTab={activateTab}
           onToggleTabLocked={toggleTabLocked}
           onCloseTab={closeTab}
@@ -1227,6 +1628,10 @@ export function AppController() {
               onSave={saveSpreadsheet}
               onSaveStatusChange={setSaveStatus}
               onRegisterSaveNow={registerEditorSaveNow}
+              onRegisterReadWorkbook={registerSpreadsheetReadWorkbook}
+              aiWorkbookSnapshot={aiSpreadsheetSnapshotRequest?.workbook ?? null}
+              aiWorkbookSnapshotRequestId={aiSpreadsheetSnapshotRequest?.id}
+              onAiWorkbookSnapshotApplied={() => setAiSpreadsheetSnapshotRequest(null)}
             />
           </Suspense>
         ) : currentDocument?.kind === "multidimensional-table" ? (
@@ -1244,6 +1649,10 @@ export function AppController() {
               resourcePreviewConcurrency={ossSettings?.resourcePreviewConcurrency}
               onSaveStatusChange={setSaveStatus}
               onRegisterSaveNow={registerEditorSaveNow}
+              onRegisterReadTable={registerTableReadDocument}
+              aiTablePatch={aiTablePatchRequest?.patch ?? null}
+              aiTablePatchRequestId={aiTablePatchRequest?.id}
+              onAiTablePatchApplied={() => setAiTablePatchRequest(null)}
             />
           </Suspense>
         ) : (
@@ -1261,15 +1670,94 @@ export function AppController() {
             resourcePreviewConcurrency={ossSettings?.resourcePreviewConcurrency}
             onSaveStatusChange={setSaveStatus}
             onRegisterSaveNow={registerEditorSaveNow}
+            onRegisterReadContent={registerLakeReadContent}
+            onRegisterReadSelection={registerLakeReadSelection}
+            onRegisterReplaceSelection={registerLakeReplaceSelection}
+            onSelectionCapabilityChange={setLakeSelectionCapability}
+            aiPreviewContent={aiPreviewRequest?.content ?? null}
+            aiPreviewContentType={aiPreviewRequest?.contentType}
+            aiPreviewRequestId={aiPreviewRequest?.id}
+            onAiPreviewApplied={() => setAiPreviewRequest(null)}
           />
         )}
+        {aiResult?.previewMode === "patch" && aiPatchPreview ? (
+          <section className="ai-document-diff-overlay" aria-label="文档修改预览">
+            <header className="ai-document-diff-overlay__header">
+              <div>
+                <span>文档修改预览</span>
+                <strong>{aiResult.title}</strong>
+              </div>
+              <div className="ai-document-diff-overlay__actions">
+                <button type="button" className="secondary-button" onClick={() => {
+                  setAiResult(null);
+                  setAiPatchPreview(null);
+                }}>
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={Boolean(aiPatchPreview.errors.length) || (aiResult.contentScope === "selection" && !lakeSelectionCapability.canReplaceSelection)}
+                  onClick={applyAiResultToCurrentDocument}
+                >
+                  {aiResult.contentScope === "selection" ? "允许并替换选中区域" : "允许并应用修改"}
+                </button>
+              </div>
+            </header>
+            <AiDocumentPatchDiff preview={aiPatchPreview} />
+          </section>
+        ) : null}
       </main>
+      <AiDocumentAssistant
+        open={aiDocumentAssistantVisible}
+        documentTitle={currentDocument?.entry ? documentTitleFromPath(currentDocument.entry.path) : ""}
+        result={aiResult}
+        patchPreview={aiPatchPreview}
+        splitResult={aiSplitResult}
+        running={aiRunning}
+        error={aiError}
+        scope={aiContentScope}
+        autoApply={aiAutoApply}
+        selectionAvailable={lakeSelectionCapability.canReadSelection}
+        selectionReplaceAvailable={lakeSelectionCapability.canReplaceSelection}
+        onClose={() => setAiAssistantOpen(false)}
+        onScopeChange={setAiContentScope}
+        onAutoApplyChange={setAiAutoApply}
+        onRunAction={runCurrentDocumentAiAction}
+        onApplyResult={applyAiResultToCurrentDocument}
+        onConfirmSplit={confirmSplitCurrentDocument}
+      />
+      <AiTableAssistant
+        open={aiAssistantOpen && currentDocument?.kind === "multidimensional-table"}
+        tableTitle={currentDocument?.entry ? documentTitleFromPath(currentDocument.entry.path) : ""}
+        result={aiTableResult}
+        running={aiRunning}
+        error={aiError}
+        onClose={() => setAiAssistantOpen(false)}
+        onRunAction={runCurrentTableAiAction}
+        onApplyPatch={applyAiTablePatchToCurrentTable}
+      />
+      <AiSpreadsheetAssistant
+        open={aiAssistantOpen && currentDocument?.kind === "spreadsheet"}
+        spreadsheetTitle={currentDocument?.entry ? documentTitleFromPath(currentDocument.entry.path) : ""}
+        result={aiSpreadsheetResult}
+        running={aiRunning}
+        error={aiError}
+        onClose={() => setAiAssistantOpen(false)}
+        onRunAction={runCurrentSpreadsheetAiAction}
+        onApplyPatch={applyAiSpreadsheetPatchToCurrentSpreadsheet}
+      />
       <OssSettingsPanel
         open={settingsOpen}
         settings={ossSettings}
+        aiSettings={aiSettings}
         databaseLocation={databaseLocation}
         onClose={() => setSettingsOpen(false)}
         onSave={saveSettings}
+        onSaveAiSettings={saveModelSettings}
+        onListAiModels={fetchAiModels}
+        onAddAiModel={addModelToProfile}
+        onSetActiveAiModel={activateAiModel}
         onChooseDatabaseDirectory={chooseDatabaseDirectory}
         onChooseStorageDirectory={chooseStorageDirectory}
         onSaveDatabaseLocation={saveDatabaseDirectory}
