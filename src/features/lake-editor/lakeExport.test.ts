@@ -1,4 +1,5 @@
 import {
+  analyzeLakeDocumentExportResources,
   createOfficialLakeMarkdownConverter,
   lakeDocumentToHtml,
   lakeDocumentToHtmlBundle,
@@ -33,16 +34,48 @@ test("HTML 导出保留 Lake 内容和打印样式", async () => {
   }))}`;
   const html = await lakeDocumentToHtml(
     "标题",
-    `<h2>hello</h2><card name="file" value="${fileValue}"></card><p class="ne-p">world</p>`,
+    [
+      "<h2>hello</h2>",
+      `<card name="file" value="${fileValue}"></card>`,
+      "<p class=\"ne-p\">world</p>",
+      "<ne-container-hole data-card=\"columns\"><ne-columns><ne-columns-content>",
+      "<ne-column><ne-column-border></ne-column-border><ne-column-content><p>左侧内容</p></ne-column-content><ne-column-controller></ne-column-controller></ne-column>",
+      "<ne-column><ne-column-border></ne-column-border><ne-column-content><p>右侧内容</p></ne-column-content><ne-column-controller></ne-column-controller></ne-column>",
+      "</ne-columns-content></ne-columns></ne-container-hole>",
+      "<ne-collapse ne-open=\"false\"><div class=\"collapse-controller\"><span class=\"ne-collapse-fold-container\"><span class=\"ne-collapse-folding-inner\"></span></span></div><ne-collapse-content><ne-summary>折叠标题</ne-summary><p>折叠内容</p></ne-collapse-content></ne-collapse>",
+      "<pre data-language=\"plain\" data-title=\"这是svn\" class=\"ne-codeblock language-plain\"><code>svn:\n\nhttps://example.test/svn\n\ncaoweifeng\ncaoweifeng2025</code></pre>",
+    ].join(""),
   );
 
   expect(html).toContain("<title>标题</title>");
   expect(html).toContain("@media print");
+  expect(html).toContain("background:");
   expect(html).toContain("lake-export-outline");
+  expect(html).toContain("ne-doc-major-viewer ne-viewer ne-typography-classic ne-paragraph-spacing-relax fz16");
+  expect(html).toContain("lake-export-content ne-viewer-body");
   expect(html).toContain("--lake-export-outline-width");
   expect(html).toContain("lake-export-resizer");
   expect(html).toContain("yuque-lake-export-outline-width");
   expect(html).toContain("href=\"#heading-hello\"");
+  expect(html).toContain(".lake-export-content ne-columns-content");
+  expect(html).toContain("<ne-columns-content>");
+  expect(html).toContain("<ne-column-content><p>左侧内容</p></ne-column-content>");
+  expect(html).toContain("ne-column-controller");
+  expect(html).toContain(".lake-export-content ne-collapse");
+  expect(html).toContain("initExportCollapses");
+  expect(html).toContain("aria-expanded");
+  expect(html).toContain("<ne-collapse ne-open=\"false\">");
+  expect(html).toContain("<ne-summary>折叠标题</ne-summary>");
+  expect(html).toContain("lake-export-codeblock");
+  expect(html).toContain("lake-export-codeblock__toolbar");
+  expect(html).toContain("lake-export-codeblock__title\">这是svn</span>");
+  expect(html).toContain("lake-export-codeblock__select lake-export-codeblock__select--language\">Plain Text</span>");
+  expect(html).toContain("lake-export-codeblock__select lake-export-codeblock__select--theme\">Yuque Light Pro</span>");
+  expect(html).toContain("lake-export-codeblock__more");
+  expect(html).toContain("lake-export-codeblock__line-number\">1</span>");
+  expect(html).toContain("lake-export-codeblock__line-number\">6</span>");
+  expect(html).toContain("lake-export-codeblock__line\">caoweifeng2025</span>");
+  expect(html).toContain("<details class=\"lake-export-codeblock\" open=\"\">");
   expect(html).toContain("lake-export-attachment");
   expect(html).toContain("测试文件1.zip");
   expect(html).toContain("(35 kB)");
@@ -208,6 +241,63 @@ test("Markdown 本地资源包导出会生成 md 和资源文件", async () => {
   expect(entries.map((entry) => entry.path)).toEqual(["标题.md", "assets/截图.png"]);
   expect(entries[0].content).toContain("![截图](assets/截图.png)");
   expect(entries[1].content).toBe("B");
+});
+
+test("Markdown 单文件导出可将本地图片内嵌为 data URL", async () => {
+  const imageRef = createResourceReference({
+    bucket: "yuque",
+    key: "images/a.png",
+    kind: "image",
+    name: "截图.png",
+    mimeType: "image/png",
+  });
+  const markdown = await lakeDocumentMarkdownToTextWithResources(
+    "标题",
+    `![截图](${imageRef})`,
+    {
+      strategy: "bundle",
+      signedUrlTtlSeconds: 3600,
+      loadResource: async () => new Uint8Array([66]),
+    },
+  );
+
+  expect(markdown).toContain("![截图](data:image/png;base64,Qg==)");
+});
+
+test("单篇导出只在存在附件类资源时需要资源包", () => {
+  const imageRef = createResourceReference({
+    bucket: "yuque",
+    key: "images/a.png",
+    kind: "image",
+    name: "截图.png",
+  });
+  const fileRef = createResourceReference({
+    bucket: "yuque",
+    key: "files/a.pdf",
+    kind: "file",
+    name: "附件.pdf",
+  });
+  const fileValue = `data:${encodeURIComponent(JSON.stringify({ src: fileRef, name: "附件.pdf" }))}`;
+  const options = {
+    strategy: "bundle" as const,
+    signedUrlTtlSeconds: 3600,
+    loadResource: async () => new Uint8Array([66]),
+  };
+
+  expect(analyzeLakeDocumentExportResources(`![截图](${imageRef})`, "markdown", options)).toMatchObject({
+    hasResources: true,
+    hasImageResources: true,
+    hasFileResources: false,
+  });
+  expect(analyzeLakeDocumentExportResources(`<p><img src="${imageRef}" alt="截图"></p>`, "html", options)).toMatchObject({
+    hasResources: true,
+    hasImageResources: true,
+    hasFileResources: false,
+  });
+  expect(analyzeLakeDocumentExportResources(`<card name="file" value="${fileValue}"></card>`, "html", options)).toMatchObject({
+    hasResources: true,
+    hasFileResources: true,
+  });
 });
 
 test("Markdown 短时签名导出保持单文件并重写链接", async () => {

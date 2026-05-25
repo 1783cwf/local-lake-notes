@@ -301,15 +301,10 @@ function RecordCard({
     >
       {showPrimaryField ? (
         <div className="multitable-card__title-row">
-          <button
-            type="button"
-            className="multitable-card__drag"
-            aria-label="拖动记录"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <GripVertical size={13} />
-          </button>
           <h3>{textValue(record.values[primaryField.id]) || "未命名记录"}</h3>
+          <span className="multitable-card__drag" aria-hidden="true">
+            <GripVertical size={13} />
+          </span>
         </div>
       ) : null}
       <div className="multitable-card__fields">

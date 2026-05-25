@@ -18,6 +18,7 @@ import type { MultidimensionalTableDocument } from "../features/multidimensional
 import { serializeMultidimensionalTableDocument } from "../features/multidimensional-table/multidimensionalTableDocument";
 import type { SpreadsheetEditorHandle } from "../features/spreadsheet/SpreadsheetEditor";
 import {
+  analyzeLakeDocumentExportResources,
   createOfficialLakeMarkdownConverter,
   exportFileName,
   lakeDocumentToHtmlWithResources,
@@ -941,10 +942,12 @@ export function AppController() {
   ) => {
     const title = documentTitleFromPath(request.document.path);
     const exportOptions = createResourceExportOptions(request.resourceStrategy, request.signedUrlTtlSeconds);
+    const exportResourceUsage = analyzeLakeDocumentExportResources(content, request.format, exportOptions);
+    const needsResourceBundle = request.resourceStrategy === "bundle" && exportResourceUsage.hasFileResources;
     setActiveAppOperation({ kind: "document-export", label: `正在导出 ${formatExportLabel(request.format)}` });
     try {
       if (request.format === "markdown") {
-        if (request.resourceStrategy === "bundle") {
+        if (needsResourceBundle) {
           await saveBinaryExport(
             exportFileName(request.document, "markdown").replace(/\.md$/i, ".zip"),
             await lakeDocumentMarkdownToBundle(title, content, exportOptions),
@@ -959,7 +962,7 @@ export function AppController() {
         }
       } else if (request.format === "html") {
         const htmlExportOptions = { ...exportOptions, embedImages: true };
-        if (request.resourceStrategy === "bundle") {
+        if (needsResourceBundle) {
           await saveBinaryExport(
             exportFileName(request.document, "html").replace(/\.html$/i, ".zip"),
             await lakeDocumentToHtmlBundle(title, content, htmlExportOptions),
