@@ -10,6 +10,7 @@ import type {
   MoveWorkspaceItemInput,
   WorkspacePayload,
 } from "../features/workspace/workspaceStore";
+import type { OssSettings } from "./appState";
 import { AppController } from "./AppController";
 
 const createLakeDocument = vi.fn<(title: string, parentPath?: string) => Promise<CreateDocumentPayload>>();
@@ -42,6 +43,7 @@ const getDatabaseLocation = vi.fn(async () => ({
   databasePath: "/tmp/local-lake-db/yuque-lake-notes.sqlite3",
   custom: false,
 }));
+const getOssSettings = vi.fn<() => Promise<OssSettings | null>>(async () => null);
 const getBackupKeyStatus = vi.fn(async () => ({ configured: false, needsKey: false }));
 const getAiSettings = vi.fn(async () => ({ profiles: [] }));
 const listAiModels = vi.fn<(input: { profileId: string }) => Promise<{ profileId: string; models: [] }>>(
@@ -149,6 +151,36 @@ const renameSpreadsheetDocument = vi.fn<(path: string, name: string) => Promise<
 const writeLakeDocument = vi.fn<(path: string, content: string) => Promise<void>>();
 const writeSpreadsheetDocument = vi.fn<(path: string, content: string) => Promise<void>>();
 const writeMultidimensionalTableDocument = vi.fn<(path: string, content: string) => Promise<void>>();
+
+const s3SignedUrlOssSettings: OssSettings = {
+  activeProvider: "s3",
+  endpoint: "https://s3.example.test",
+  bucket: "yuque",
+  region: "us-east-1",
+  accessKeyId: "key",
+  secretAccessKey: "",
+  publicBaseUrl: "https://oss.example.test/yuque",
+  forcePathStyle: true,
+  imagePrefix: "images",
+  filePrefix: "files",
+  backupPrefix: "backups",
+  defaultExportResourceStrategy: "signed-url",
+  defaultSignedUrlTtlSeconds: 3600,
+  maxSignedUrlTtlSeconds: 7 * 24 * 60 * 60,
+  allowSignedUrlExport: true,
+  resourcePreviewConcurrency: 6,
+  local: {
+    rootDirectory: "",
+    storageId: "local",
+  },
+  webdav: {
+    endpoint: "",
+    username: "",
+    password: "",
+    rootPath: "",
+    storageId: "webdav",
+  },
+};
 
 vi.mock("../components/DocumentSidebar", () => ({
   DocumentSidebar: ({
@@ -447,7 +479,7 @@ vi.mock("../lib/tauri", () => ({
   downloadResourceFile: (input: { url: string; filename: string; resourceRef?: string }) => downloadResourceFile(input),
   getDatabaseLocation: () => getDatabaseLocation(),
   getAiSettings: () => getAiSettings(),
-  getOssSettings: vi.fn(async () => null),
+  getOssSettings: () => getOssSettings(),
   getBackupKeyStatus: () => getBackupKeyStatus(),
   getResourceKeyStatus: () => getResourceKeyStatus(),
   verifyBackupKeyStatus: () => verifyBackupKeyStatus(),
@@ -599,6 +631,8 @@ beforeEach(() => {
   setActiveAiModel.mockResolvedValue({ profiles: [] });
   getResourceKeyStatus.mockReset();
   getResourceKeyStatus.mockResolvedValue({ configured: false, needsKey: false, knownFingerprints: [] });
+  getOssSettings.mockReset();
+  getOssSettings.mockResolvedValue(null);
   verifyBackupKeyStatus.mockReset();
   verifyBackupKeyStatus.mockResolvedValue({ configured: false, needsKey: false });
   verifyResourceKeyStatus.mockReset();
@@ -817,8 +851,8 @@ test("文档导出完成后切换标签不会重复消费旧导出请求", async
   await user.click(screen.getByRole("menuitem", { name: "Markdown" }));
 
   await waitFor(() => {
-    expect(saveBinaryExport).toHaveBeenCalledTimes(1);
-    expect(saveBinaryExport.mock.calls[0][0]).toBe("a.zip");
+    expect(saveTextExport).toHaveBeenCalledTimes(1);
+    expect(saveTextExport.mock.calls[0][0]).toBe("a.md");
   });
 
   await user.click(screen.getByRole("treeitem", { name: "b" }));
@@ -827,7 +861,77 @@ test("文档导出完成后切换标签不会重复消费旧导出请求", async
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  expect(saveBinaryExport).toHaveBeenCalledTimes(1);
+  expect(saveTextExport).toHaveBeenCalledTimes(1);
+});
+
+test("单篇 Markdown 只有图片资源时直接导出单文件", async () => {
+  const user = userEvent.setup();
+  const imageRef = "yuque-resource://yuque/images/a.png?kind=image&name=%E6%88%AA%E5%9B%BE.png&mimeType=image%2Fpng";
+  const editor = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn((type: string) => (type === "text/markdown" ? `![截图](${imageRef})` : "<p>图片</p>")),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" }],
+    order: ["document:a.lake"],
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "a" }));
+  await user.click(screen.getByRole("button", { name: "导出文档" }));
+  await user.click(screen.getByRole("menuitem", { name: "Markdown" }));
+
+  await waitFor(() => {
+    expect(saveTextExport).toHaveBeenCalledWith(
+      "a.md",
+      expect.stringContaining("![截图](data:image/png;base64,AQID)"),
+      [{ name: "Markdown", extensions: ["md"] }],
+    );
+    expect(saveBinaryExport).not.toHaveBeenCalled();
+  });
+});
+
+test("短时签名链接导出无本地资源时保持单个 HTML 文件", async () => {
+  const user = userEvent.setup();
+  const editor = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn((type: string) => (type === "text/html" ? "<p>无资源正文</p>" : "无资源正文")),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+  getOssSettings.mockResolvedValue(s3SignedUrlOssSettings);
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" }],
+    order: ["document:a.lake"],
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "a" }));
+  await user.click(screen.getByRole("button", { name: "导出文档" }));
+  await user.click(screen.getByRole("menuitem", { name: "HTML" }));
+
+  await waitFor(() => {
+    expect(saveTextExport).toHaveBeenCalledWith(
+      "a.html",
+      expect.stringContaining("无资源正文"),
+      [{ name: "HTML", extensions: ["html"] }],
+    );
+    expect(saveBinaryExport).not.toHaveBeenCalled();
+  });
 });
 
 test("关闭活动未锁定标签后切换到相邻标签", async () => {

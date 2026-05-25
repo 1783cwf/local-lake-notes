@@ -64,6 +64,12 @@ export interface WorkspaceZipEntryInput {
   content: string | Uint8Array;
 }
 
+export interface LakeDocumentExportResourceUsage {
+  hasResources: boolean;
+  hasImageResources: boolean;
+  hasFileResources: boolean;
+}
+
 export function lakeDocumentToMarkdown(title: string, content: string): string {
   return normalizeMarkdown(`# ${title}\n\n${lakeContentToMarkdown(content)}`);
 }
@@ -79,7 +85,9 @@ export async function lakeDocumentMarkdownToTextWithResources(
   markdown: string,
   options: LakeDocumentResourceExportOptions,
 ): Promise<string> {
-  const result = await rewriteMarkdownResourceReferences(markdown, options);
+  const result = await rewriteMarkdownResourceReferences(markdown, options, options.strategy === "bundle" ? {
+    inlineImages: true,
+  } : undefined);
   return markdownWithTitle(title, result.content);
 }
 
@@ -113,9 +121,12 @@ export async function lakeDocumentToHtml(title: string, content: string): Promis
         margin: 18mm;
       }
       body {
-        margin: 48px 0;
+        margin: 0;
         padding: 0 clamp(24px, 4vw, 72px);
         color: #262626;
+        background:
+          linear-gradient(180deg, #f8faf9 0%, #ffffff 220px),
+          #ffffff;
         font: 16px/1.75 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
       }
       .lake-export-shell {
@@ -126,13 +137,18 @@ export async function lakeDocumentToHtml(title: string, content: string): Promis
         align-items: start;
         width: min(100%, 1760px);
         margin: 0 auto;
+        padding: clamp(28px, 4vw, 56px) 0;
       }
       .lake-export-outline {
         position: sticky;
         top: 32px;
         max-height: calc(100vh - 64px);
         overflow: auto;
-        padding: 8px 0 0;
+        padding: 14px 12px;
+        border: 1px solid #e6ebe8;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 10px 32px rgb(31 38 45 / 6%);
         color: #6b737b;
         font-size: 14px;
       }
@@ -145,13 +161,15 @@ export async function lakeDocumentToHtml(title: string, content: string): Promis
       .lake-export-outline span {
         display: block;
         overflow: hidden;
-        padding: 4px 0;
+        padding: 5px 8px;
+        border-radius: 6px;
         color: inherit;
         text-decoration: none;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
       .lake-export-outline a:hover {
+        background: #eef7f2;
         color: #1677ff;
       }
       .lake-export-resizer {
@@ -190,13 +208,327 @@ export async function lakeDocumentToHtml(title: string, content: string): Promis
       .lake-export-outline__item--6 { padding-left: 36px !important; }
       .lake-export-document {
         min-width: 0;
+        padding: clamp(32px, 4vw, 64px);
+        border: 1px solid #e8edea;
+        border-radius: 8px;
+        background: #ffffff;
+        box-shadow: 0 18px 48px rgb(31 38 45 / 7%);
       }
-      h1, h2, h3 { line-height: 1.35; }
-      img { max-width: 100%; }
-      table { width: 100%; border-collapse: collapse; }
-      th, td { padding: 8px 10px; border: 1px solid #dfe3e6; }
-      pre { overflow: auto; padding: 14px; border-radius: 8px; background: #f6f8f7; }
-      .lake-export-document-title { margin: 0 0 32px; }
+      .lake-export-content {
+        color: #2b3035;
+        word-break: break-word;
+      }
+      .lake-export-content h1,
+      .lake-export-content h2,
+      .lake-export-content h3,
+      .lake-export-content h4,
+      .lake-export-content h5,
+      .lake-export-content h6 {
+        margin: 1.35em 0 0.6em;
+        color: #202428;
+        line-height: 1.35;
+      }
+      .lake-export-content h1 { font-size: 1.9em; }
+      .lake-export-content h2 {
+        padding-bottom: 0.28em;
+        border-bottom: 1px solid #edf0ee;
+        font-size: 1.55em;
+      }
+      .lake-export-content h3 { font-size: 1.28em; }
+      .lake-export-content p,
+      .lake-export-content ul,
+      .lake-export-content ol,
+      .lake-export-content blockquote,
+      .lake-export-content table,
+      .lake-export-content pre,
+      .lake-export-codeblock {
+        margin: 14px 0;
+      }
+      img {
+        max-width: 100%;
+        border-radius: 6px;
+      }
+      table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        overflow: hidden;
+        border: 1px solid #dfe6e2;
+        border-radius: 8px;
+      }
+      th,
+      td {
+        padding: 9px 12px;
+        border-right: 1px solid #e3e8e5;
+        border-bottom: 1px solid #e3e8e5;
+      }
+      th {
+        background: #f6f8f7;
+        color: #202428;
+        font-weight: 650;
+      }
+      tr:last-child > th,
+      tr:last-child > td { border-bottom: 0; }
+      th:last-child,
+      td:last-child { border-right: 0; }
+      blockquote {
+        padding: 10px 14px;
+        border-left: 3px solid #9ed8b6;
+        border-radius: 0 6px 6px 0;
+        background: #f5fbf7;
+        color: #475057;
+      }
+      .lake-export-content ne-container-hole,
+      .lake-export-content ne-root-card-hole,
+      .lake-export-content ne-hole,
+      .lake-export-content ne-alert-hole {
+        display: block;
+        max-width: 100%;
+      }
+      .lake-export-content ne-container-hole[data-card="columns"] {
+        margin: 18px 0;
+      }
+      .lake-export-content ne-columns {
+        display: block;
+        width: 100%;
+        max-width: 100%;
+        color: inherit;
+        user-select: text;
+      }
+      .lake-export-content ne-columns-content {
+        display: flex;
+        width: 100%;
+        align-items: stretch;
+        gap: 18px;
+      }
+      .lake-export-content ne-column {
+        display: block;
+        flex: 1 1 0;
+        min-width: 0;
+        margin: 0;
+        padding: 0;
+        position: relative;
+      }
+      .lake-export-content ne-column-content {
+        display: block;
+        min-width: 0;
+        max-width: 100%;
+        overflow: visible;
+      }
+      .lake-export-content ne-column-border,
+      .lake-export-content ne-column-controller,
+      .lake-export-content .columns-add,
+      .lake-export-content .columns-remove,
+      .lake-export-content .columns-start-add,
+      .lake-export-content .columns-end-add,
+      .lake-export-content .columns-adder,
+      .lake-export-content .columns-drag-button,
+      .lake-export-content .columns-move-inspector {
+        display: none !important;
+      }
+      .lake-export-content ne-collapse {
+        display: flex;
+        width: 100%;
+        max-width: 100%;
+        margin: 16px 0;
+        padding: 8px 16px 10px 0;
+        border: 1px solid #e2e8e4;
+        border-radius: 8px;
+        background: #fbfcfb;
+      }
+      .lake-export-content ne-collapse .collapse-controller {
+        display: flex;
+        flex: 0 0 32px;
+        justify-content: center;
+        padding-top: 2px;
+      }
+      .lake-export-content ne-collapse .ne-collapse-fold-container {
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+      }
+      .lake-export-content ne-collapse .ne-collapse-folding-inner {
+        display: inline-grid;
+        place-items: center;
+        width: 22px;
+        height: 22px;
+        border-radius: 5px;
+        color: #69727a;
+        cursor: pointer;
+        transition:
+          background 120ms ease,
+          transform 120ms ease;
+      }
+      .lake-export-content ne-collapse .ne-collapse-folding-inner::before {
+        content: "▾";
+      }
+      .lake-export-content ne-collapse[ne-open="false"] .ne-collapse-folding-inner {
+        transform: rotate(-90deg);
+      }
+      .lake-export-content ne-collapse .ne-collapse-folding-inner:hover,
+      .lake-export-content ne-collapse .collapse-controller:focus-visible .ne-collapse-folding-inner {
+        background: #eef7f2;
+        color: #0f8f52;
+      }
+      .lake-export-content ne-collapse-content {
+        display: block;
+        flex: 1 1 auto;
+        min-width: 0;
+        max-width: calc(100% - 32px);
+      }
+      .lake-export-content ne-summary {
+        display: block;
+        margin: 0;
+        color: #202428;
+        font-weight: 650;
+      }
+      .lake-export-content ne-collapse[ne-open="false"] ne-collapse-content > * {
+        display: none;
+      }
+      .lake-export-content ne-collapse[ne-open="false"] ne-collapse-content > ne-summary {
+        display: block;
+      }
+      .lake-export-content :not(pre) > code,
+      .lake-export-content .ne-code {
+        padding: 2px 5px;
+        border: 1px solid #e2e7e4;
+        border-radius: 5px;
+        background: #f4f6f5;
+        color: #b42318;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        font-size: 0.92em;
+      }
+      pre {
+        overflow: auto;
+        padding: 14px;
+        border: 1px solid #dfe6e2;
+        border-radius: 8px;
+        background: #f8faf9;
+        color: #24292f;
+      }
+      .lake-export-codeblock {
+        overflow: hidden;
+        border: 1px solid #2f86ff;
+        border-radius: 8px;
+        background: #ffffff;
+        box-shadow: 0 1px 2px rgb(31 38 45 / 3%);
+      }
+      .lake-export-codeblock__toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        min-height: 50px;
+        padding: 0 14px 0 18px;
+        border-bottom: 1px solid #e8ecef;
+        background: #f7f7f7;
+        color: #2d3033;
+        cursor: pointer;
+        list-style: none;
+      }
+      .lake-export-codeblock__toolbar::-webkit-details-marker {
+        display: none;
+      }
+      .lake-export-codeblock:not([open]) .lake-export-codeblock__toolbar {
+        border-bottom: 0;
+      }
+      .lake-export-codeblock:not([open]) .lake-export-codeblock__caret {
+        transform: rotate(-90deg);
+      }
+      .lake-export-codeblock__start,
+      .lake-export-codeblock__actions {
+        display: inline-flex;
+        align-items: center;
+        min-width: 0;
+      }
+      .lake-export-codeblock__start {
+        flex: 1 1 auto;
+        gap: 18px;
+      }
+      .lake-export-codeblock__actions {
+        flex: 0 0 auto;
+        gap: 18px;
+        color: #2d3033;
+        font-size: 15px;
+        line-height: 1;
+      }
+      .lake-export-codeblock__caret {
+        flex: 0 0 auto;
+        color: #5d6469;
+        font-size: 16px;
+        line-height: 1;
+        transition: transform 120ms ease;
+      }
+      .lake-export-codeblock__title {
+        overflow: hidden;
+        color: #2b2f33;
+        font-size: 16px;
+        font-weight: 500;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .lake-export-codeblock__select {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        white-space: nowrap;
+      }
+      .lake-export-codeblock__select::after {
+        width: 8px;
+        height: 8px;
+        border-right: 2px solid currentColor;
+        border-bottom: 2px solid currentColor;
+        content: "";
+        transform: translateY(-2px) rotate(45deg);
+      }
+      .lake-export-codeblock__divider {
+        width: 1px;
+        height: 20px;
+        background: #e5e7e9;
+      }
+      .lake-export-codeblock__more {
+        color: #5c6268;
+        font-size: 18px;
+        line-height: 1;
+        letter-spacing: 2px;
+      }
+      .lake-export-codeblock__content {
+        overflow: auto;
+        background: #ffffff;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        font-size: 15px;
+        line-height: 1.65;
+      }
+      .lake-export-codeblock__table {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        min-width: max-content;
+        padding: 12px 0 14px;
+      }
+      .lake-export-codeblock__line-number,
+      .lake-export-codeblock__line {
+        min-height: 24px;
+        white-space: pre;
+      }
+      .lake-export-codeblock__line-number {
+        min-width: 48px;
+        padding: 0 18px 0 22px;
+        color: #70767a;
+        text-align: right;
+        user-select: none;
+      }
+      .lake-export-codeblock__line {
+        padding: 0 22px 0 4px;
+        color: #2f3439;
+      }
+      .lake-export-document-title {
+        margin: 0 0 32px;
+        padding-bottom: 18px;
+        border-bottom: 1px solid #edf0ee;
+        color: #202428;
+        font-size: clamp(28px, 4vw, 40px);
+        line-height: 1.25;
+      }
       .lake-export-expiration {
         margin: 0 0 18px;
         padding: 10px 12px;
@@ -249,14 +581,23 @@ export async function lakeDocumentToHtml(title: string, content: string): Promis
           max-width: none;
           margin: 0;
           padding: 0;
+          background: #ffffff;
         }
         .lake-export-shell {
           grid-template-columns: 150px minmax(0, 1fr);
           gap: 24px;
+          padding: 0;
         }
         .lake-export-outline {
           position: static;
+          border: 0;
+          box-shadow: none;
           font-size: 12px;
+        }
+        .lake-export-document {
+          padding: 0;
+          border: 0;
+          box-shadow: none;
         }
         .lake-export-resizer {
           display: none;
@@ -264,11 +605,11 @@ export async function lakeDocumentToHtml(title: string, content: string): Promis
       }
       @media (max-width: 920px) {
         body {
-          margin: 32px auto;
           padding: 0 20px;
         }
         .lake-export-shell {
           display: block;
+          padding: 28px 0;
         }
         .lake-export-outline {
           position: static;
@@ -276,6 +617,16 @@ export async function lakeDocumentToHtml(title: string, content: string): Promis
           margin-bottom: 28px;
           padding-bottom: 18px;
           border-bottom: 1px solid #dfe3e6;
+        }
+        .lake-export-document {
+          padding: 24px 20px;
+        }
+        .lake-export-content ne-columns-content {
+          flex-direction: column;
+        }
+        .lake-export-content ne-column + ne-column {
+          padding-top: 14px;
+          border-top: 1px solid #edf0ee;
         }
         .lake-export-resizer {
           display: none;
@@ -298,13 +649,58 @@ export async function lakeDocumentToHtml(title: string, content: string): Promis
       ></button>
       <main class="lake-export-document">
         <h1 class="lake-export-document-title">${escapeHtml(title)}</h1>
-        <article class="lake-export-content ne-doc-major-editor">
-          ${rendered.html}
+        <article class="ne-doc-major-viewer ne-viewer ne-typography-classic ne-paragraph-spacing-relax fz16">
+          <div class="lake-export-content ne-viewer-body">
+            ${rendered.html}
+          </div>
         </article>
       </main>
     </div>
     <script>
       (() => {
+        const initExportCollapses = () => {
+          document.querySelectorAll("ne-collapse").forEach((collapse) => {
+            if (!collapse.hasAttribute("ne-open")) {
+              collapse.setAttribute("ne-open", "true");
+            }
+
+            const updateExpandedState = () => {
+              const expanded = collapse.getAttribute("ne-open") !== "false";
+              collapse.querySelectorAll(".collapse-controller, ne-summary").forEach((trigger) => {
+                trigger.setAttribute("aria-expanded", String(expanded));
+              });
+            };
+            const toggle = () => {
+              const expanded = collapse.getAttribute("ne-open") !== "false";
+              collapse.setAttribute("ne-open", expanded ? "false" : "true");
+              updateExpandedState();
+            };
+            const triggers = collapse.querySelectorAll(".collapse-controller, ne-summary");
+            triggers.forEach((trigger) => {
+              trigger.setAttribute("role", "button");
+              trigger.setAttribute("tabindex", "0");
+              trigger.addEventListener("click", (event) => {
+                const target = event.target;
+                if (target instanceof Element && target.closest("a, button, input, textarea, select")) {
+                  return;
+                }
+                event.preventDefault();
+                toggle();
+              });
+              trigger.addEventListener("keydown", (event) => {
+                if (event.key !== "Enter" && event.key !== " ") {
+                  return;
+                }
+                event.preventDefault();
+                toggle();
+              });
+            });
+            updateExpandedState();
+          });
+        };
+
+        initExportCollapses();
+
         const shell = document.querySelector(".lake-export-shell");
         const resizer = document.querySelector(".lake-export-resizer");
         if (!shell || !resizer) {
@@ -483,6 +879,67 @@ export async function lakeWorkspaceMarkdownEntriesWithResources(
 
 export function workspaceEntriesToZip(entries: WorkspaceZipEntryInput[]): Uint8Array {
   return createZip(entries);
+}
+
+export function analyzeLakeDocumentExportResources(
+  content: string,
+  format: DocumentExportFormat,
+  options: LakeDocumentResourceExportOptions,
+): LakeDocumentExportResourceUsage {
+  const usage: LakeDocumentExportResourceUsage = {
+    hasResources: false,
+    hasImageResources: false,
+    hasFileResources: false,
+  };
+
+  if (format === "markdown") {
+    for (const match of content.matchAll(markdownLinkPattern)) {
+      const isImageLink = match[1] === "!";
+      const label = match[2] ?? "";
+      const url = match[3] ?? "";
+      const resource = resolveExportResource(url, options, {
+        kind: isImageLink ? "image" : "file",
+        name: label || undefined,
+      });
+      markExportResourceUsage(usage, resource, isImageLink);
+    }
+    return usage;
+  }
+
+  const template = document.createElement("template");
+  template.innerHTML = content;
+
+  for (const image of Array.from(template.content.querySelectorAll("img[src]"))) {
+    const src = image.getAttribute("src");
+    const resource = src ? resolveExportResource(src, options, {
+      kind: "image",
+      name: image.getAttribute("alt") ?? undefined,
+    }) : null;
+    markExportResourceUsage(usage, resource, true);
+  }
+
+  for (const card of Array.from(template.content.querySelectorAll("card[name='file'], card[name='localdoc']"))) {
+    const value = decodeLakeCardValue(card.getAttribute("value"));
+    const resource = typeof value?.src === "string" ? resolveExportResource(value.src, options, {
+      kind: "file",
+      name: typeof value.name === "string" ? value.name : undefined,
+      size: typeof value.size === "number" ? value.size : undefined,
+      mimeType: typeof value.type === "string" ? value.type : undefined,
+    }) : null;
+    markExportResourceUsage(usage, resource, false);
+  }
+
+  for (const link of Array.from(template.content.querySelectorAll("a[href]"))) {
+    const href = link.getAttribute("href");
+    const resource = href ? resolveExportResource(href, options, {
+      kind: "file",
+      name: exportLinkName(link),
+    }) : null;
+    // 普通链接即使指向图片，也不能像正文图片一样内嵌；否则用户原本的下载链接会变成不可预期的大型 data URL。
+    markExportResourceUsage(usage, resource, false);
+  }
+
+  return usage;
 }
 
 export function createOfficialLakeMarkdownConverter(): OfficialLakeMarkdownConverter {
@@ -669,6 +1126,7 @@ function renderHtmlExportContent(content: string): { html: string; headings: Exp
   const template = document.createElement("template");
   template.innerHTML = content;
   const headings = collectAndMarkHeadings(template.content);
+  renderCodeblocks(template.content);
   renderAttachmentCards(template.content);
   return {
     headings,
@@ -694,6 +1152,150 @@ function collectAndMarkHeadings(root: DocumentFragment): ExportHeading[] {
     });
   });
   return headings;
+}
+
+function renderCodeblocks(root: DocumentFragment): void {
+  root.querySelectorAll("pre").forEach((pre, index) => {
+    if (pre.closest(".lake-export-codeblock")) {
+      return;
+    }
+
+    const language = readCodeblockLanguage(pre);
+    const languageLabel = codeblockLanguageLabel(language);
+    const themeLabel = readCodeblockTheme(pre);
+    const title = readCodeblockTitle(pre, index);
+    const codeText = pre.textContent ?? "";
+    const codeLines = splitCodeLines(codeText);
+    const details = document.createElement("details");
+    details.className = "lake-export-codeblock";
+    details.open = true;
+
+    const summary = document.createElement("summary");
+    summary.className = "lake-export-codeblock__toolbar";
+
+    const start = document.createElement("span");
+    start.className = "lake-export-codeblock__start";
+
+    const caret = document.createElement("span");
+    caret.className = "lake-export-codeblock__caret";
+    caret.setAttribute("aria-hidden", "true");
+    caret.textContent = "▾";
+    start.append(caret);
+
+    const titleNode = document.createElement("span");
+    titleNode.className = "lake-export-codeblock__title";
+    titleNode.textContent = title;
+    start.append(titleNode);
+
+    const actions = document.createElement("span");
+    actions.className = "lake-export-codeblock__actions";
+    actions.append(
+      codeblockToolbarSelect("language", languageLabel),
+      codeblockDivider(),
+      codeblockToolbarSelect("theme", themeLabel),
+      codeblockDivider(),
+    );
+
+    const more = document.createElement("span");
+    more.className = "lake-export-codeblock__more";
+    more.setAttribute("aria-label", "更多");
+    more.textContent = "•••";
+    actions.append(more);
+
+    const content = document.createElement("div");
+    content.className = "lake-export-codeblock__content";
+    const codeTable = document.createElement("div");
+    codeTable.className = "lake-export-codeblock__table";
+    codeLines.forEach((line, lineIndex) => {
+      const lineNumber = document.createElement("span");
+      lineNumber.className = "lake-export-codeblock__line-number";
+      lineNumber.textContent = String(lineIndex + 1);
+      const lineNode = document.createElement("span");
+      lineNode.className = "lake-export-codeblock__line";
+      lineNode.textContent = line;
+      codeTable.append(lineNumber, lineNode);
+    });
+    content.append(codeTable);
+
+    summary.append(start, actions);
+    details.append(summary, content);
+    pre.replaceWith(details);
+  });
+}
+
+function codeblockToolbarSelect(kind: string, label: string): HTMLSpanElement {
+  const node = document.createElement("span");
+  node.className = `lake-export-codeblock__select lake-export-codeblock__select--${kind}`;
+  node.textContent = label;
+  return node;
+}
+
+function codeblockDivider(): HTMLSpanElement {
+  const node = document.createElement("span");
+  node.className = "lake-export-codeblock__divider";
+  node.setAttribute("aria-hidden", "true");
+  return node;
+}
+
+function readCodeblockLanguage(pre: Element): string {
+  const dataLanguage = pre.getAttribute("data-language")?.trim();
+  if (dataLanguage) {
+    return dataLanguage;
+  }
+
+  const languageClass = Array.from(pre.classList)
+    .find((className) => className.startsWith("language-"));
+  return languageClass?.replace(/^language-/, "").trim() ?? "";
+}
+
+function readCodeblockTitle(pre: Element, index: number): string {
+  for (const attribute of ["data-title", "data-name", "data-filename", "title"]) {
+    const value = pre.getAttribute(attribute)?.trim();
+    if (value) {
+      return value;
+    }
+  }
+  return `代码块 ${index + 1}`;
+}
+
+function readCodeblockTheme(pre: Element): string {
+  return pre.getAttribute("theme")?.trim() ||
+    pre.getAttribute("data-theme")?.trim() ||
+    "Yuque Light Pro";
+}
+
+function codeblockLanguageLabel(language: string): string {
+  const normalized = language.trim().toLowerCase();
+  if (!normalized || normalized === "plain" || normalized === "plaintext" || normalized === "text") {
+    return "Plain Text";
+  }
+
+  const knownLabels: Record<string, string> = {
+    bash: "Bash",
+    css: "CSS",
+    html: "HTML",
+    js: "JavaScript",
+    javascript: "JavaScript",
+    json: "JSON",
+    md: "Markdown",
+    markdown: "Markdown",
+    shell: "Shell",
+    sh: "Shell",
+    sql: "SQL",
+    ts: "TypeScript",
+    tsx: "TSX",
+    txt: "Plain Text",
+    typescript: "TypeScript",
+    xml: "XML",
+    yaml: "YAML",
+    yml: "YAML",
+  };
+  return knownLabels[normalized] ?? language;
+}
+
+function splitCodeLines(value: string): string[] {
+  const normalized = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n+$/g, "");
+  return normalized ? normalized.split("\n") : [""];
 }
 
 function renderAttachmentCards(root: DocumentFragment): void {
@@ -951,8 +1553,9 @@ async function rewriteMarkdownResourceReferences(
   if (!options.loadResource) {
     throw new Error("缺少本地资源包读取器");
   }
+  const loadResource = options.loadResource;
 
-  const writer = createBundleResourceWriter(options.loadResource);
+  const writer = createBundleResourceWriter(loadResource);
   const content = await replaceMarkdownLinks(markdown, async (url, label, isImage) => {
     const resource = resolveExportResource(url, options, {
       kind: isImage ? "image" : "file",
@@ -960,6 +1563,9 @@ async function rewriteMarkdownResourceReferences(
     });
     if (!resource) {
       return url;
+    }
+    if (bundle.inlineImages && isImage && resource.resource.kind === "image") {
+      return resourceToOptimizedImageDataUrl(resource.resourceRef, loadResource, resourceMimeType(resource.resource));
     }
     const prefix = isImage ? bundle.assetPrefix ?? "assets" : bundle.attachmentPrefix ?? "attachments";
     const path = await writer.add(resource.resourceRef, resourceFileName(resource.resource, label), prefix);
@@ -973,11 +1579,10 @@ async function replaceMarkdownLinks(
   markdown: string,
   replace: (url: string, label: string, isImage: boolean) => Promise<string>,
 ): Promise<string> {
-  const linkPattern = /(!?)\[([^\]]*)\]\(([^)\s]+)\)/g;
   let output = "";
   let lastIndex = 0;
 
-  for (const match of markdown.matchAll(linkPattern)) {
+  for (const match of markdown.matchAll(markdownLinkPattern)) {
     const index = match.index ?? 0;
     output += markdown.slice(lastIndex, index);
     const isImage = match[1] === "!";
@@ -988,6 +1593,25 @@ async function replaceMarkdownLinks(
   }
 
   return output + markdown.slice(lastIndex);
+}
+
+const markdownLinkPattern = /(!?)\[([^\]]*)\]\(([^)\s]+)\)/g;
+
+function markExportResourceUsage(
+  usage: LakeDocumentExportResourceUsage,
+  resource: ResolvedExportResource | null,
+  canInlineAsImage: boolean,
+): void {
+  if (!resource) {
+    return;
+  }
+
+  usage.hasResources = true;
+  if (canInlineAsImage && resource.resource.kind === "image") {
+    usage.hasImageResources = true;
+    return;
+  }
+  usage.hasFileResources = true;
 }
 
 function resolveExportResource(

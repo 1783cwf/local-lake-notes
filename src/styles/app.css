@@ -3123,9 +3123,9 @@ button {
 
 .multitable-card {
   display: grid;
-  gap: 18px;
+  gap: 16px;
   min-height: 178px;
-  padding: 26px 28px 24px;
+  padding: 24px 26px 24px;
   border: 1px solid #e6e8ec;
   border-radius: 9px;
   background: var(--multitable-panel);
@@ -3157,8 +3157,8 @@ button {
 
 .multitable-card__title-row {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) 20px;
+  gap: 8px;
   align-items: start;
 }
 
@@ -3166,26 +3166,30 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 22px;
-  color: #b0b7c3;
+  width: 20px;
+  height: 24px;
+  color: #c0c6d0;
   background: transparent;
   cursor: grab;
+  opacity: 0.6;
   pointer-events: none;
-  transition: color 0.16s ease;
+  transition:
+    color 0.16s ease,
+    opacity 0.16s ease;
 }
 
-.multitable-card__drag:hover {
-  color: var(--multitable-blue);
+.multitable-card:hover .multitable-card__drag {
+  color: #8f959e;
+  opacity: 1;
 }
 
 .multitable-card h3 {
   margin: 0;
   overflow-wrap: anywhere;
   color: var(--multitable-text);
-  font-size: 17px;
-  font-weight: 500;
-  line-height: 1.4;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.45;
 }
 
 .multitable-card__fields {
