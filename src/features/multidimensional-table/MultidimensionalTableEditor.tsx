@@ -905,7 +905,9 @@ function ToolbarPanel({
                     onUpdate={(value) => onUpdateFilterRule(rule.id, { ...rule, operator: selectedOperator, value })}
                   />
                 ) : (
-                  <div className="multitable-filter-panel__empty-value" aria-hidden="true">无需填写</div>
+                  <div className="multitable-filter-panel__empty-value" aria-hidden="true">
+                    {filterOperatorEmptyValueHint(selectedOperator)}
+                  </div>
                 )}
                 <button
                   type="button"
@@ -1082,7 +1084,7 @@ function filterRecordByRule(
   if (rule.operator === "isNotEmpty") {
     return !isEmptyFieldValue(value);
   }
-  if (!filterOperatorNeedsValue(rule.operator)) {
+  if (!filterOperatorNeedsValue(rule.operator) && !isRelativeTimeFilterOperator(rule.operator)) {
     return true;
   }
 
@@ -1149,9 +1151,18 @@ function compareNumericValue(value: MultidimensionalTableFieldValue | undefined,
 
 function compareTimeValue(value: MultidimensionalTableFieldValue | undefined, rule: MultidimensionalTableFilterRule): boolean {
   const currentTime = comparableTimeValue(typeof value === "string" ? value : "");
+  const relativeRange = relativeTimeRangeForOperator(rule.operator);
+  if (relativeRange) {
+    return currentTime !== null && currentTime >= relativeRange.start && currentTime < relativeRange.end;
+  }
+
   const filterTime = comparableTimeValue(rule.value ?? "");
   if (currentTime === null || filterTime === null) {
     return false;
+  }
+  if ((rule.operator === "equals" || rule.operator === "is") && isDateOnlyValue(rule.value ?? "")) {
+    const dayEnd = addDays(new Date(filterTime), 1).getTime();
+    return currentTime >= filterTime && currentTime < dayEnd;
   }
   if (rule.operator === "before") {
     return currentTime < filterTime;
@@ -1229,10 +1240,26 @@ function filterOperatorsForField(field: MultidimensionalTableField): Array<{
     ];
   }
   if (field.type === "time") {
+    const dateRangeOperators = isTimeOnlyField(field)
+      ? []
+      : [
+        { operator: "today", label: "今天" },
+        { operator: "yesterday", label: "昨天" },
+        { operator: "thisWeek", label: "本周" },
+        { operator: "lastWeek", label: "上周" },
+        { operator: "thisMonth", label: "本月" },
+        { operator: "lastMonth", label: "上个月" },
+        { operator: "last7Days", label: "最近7天" },
+        { operator: "last30Days", label: "最近30天" },
+      ] satisfies Array<{
+        operator: MultidimensionalTableFilterOperator;
+        label: string;
+      }>;
     return [
       { operator: "equals", label: "等于" },
       { operator: "before", label: "早于" },
       { operator: "after", label: "晚于" },
+      ...dateRangeOperators,
       { operator: "isEmpty", label: "为空" },
       { operator: "isNotEmpty", label: "非空" },
     ];
@@ -1263,7 +1290,11 @@ function defaultFilterOperatorForField(field: MultidimensionalTableField): Multi
 }
 
 function filterOperatorNeedsValue(operator: MultidimensionalTableFilterOperator): boolean {
-  return operator !== "isEmpty" && operator !== "isNotEmpty";
+  return operator !== "isEmpty" && operator !== "isNotEmpty" && !isRelativeTimeFilterOperator(operator);
+}
+
+function filterOperatorEmptyValueHint(operator: MultidimensionalTableFilterOperator): string {
+  return isRelativeTimeFilterOperator(operator) ? "按当前日期自动计算" : "无需填写";
 }
 
 function comparableTimeValue(value: string): number | null {
@@ -1282,13 +1313,18 @@ function comparableTimeValue(value: string): number | null {
     return null;
   }
 
-  const normalizedText = text
-    .replace(/年|月/g, "-")
-    .replace(/日/g, "")
-    .replace(/\//g, "-")
-    .replace(/\s+/, "T");
-  const timestamp = Date.parse(normalizedText);
-  return Number.isNaN(timestamp) ? null : timestamp;
+  const dateTimeMatch = text.match(/^(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})(?:日)?(?:[ T](\d{1,2}):(\d{1,2}))?$/);
+  if (!dateTimeMatch) {
+    return null;
+  }
+
+  return localDateTimestamp(
+    Number(dateTimeMatch[1]),
+    Number(dateTimeMatch[2]),
+    Number(dateTimeMatch[3]),
+    dateTimeMatch[4] ? Number(dateTimeMatch[4]) : 0,
+    dateTimeMatch[5] ? Number(dateTimeMatch[5]) : 0,
+  );
 }
 
 function dateInputValue(value: string): string {
@@ -1299,6 +1335,91 @@ function dateInputValue(value: string): string {
   }
 
   return `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
+}
+
+function isTimeOnlyField(field: MultidimensionalTableField): boolean {
+  return (field.timeFormat ?? "").trim() === "hh:mm";
+}
+
+function isRelativeTimeFilterOperator(operator: MultidimensionalTableFilterOperator): boolean {
+  return operator === "today" ||
+    operator === "yesterday" ||
+    operator === "thisWeek" ||
+    operator === "lastWeek" ||
+    operator === "thisMonth" ||
+    operator === "lastMonth" ||
+    operator === "last7Days" ||
+    operator === "last30Days";
+}
+
+function relativeTimeRangeForOperator(operator: MultidimensionalTableFilterOperator): { start: number; end: number } | null {
+  const today = startOfDay(new Date());
+
+  // 相对日期条件按本地自然日计算；周范围使用周一作为开始，符合中文语境下“本周/上周”的常见理解。
+  if (operator === "today") {
+    return { start: today.getTime(), end: addDays(today, 1).getTime() };
+  }
+  if (operator === "yesterday") {
+    return { start: addDays(today, -1).getTime(), end: today.getTime() };
+  }
+  if (operator === "thisWeek") {
+    const start = startOfWeek(today);
+    return { start: start.getTime(), end: addDays(start, 7).getTime() };
+  }
+  if (operator === "lastWeek") {
+    const thisWeekStart = startOfWeek(today);
+    return { start: addDays(thisWeekStart, -7).getTime(), end: thisWeekStart.getTime() };
+  }
+  if (operator === "thisMonth") {
+    const start = new Date(today.getFullYear(), today.getMonth(), 1);
+    const end = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+    return { start: start.getTime(), end: end.getTime() };
+  }
+  if (operator === "lastMonth") {
+    const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const end = new Date(today.getFullYear(), today.getMonth(), 1);
+    return { start: start.getTime(), end: end.getTime() };
+  }
+  if (operator === "last7Days") {
+    return { start: addDays(today, -6).getTime(), end: addDays(today, 1).getTime() };
+  }
+  if (operator === "last30Days") {
+    return { start: addDays(today, -29).getTime(), end: addDays(today, 1).getTime() };
+  }
+
+  return null;
+}
+
+function localDateTimestamp(year: number, month: number, day: number, hour: number, minute: number): number | null {
+  const date = new Date(year, month - 1, day, hour, minute);
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day ||
+    date.getHours() !== hour ||
+    date.getMinutes() !== minute
+  ) {
+    return null;
+  }
+  return date.getTime();
+}
+
+function isDateOnlyValue(value: string): boolean {
+  return /^(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})(?:日)?$/.test(value.trim());
+}
+
+function startOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function startOfWeek(date: Date): Date {
+  const day = date.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  return addDays(startOfDay(date), mondayOffset);
+}
+
+function addDays(date: Date, days: number): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
 }
 
 function isEmptyFieldValue(value: MultidimensionalTableFieldValue | undefined): boolean {

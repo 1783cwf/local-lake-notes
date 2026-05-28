@@ -35,6 +35,14 @@ export type MultidimensionalTableFilterOperator =
   | "equals"
   | "before"
   | "after"
+  | "today"
+  | "yesterday"
+  | "thisWeek"
+  | "lastWeek"
+  | "thisMonth"
+  | "lastMonth"
+  | "last7Days"
+  | "last30Days"
   | "greaterThan"
   | "lessThan";
 
@@ -870,6 +878,14 @@ function isFilterOperator(value: unknown): value is MultidimensionalTableFilterO
     value === "equals" ||
     value === "before" ||
     value === "after" ||
+    value === "today" ||
+    value === "yesterday" ||
+    value === "thisWeek" ||
+    value === "lastWeek" ||
+    value === "thisMonth" ||
+    value === "lastMonth" ||
+    value === "last7Days" ||
+    value === "last30Days" ||
     value === "greaterThan" ||
     value === "lessThan";
 }

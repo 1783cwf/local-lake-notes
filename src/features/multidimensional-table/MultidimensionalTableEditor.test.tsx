@@ -276,6 +276,76 @@ test("筛选支持多规则并保存到当前视图", async () => {
   expect(screen.getByRole("button", { name: "2个筛选" })).toBeInTheDocument();
 });
 
+test("日期筛选支持本周、上个月和最近7天范围", async () => {
+  const user = userEvent.setup();
+  const table = createDefaultMultidimensionalTableDocument();
+  const today = new Date();
+  const recentDate = addTestDays(today, -3);
+  const lastMonthDate = new Date(today.getFullYear(), today.getMonth() - 1, 15, 9, 0, 0);
+  const currentWeekRecord = createEmptyMultidimensionalTableRecord(table.fields, {
+    title: "本周任务",
+    status: "status-single-1",
+    date: formatTestDateTime(today),
+  });
+  const recentRecord = createEmptyMultidimensionalTableRecord(table.fields, {
+    title: "最近任务",
+    status: "status-single-1",
+    date: formatTestDateTime(recentDate),
+  });
+  const lastMonthRecord = createEmptyMultidimensionalTableRecord(table.fields, {
+    title: "上月任务",
+    status: "status-single-1",
+    date: formatTestDateTime(lastMonthDate),
+  });
+  let savedContent = "";
+  const onSave = vi.fn(async (_path: string, content: string) => {
+    savedContent = content;
+  });
+
+  renderEditor({
+    onSave,
+    content: serializeMultidimensionalTableDocument({
+      ...table,
+      activeViewId: "view-board",
+      records: [currentWeekRecord, recentRecord, lastMonthRecord],
+    }),
+  });
+
+  await user.click(screen.getByRole("button", { name: "筛选" }));
+  await user.click(screen.getByRole("button", { name: "添加筛选规则" }));
+  await user.selectOptions(screen.getByLabelText("筛选字段 1"), "date");
+  await waitFor(() => {
+    expect(screen.getByLabelText("筛选条件 1")).toHaveValue("equals");
+  });
+  await user.selectOptions(screen.getByLabelText("筛选条件 1"), "thisWeek");
+  await waitFor(() => {
+    expect(screen.getByLabelText("筛选条件 1")).toHaveValue("thisWeek");
+  });
+
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: /本周任务/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /上月任务/ })).not.toBeInTheDocument();
+  });
+
+  await user.selectOptions(screen.getByLabelText("筛选条件 1"), "lastMonth");
+  await waitFor(() => {
+    expect(screen.queryByRole("button", { name: /本周任务/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /上月任务/ })).toBeInTheDocument();
+  });
+
+  await user.selectOptions(screen.getByLabelText("筛选条件 1"), "last7Days");
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: /本周任务/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /最近任务/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /上月任务/ })).not.toBeInTheDocument();
+    expect(screen.getByText("按当前日期自动计算")).toBeInTheDocument();
+  });
+
+  await waitFor(() => {
+    expect(savedContent).toContain("\"operator\": \"last7Days\"");
+  });
+});
+
 test("表格视图编辑文本字段后会防抖保存", async () => {
   const user = userEvent.setup();
   const onSave = vi.fn(async () => undefined);
@@ -722,4 +792,15 @@ function renderEditor({
       onSaveStatusChange={vi.fn()}
     />,
   );
+}
+
+function addTestDays(date: Date, days: number): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 9, 0, 0);
+}
+
+function formatTestDateTime(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}T09:00`;
 }
