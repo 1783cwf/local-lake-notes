@@ -173,6 +173,11 @@ interface AppOperationState {
   count?: number;
 }
 
+interface EditorScrollSnapshot {
+  top: number;
+  left: number;
+}
+
 const selectionActionTypes = new Set<AiDocumentActionType>([
   "rewrite",
   "polish",
@@ -241,6 +246,8 @@ export function AppController() {
   const [sidebarWidth, setSidebarWidth] = useState(296);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [textDialog, setTextDialog] = useState<TextDialogState | null>(null);
+  const editorWorkspaceRef = useRef<HTMLElement | null>(null);
+  const tabScrollSnapshotsRef = useRef(new Map<string, EditorScrollSnapshot>());
   const saveCurrentEditorNowRef = useRef<(() => Promise<void>) | null>(null);
   const readCurrentLakeContentRef = useRef<(() => string) | null>(null);
   const readCurrentLakeSelectionRef = useRef<(() => string | null) | null>(null);
@@ -348,6 +355,7 @@ export function AppController() {
   }, []);
 
   const clearOpenDocumentTabs = useCallback(() => {
+    tabScrollSnapshotsRef.current.clear();
     setOpenTabs([]);
     setActiveTabId(null);
     setCurrentDocument(null);
@@ -368,13 +376,25 @@ export function AppController() {
     }
 
     try {
+      saveTabScrollSnapshot(tabScrollSnapshotsRef.current, editorWorkspaceRef.current, currentDocument?.entry.path ?? null);
       await saveCurrentEditorNowRef.current?.();
       return true;
     } catch (error) {
       setAppError(toMessage(error));
       return false;
     }
-  }, [saveStatus.state]);
+  }, [currentDocument?.entry.path, saveStatus.state]);
+
+  useEffect(() => {
+    if (!currentDocument) {
+      return;
+    }
+
+    // 编辑器由第三方运行时挂载，切换页签后需要等内部滚动容器出现再恢复位置。
+    return scheduleTabScrollRestore(() => {
+      restoreTabScrollSnapshot(tabScrollSnapshotsRef.current, editorWorkspaceRef.current, currentDocument.entry.path);
+    });
+  }, [currentDocument?.entry.path]);
 
   const activateDocumentTab = useCallback(async (
     tabId: string,
@@ -440,6 +460,9 @@ export function AppController() {
         ? openTabs.map((tab) => (tab.id === activeTab.id ? nextTab : tab))
         : [...openTabs, nextTab];
 
+      if (activeTab && !activeTab.locked && activeTab.path !== nextTab.path) {
+        deleteTabScrollSnapshot(tabScrollSnapshotsRef.current, activeTab.path);
+      }
       setOpenTabs(nextTabs);
       await activateDocumentTab(nextTab.id, nextTabs, candidateWorkspace);
     } catch (error) {
@@ -464,6 +487,7 @@ export function AppController() {
     }
 
     if (tabId !== activeTabId) {
+      deleteTabScrollSnapshot(tabScrollSnapshotsRef.current, closingTab.path);
       setOpenTabs(openTabs.filter((tab) => tab.id !== tabId));
       return;
     }
@@ -474,6 +498,7 @@ export function AppController() {
 
     try {
       const nextTabs = openTabs.filter((tab) => tab.id !== tabId);
+      deleteTabScrollSnapshot(tabScrollSnapshotsRef.current, closingTab.path);
       setOpenTabs(nextTabs);
       const nextTab = nextTabs[closingIndex] ?? nextTabs[closingIndex - 1] ?? null;
       if (nextTab) {
@@ -702,6 +727,7 @@ export function AppController() {
       setWorkspace(payload);
       const extension = documentExtension(document);
       const nextPath = document.parentPath ? `${document.parentPath}/${nextName}${extension}` : `${nextName}${extension}`;
+      rewriteTabScrollSnapshot(tabScrollSnapshotsRef.current, document.path, nextPath);
       const nextTabs = rewriteOpenTabs(openTabs, document.path, nextPath);
       setOpenTabs(nextTabs);
       if (activeTabId === document.path) {
@@ -738,6 +764,7 @@ export function AppController() {
           ? await deleteMultidimensionalTableDocument(document.path)
           : await deleteLakeDocument(document.path);
       setWorkspace(payload);
+      deleteTabScrollSnapshot(tabScrollSnapshotsRef.current, document.path);
       const nextTabs = openTabs.filter((tab) => tab.path !== document.path);
       setOpenTabs(nextTabs);
       if (currentDocument?.entry.path === document.path) {
@@ -777,6 +804,7 @@ export function AppController() {
           const payload = await renameLakeDirectory(directory.path, nextName);
           setWorkspace(payload);
           const nextPrefix = directory.parentPath ? `${directory.parentPath}/${nextName}` : nextName;
+          rewriteTabScrollSnapshotsByPrefix(tabScrollSnapshotsRef.current, directory.path, nextPrefix);
           const nextTabs = rewriteOpenTabsByPrefix(openTabs, directory.path, nextPrefix);
           setOpenTabs(nextTabs);
           if (activeTabId && isSameOrChildPath(activeTabId, directory.path)) {
@@ -802,6 +830,7 @@ export function AppController() {
     try {
       const payload = await deleteLakeDirectory(directory.path);
       setWorkspace(payload);
+      deleteTabScrollSnapshotsByPrefix(tabScrollSnapshotsRef.current, directory.path);
       const nextTabs = openTabs.filter((tab) => !isSameOrChildPath(tab.path, directory.path));
       setOpenTabs(nextTabs);
       if (currentDocument?.entry.path.startsWith(`${directory.path}/`)) {
@@ -1491,6 +1520,8 @@ export function AppController() {
     const previousActiveTabId = activeTabId;
     const optimisticWorkspace = applyWorkspaceMove(workspace, move);
     const optimisticTabs = rebindOpenTabsForMove(openTabs, optimisticWorkspace, move).tabs;
+    const previousScrollSnapshots = new Map(tabScrollSnapshotsRef.current);
+    rebindTabScrollSnapshotsForMove(tabScrollSnapshotsRef.current, move);
     setWorkspace(optimisticWorkspace);
     setOpenTabs(optimisticTabs);
     if (activeTabId && pathMovesWithResolution(activeTabId, move)) {
@@ -1506,6 +1537,8 @@ export function AppController() {
       });
       const currentBinding = rebindCurrentDocument(currentDocument, payload, move);
       const tabBinding = rebindOpenTabsForMove(openTabs, payload, move);
+      tabScrollSnapshotsRef.current = previousScrollSnapshots;
+      rebindTabScrollSnapshotsForMove(tabScrollSnapshotsRef.current, move);
       setWorkspace(payload);
       setOpenTabs(tabBinding.tabs);
       if (activeTabId && pathMovesWithResolution(activeTabId, move)) {
@@ -1519,6 +1552,7 @@ export function AppController() {
       setOpenTabs(previousOpenTabs);
       setActiveTabId(previousActiveTabId);
       setCurrentDocument(previousCurrentDocument);
+      tabScrollSnapshotsRef.current = previousScrollSnapshots;
       setAppError(toMessage(error));
     }
   }, [activeTabId, currentDocument, openTabs, workspace]);
@@ -1589,7 +1623,7 @@ export function AppController() {
         onPointerDown={beginSidebarResize}
         onToggleCollapsed={() => setSidebarCollapsed((current) => !current)}
       />
-      <main className="editor-workspace">
+      <main ref={editorWorkspaceRef} className="editor-workspace">
         <TopBar
           document={currentDocument?.entry ?? null}
           openTabs={visibleOpenTabs}
@@ -1793,6 +1827,148 @@ export function AppController() {
 
 function toMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+const editorScrollContainerSelectors = [
+  ".lake-editor-root .ne-editor-wrap",
+  ".multitable-grid",
+  ".multitable-board",
+  ".spreadsheet-editor-container",
+  ".spreadsheet-editor-host",
+  ".lake-editor-root",
+  ".multitable-editor-root",
+  ".spreadsheet-editor-root",
+];
+
+function saveTabScrollSnapshot(
+  snapshots: Map<string, EditorScrollSnapshot>,
+  workspaceElement: HTMLElement | null,
+  documentPath: string | null,
+): void {
+  if (!documentPath) {
+    return;
+  }
+
+  const scrollElement = findEditorScrollContainer(workspaceElement);
+  if (!scrollElement) {
+    snapshots.delete(documentPath);
+    return;
+  }
+
+  snapshots.set(documentPath, {
+    top: scrollElement.scrollTop,
+    left: scrollElement.scrollLeft,
+  });
+}
+
+function restoreTabScrollSnapshot(
+  snapshots: Map<string, EditorScrollSnapshot>,
+  workspaceElement: HTMLElement | null,
+  documentPath: string,
+): void {
+  const snapshot = snapshots.get(documentPath);
+  if (!snapshot) {
+    return;
+  }
+
+  const scrollElement = findEditorScrollContainer(workspaceElement);
+  if (!scrollElement) {
+    return;
+  }
+
+  scrollElement.scrollTo?.({ top: snapshot.top, left: snapshot.left });
+  scrollElement.scrollTop = snapshot.top;
+  scrollElement.scrollLeft = snapshot.left;
+}
+
+function findEditorScrollContainer(workspaceElement: HTMLElement | null): HTMLElement | null {
+  if (!workspaceElement) {
+    return null;
+  }
+
+  const candidates = editorScrollContainerSelectors
+    .flatMap((selector) => Array.from(workspaceElement.querySelectorAll<HTMLElement>(selector)));
+
+  // 优先记录已经发生过滚动的内部容器；没有滚动时再落到第一个编辑器滚动面。
+  return candidates.find((element) => element.scrollTop > 0 || element.scrollLeft > 0) ?? candidates[0] ?? null;
+}
+
+function scheduleTabScrollRestore(restore: () => void): () => void {
+  let timeoutId: number | null = null;
+  let frameId: number | null = window.requestAnimationFrame(() => {
+    restore();
+    timeoutId = window.setTimeout(restore, 0);
+  });
+
+  return () => {
+    if (frameId !== null) {
+      window.cancelAnimationFrame(frameId);
+      frameId = null;
+    }
+    if (timeoutId !== null) {
+      window.clearTimeout(timeoutId);
+      timeoutId = null;
+    }
+  };
+}
+
+function rewriteTabScrollSnapshot(
+  snapshots: Map<string, EditorScrollSnapshot>,
+  fromPath: string,
+  toPath: string,
+): void {
+  const snapshot = snapshots.get(fromPath);
+  if (!snapshot) {
+    return;
+  }
+
+  snapshots.delete(fromPath);
+  snapshots.set(toPath, snapshot);
+}
+
+function rewriteTabScrollSnapshotsByPrefix(
+  snapshots: Map<string, EditorScrollSnapshot>,
+  fromPath: string,
+  toPath: string,
+): void {
+  for (const [path, snapshot] of Array.from(snapshots.entries())) {
+    if (!isSameOrChildPath(path, fromPath)) {
+      continue;
+    }
+
+    snapshots.delete(path);
+    snapshots.set(replacePathPrefix(path, fromPath, toPath), snapshot);
+  }
+}
+
+function deleteTabScrollSnapshot(snapshots: Map<string, EditorScrollSnapshot>, path: string): void {
+  snapshots.delete(path);
+}
+
+function deleteTabScrollSnapshotsByPrefix(snapshots: Map<string, EditorScrollSnapshot>, path: string): void {
+  for (const key of Array.from(snapshots.keys())) {
+    if (isSameOrChildPath(key, path)) {
+      snapshots.delete(key);
+    }
+  }
+}
+
+function rebindTabScrollSnapshotsForMove(
+  snapshots: Map<string, EditorScrollSnapshot>,
+  move: WorkspaceMoveResolution,
+): void {
+  if (!move.ok) {
+    return;
+  }
+
+  for (const [path, snapshot] of Array.from(snapshots.entries())) {
+    if (!pathMovesWithResolution(path, move)) {
+      continue;
+    }
+
+    snapshots.delete(path);
+    snapshots.set(rewriteMovedPath(path, move), snapshot);
+  }
 }
 
 function formatExportLabel(format: DocumentExportFormat): string {

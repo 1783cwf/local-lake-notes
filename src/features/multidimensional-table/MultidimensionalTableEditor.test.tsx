@@ -527,7 +527,7 @@ test("看板带日期筛选时新增记录会直接打开详情", async () => {
     activeViewId: "view-board",
     records: [],
     views: table.views.map((view) => view.id === "view-board"
-      ? { ...view, filterRules: [{ id: "filter-date", fieldId: "date", operator: "thisWeek" }] }
+      ? { ...view, filterRules: [{ id: "filter-date", fieldId: "date", operator: "isNotEmpty" }] }
       : view),
   });
 

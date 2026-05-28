@@ -820,6 +820,59 @@ test("再次打开已经存在的标签只激活已有标签", async () => {
   });
 });
 
+test("切换回已打开标签时恢复之前浏览位置", async () => {
+  const user = userEvent.setup();
+  window.Doc = {
+    createOpenEditor: vi.fn((mountElement: HTMLElement) => {
+      const wrap = document.createElement("div");
+      wrap.className = "ne-editor-wrap";
+      mountElement.appendChild(wrap);
+      return {
+        setDocument: vi.fn((_: string, content: string) => {
+          wrap.textContent = content;
+        }),
+        getDocument: vi.fn(() => wrap.textContent ?? ""),
+        on: vi.fn(),
+        destroy: vi.fn(),
+      };
+    }),
+  };
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [
+      { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+      { id: "b.lake", path: "b.lake", name: "b", parentPath: "", size: 1, kind: "lake" },
+    ],
+    order: ["document:a.lake", "document:b.lake"],
+  });
+  readLakeDocument.mockImplementation(async (path) => `<p>${path}</p>`);
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "a" }));
+  await user.pointer({ keys: "[MouseRight]", target: await screen.findByRole("tab", { name: "a" }) });
+  await user.click(screen.getByRole("menuitem", { name: "锁定标签" }));
+  const firstScrollContainer = await waitFor(() => {
+    const element = document.querySelector<HTMLElement>(".ne-editor-wrap");
+    expect(element).not.toBeNull();
+    return element!;
+  });
+  firstScrollContainer.scrollTop = 360;
+  firstScrollContainer.scrollLeft = 24;
+
+  await user.click(screen.getByRole("treeitem", { name: "b" }));
+  await waitFor(() => expect(screen.getByTestId("current-path")).toHaveTextContent("b.lake"));
+  await user.click(screen.getByRole("tab", { name: "a，已锁定" }));
+
+  await waitFor(() => {
+    expect(screen.getByTestId("current-path")).toHaveTextContent("a.lake");
+    const restored = document.querySelector<HTMLElement>(".ne-editor-wrap");
+    expect(restored?.scrollTop).toBe(360);
+    expect(restored?.scrollLeft).toBe(24);
+  });
+});
+
 test("文档导出完成后切换标签不会重复消费旧导出请求", async () => {
   const user = userEvent.setup();
   const editor = {
