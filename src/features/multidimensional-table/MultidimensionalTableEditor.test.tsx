@@ -124,6 +124,10 @@ test("唯一表格视图不允许删除", async () => {
 
 test("工具栏已移除生成表单并支持搜索筛选排序", async () => {
   const user = userEvent.setup();
+  let savedContent = "";
+  const onSave = vi.fn(async (_path: string, content: string) => {
+    savedContent = content;
+  });
   const table = tableWithCategory();
   const firstRecord = createEmptyMultidimensionalTableRecord(table.fields, {
     title: "B 任务",
@@ -139,6 +143,7 @@ test("工具栏已移除生成表单并支持搜索筛选排序", async () => {
   });
 
   renderEditor({
+    onSave,
     content: serializeMultidimensionalTableDocument({ ...table, activeViewId: "view-table", records: [firstRecord, secondRecord] }),
   });
 
@@ -163,6 +168,55 @@ test("工具栏已移除生成表单并支持搜索筛选排序", async () => {
 
   const titleInputs = Array.from(document.querySelectorAll<HTMLInputElement>(".multitable-grid__row input[aria-label='标题']"));
   expect(titleInputs.map((input) => input.value)).toEqual(["A 任务", "B 任务"]);
+  await waitFor(() => {
+    expect(savedContent).toContain("\"sortFieldId\": \"title\"");
+    expect(savedContent).toContain("\"sortDirection\": \"asc\"");
+  }, { timeout: 1400 });
+});
+
+test("排序条件会保存到当前视图并在重新打开后生效", async () => {
+  const user = userEvent.setup();
+  let savedContent = "";
+  const onSave = vi.fn(async (_path: string, content: string) => {
+    savedContent = content;
+  });
+  const table = tableWithCategory();
+  const firstRecord = createEmptyMultidimensionalTableRecord(table.fields, {
+    title: "B 任务",
+    status: "status-single-1",
+    category: ["multi-1"],
+    description: "测试内容1",
+  });
+  const secondRecord = createEmptyMultidimensionalTableRecord(table.fields, {
+    title: "A 任务",
+    status: "status-single-2",
+    category: ["multi-2"],
+    description: "测试内容2",
+  });
+  const content = serializeMultidimensionalTableDocument({
+    ...table,
+    activeViewId: "view-table",
+    records: [firstRecord, secondRecord],
+  });
+  const rendered = renderEditor({ onSave, content });
+
+  await user.click(screen.getByRole("button", { name: "排序" }));
+  await user.selectOptions(screen.getByLabelText("排序字段"), "title");
+  await user.selectOptions(screen.getByLabelText("排序方向"), "desc");
+
+  await waitFor(() => {
+    expect(savedContent).toContain("\"sortFieldId\": \"title\"");
+    expect(savedContent).toContain("\"sortDirection\": \"desc\"");
+  }, { timeout: 1400 });
+
+  rendered.unmount();
+  renderEditor({ content: savedContent });
+
+  const titleInputs = Array.from(document.querySelectorAll<HTMLInputElement>(".multitable-grid__row input[aria-label='标题']"));
+  expect(titleInputs.map((input) => input.value)).toEqual(["B 任务", "A 任务"]);
+  await user.click(screen.getByRole("button", { name: "排序" }));
+  expect(screen.getByLabelText("排序字段")).toHaveValue("title");
+  expect(screen.getByLabelText("排序方向")).toHaveValue("desc");
 });
 
 test("筛选支持多规则并保存到当前视图", async () => {
@@ -388,6 +442,33 @@ test("看板新增记录会写入当前分组状态", async () => {
 
   await waitFor(() => {
     expect(onSave).toHaveBeenCalledWith("project.dbtable.json", expect.stringContaining("status-single-1"));
+  }, { timeout: 1400 });
+});
+
+test("看板带日期筛选时新增记录会直接打开详情", async () => {
+  const user = userEvent.setup();
+  let savedContent = "";
+  const onSave = vi.fn(async (_path: string, content: string) => {
+    savedContent = content;
+  });
+  const table = tableWithCategory();
+  const content = serializeMultidimensionalTableDocument({
+    ...table,
+    activeViewId: "view-board",
+    records: [],
+    views: table.views.map((view) => view.id === "view-board"
+      ? { ...view, filterRules: [{ id: "filter-date", fieldId: "date", operator: "thisWeek" }] }
+      : view),
+  });
+
+  renderEditor({ onSave, content });
+
+  await user.click(screen.getAllByRole("button", { name: "新增记录" })[0]);
+
+  expect(screen.getByRole("complementary", { name: "记录详情" })).toBeInTheDocument();
+  expect(screen.getByLabelText("看板标题")).toHaveValue("");
+  await waitFor(() => {
+    expect(savedContent).toContain("status-single-1");
   }, { timeout: 1400 });
 });
 
