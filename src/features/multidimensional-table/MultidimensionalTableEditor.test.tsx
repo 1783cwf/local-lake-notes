@@ -581,6 +581,24 @@ test("看板配置可以控制卡片字段显示隐藏", async () => {
   expect(screen.queryByRole("button", { name: /测试记录1/ })).not.toBeInTheDocument();
 });
 
+test("看板配置可以隐藏空分组", async () => {
+  const user = userEvent.setup();
+  const onSave = vi.fn(async () => undefined);
+  renderEditor({ onSave });
+
+  expect(screen.getAllByText("单选1").length).toBeGreaterThan(0);
+  expect(screen.getByText("单选2")).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "看板配置" }));
+  await user.click(screen.getByRole("checkbox", { name: /隐藏空分组/ }));
+
+  expect(screen.getAllByText("单选1").length).toBeGreaterThan(0);
+  expect(screen.queryByText("单选2")).not.toBeInTheDocument();
+  await waitFor(() => {
+    expect(onSave).toHaveBeenCalledWith("project.dbtable.json", expect.stringContaining("\"hideEmptyGroups\": true"));
+  }, { timeout: 1400 });
+});
+
 test("看板配置和筛选面板点击外部区域会收起", async () => {
   const user = userEvent.setup();
   renderEditor();

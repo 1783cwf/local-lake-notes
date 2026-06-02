@@ -83,6 +83,7 @@ export interface MultidimensionalTableView {
   name: string;
   type: MultidimensionalTableViewType;
   groupByFieldId?: string;
+  hideEmptyGroups?: boolean;
   cardFieldIds?: string[];
   cardFieldConfigExplicit?: boolean;
   filterRules?: MultidimensionalTableFilterRule[];
@@ -708,6 +709,7 @@ function normalizeViews(
       name: view.name,
       type: view.type === "board" ? "board" as const : "table" as const,
       groupByFieldId: view.groupByFieldId && fieldIds.has(view.groupByFieldId) ? view.groupByFieldId : undefined,
+      hideEmptyGroups: Boolean(view.hideEmptyGroups),
       cardFieldIds: Array.isArray(view.cardFieldIds)
         ? view.cardFieldIds.filter((fieldId) => fieldIds.has(fieldId))
         : undefined,

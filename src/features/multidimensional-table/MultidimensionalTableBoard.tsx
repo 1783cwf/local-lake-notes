@@ -83,7 +83,10 @@ export function MultidimensionalTableBoard({
   const primaryField = document.fields.find((field) => field.primary) ?? document.fields[0];
   const cardFields = cardFieldsForView(document, boardView, primaryField, groupField);
   const showPrimaryField = cardFields.some((field) => field.id === primaryField?.id);
-  const columns = useMemo(() => boardColumns(records, groupField), [records, groupField]);
+  const columns = useMemo(
+    () => boardColumns(records, groupField, Boolean(boardView?.hideEmptyGroups)),
+    [boardView?.hideEmptyGroups, records, groupField],
+  );
   const [draggingRecordId, setDraggingRecordId] = useState<string | null>(null);
   const draggingRecord = draggingRecordId ? document.records.find((record) => record.id === draggingRecordId) ?? null : null;
   const selectedRecord = selectedRecordId ? document.records.find((record) => record.id === selectedRecordId) ?? null : null;
@@ -612,14 +615,18 @@ interface BoardColumnData {
 function boardColumns(
   records: MultidimensionalTableRecord[],
   groupField: MultidimensionalTableField | undefined,
+  hideEmptyGroups: boolean,
 ): BoardColumnData[] {
   const options = groupField?.options ?? [];
-  const columns = options.map((option) => ({
-    id: option.id,
-    title: option.label,
-    option,
-    records: records.filter((record) => record.values[groupField!.id] === option.id),
-  }));
+  const columns = options
+    .map((option) => ({
+      id: option.id,
+      title: option.label,
+      option,
+      records: records.filter((record) => record.values[groupField!.id] === option.id),
+    }))
+    // 隐藏空分组只影响已有选项列；未分组列仍按是否存在记录决定，避免丢失未归类数据入口。
+    .filter((column) => !hideEmptyGroups || column.records.length > 0);
   const unassigned = records.filter((record) => !groupField || !record.values[groupField.id]);
   return unassigned.length > 0
     ? [...columns, { id: unassignedColumnId, title: "未分组", option: null, records: unassigned }]

@@ -142,6 +142,20 @@ test("视图排序配置会解析保存并忽略失效字段", () => {
   expect(serializeMultidimensionalTableDocument(parsed)).toContain("\"sortFieldId\": \"title\"");
 });
 
+test("看板隐藏空分组配置会解析并保存", () => {
+  const source = createDefaultMultidimensionalTableDocument();
+  const parsed = parseMultidimensionalTableDocument(JSON.stringify({
+    ...source,
+    views: source.views.map((view) => view.type === "board"
+      ? { ...view, hideEmptyGroups: true }
+      : view),
+  }));
+
+  const boardView = parsed.views.find((view) => view.type === "board");
+  expect(boardView?.hideEmptyGroups).toBe(true);
+  expect(serializeMultidimensionalTableDocument(parsed)).toContain("\"hideEmptyGroups\": true");
+});
+
 test("字段排序只调整字段顺序并保留记录值", () => {
   const source = createDefaultMultidimensionalTableDocument();
   const record = createEmptyMultidimensionalTableRecord(source.fields, {

@@ -397,6 +397,18 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
         : view),
     });
   };
+  const setBoardHideEmptyGroups = (hideEmptyGroups: boolean) => {
+    const nextBoardView = activeBoardView;
+    if (!nextBoardView) {
+      return;
+    }
+    commitChange({
+      ...tableDocument,
+      views: tableDocument.views.map((view) => view.id === nextBoardView.id
+        ? { ...view, hideEmptyGroups }
+        : view),
+    });
+  };
 
   return (
     <section className="multitable-editor-root">
@@ -544,7 +556,9 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
               visibleFieldIds={activeBoardView?.cardFieldConfigExplicit && activeBoardView.cardFieldIds
                 ? activeBoardView.cardFieldIds
                 : defaultBoardCardFieldIds(tableDocument.fields, boardGroupField)}
+              hideEmptyGroups={Boolean(activeBoardView?.hideEmptyGroups)}
               onToggleField={toggleBoardConfigField}
+              onHideEmptyGroupsChange={setBoardHideEmptyGroups}
             />
           ) : null}
           {importPanelOpen && activeViewType === "table" ? (
@@ -729,11 +743,15 @@ function ViewTab({
 function BoardConfigPanel({
   fields,
   visibleFieldIds,
+  hideEmptyGroups,
   onToggleField,
+  onHideEmptyGroupsChange,
 }: {
   fields: MultidimensionalTableField[];
   visibleFieldIds: string[];
+  hideEmptyGroups: boolean;
   onToggleField: (fieldId: string) => void;
+  onHideEmptyGroupsChange: (hideEmptyGroups: boolean) => void;
 }) {
   const configurableFields = fields;
 
@@ -758,6 +776,17 @@ function BoardConfigPanel({
           </label>
         ))}
       </div>
+      <label className="multitable-board-config-panel__option">
+        <input
+          type="checkbox"
+          checked={hideEmptyGroups}
+          onChange={(event) => onHideEmptyGroupsChange(event.target.checked)}
+        />
+        <span>
+          隐藏空分组
+          <small>开启后不显示没有记录的分组列</small>
+        </span>
+      </label>
     </div>
   );
 }

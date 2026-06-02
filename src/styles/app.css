@@ -2056,6 +2056,41 @@ button {
   font-weight: 500;
 }
 
+.multitable-board-config-panel__option {
+  display: inline-grid !important;
+  min-width: 210px !important;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px !important;
+  min-height: 40px;
+  padding: 0 12px;
+  border-left: 1px solid #e1e6ef;
+  color: #1f2329 !important;
+  cursor: pointer;
+}
+
+.multitable-board-config-panel__option input {
+  width: 16px !important;
+  min-width: 0 !important;
+  height: 16px !important;
+  min-height: 0 !important;
+  accent-color: var(--multitable-blue);
+}
+
+.multitable-board-config-panel__option span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.multitable-board-config-panel__option small {
+  color: #8f959e;
+  font-size: 12px;
+  font-weight: 500;
+}
+
 .multitable-import-panel {
   align-items: stretch;
   gap: 16px;
