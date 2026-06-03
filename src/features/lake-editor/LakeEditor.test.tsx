@@ -68,6 +68,74 @@ test("打开文档时把 text/lake 内容设置进语雀编辑器", async () => 
   });
 });
 
+test("阅读模式使用语雀 Viewer 且不注册保存和替换能力", async () => {
+  const onRegisterSaveNow = vi.fn();
+  const onRegisterReadContent = vi.fn();
+  const onRegisterReadSelection = vi.fn();
+  const onRegisterReplaceSelection = vi.fn();
+  const onSelectionCapabilityChange = vi.fn();
+  const onPrepareResourcePreview = vi.fn(async (resourceRef: string) => resourceRef);
+  const viewer: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => "<p>内容</p>"),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => {
+      throw new Error("阅读模式不应创建编辑器");
+    }),
+    createOpenViewer: vi.fn(() => viewer),
+  };
+
+  render(
+    <LakeEditor
+      document={documentEntry}
+      content="<p>内容</p>"
+      mode="read"
+      manualSaveRequest={0}
+      exportRequest={null}
+      onSave={vi.fn()}
+      onExportContent={vi.fn()}
+      onUploadImage={vi.fn()}
+      onUploadFile={vi.fn()}
+      onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={onPrepareResourcePreview}
+      onSaveStatusChange={vi.fn()}
+      onRegisterSaveNow={onRegisterSaveNow}
+      onRegisterReadContent={onRegisterReadContent}
+      onRegisterReadSelection={onRegisterReadSelection}
+      onRegisterReplaceSelection={onRegisterReplaceSelection}
+      onSelectionCapabilityChange={onSelectionCapabilityChange}
+    />,
+  );
+
+  await waitFor(() => {
+    expect(viewer.setDocument).toHaveBeenCalledWith("text/lake", "<p>内容</p>");
+  });
+  expect(window.Doc.createOpenViewer).toHaveBeenCalledTimes(1);
+  expect(window.Doc.createOpenViewer).toHaveBeenCalledWith(
+    expect.any(HTMLDivElement),
+    expect.objectContaining({
+      toc: {
+        enable: true,
+        normalView: true,
+      },
+    }),
+  );
+  expect(window.Doc.createOpenEditor).not.toHaveBeenCalled();
+  expect(onRegisterSaveNow).toHaveBeenLastCalledWith(null);
+  expect(onRegisterReadContent).toHaveBeenLastCalledWith(null);
+  expect(onRegisterReadSelection).toHaveBeenLastCalledWith(null);
+  expect(onRegisterReplaceSelection).toHaveBeenLastCalledWith(null);
+  expect(onPrepareResourcePreview).not.toHaveBeenCalled();
+  expect(document.querySelector(".lake-editor-root")).toHaveClass("is-read-mode");
+  expect(onSelectionCapabilityChange).toHaveBeenCalledWith({
+    canReadSelection: false,
+    canReplaceSelection: false,
+  });
+});
+
 test("打开含资源文档时先显示占位内容再异步替换预览", async () => {
   let resolvePreview!: (value: string) => void;
   const resourceRef = "yuque-resource://webdav/images/a.png?provider=webdav&kind=image";

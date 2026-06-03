@@ -134,6 +134,7 @@ import type {
   AiSpreadsheetActionType,
   AiSpreadsheetPatch,
   AiModelCapabilityType,
+  DocumentOpenMode,
   AiSettings,
   CurrentDocumentState,
   BackupKeyStatus,
@@ -327,7 +328,10 @@ export function AppController() {
     }
 
     try {
-      setCurrentDocument(await readDocumentState(currentDocument.entry));
+      setCurrentDocument(await readDocumentState(
+        currentDocument.entry,
+        currentDocument.kind === "lake" ? currentDocument.mode ?? "edit" : "edit",
+      ));
       setSaveStatus(emptySaveStatus);
     } catch {
       setCurrentDocument(null);
@@ -413,7 +417,7 @@ export function AppController() {
     }
 
     setActiveTabId(tab.id);
-    setCurrentDocument(await readDocumentState(nextDocument));
+    setCurrentDocument(await readDocumentState(nextDocument, tab.mode));
     setSaveStatus(emptySaveStatus);
     setAppError(null);
   }, [openTabs, workspace]);
@@ -433,13 +437,56 @@ export function AppController() {
     }
   }, [activateDocumentTab, activeTabId, saveBeforeLeavingCurrentTab]);
 
+  const setCurrentLakeDocumentMode = useCallback(async (mode: DocumentOpenMode): Promise<boolean> => {
+    if (!currentDocument || currentDocument.kind !== "lake") {
+      return false;
+    }
+    if ((currentDocument.mode ?? "edit") === mode) {
+      return true;
+    }
+
+    let nextContent = currentDocument.content;
+    try {
+      if ((currentDocument.mode ?? "edit") === "edit" && mode === "read") {
+        // 切到阅读模式前先保存，再读回 Lake 原始内容，避免把 AI 使用的 Markdown 快照传给 viewer。
+        await saveCurrentEditorNowRef.current?.();
+        nextContent = await readLakeDocument(currentDocument.entry.path);
+      }
+      setCurrentDocument((current) => (
+        current?.kind === "lake" && current.entry.path === currentDocument.entry.path
+          ? { ...current, content: nextContent, mode }
+          : current
+      ));
+      setOpenTabs((tabs) => tabs.map((tab) => (
+        tab.id === activeTabId ? { ...tab, mode } : tab
+      )));
+      if (mode === "read") {
+        setAiAssistantOpen(false);
+        setAiPatchPreview(null);
+      }
+      setSaveStatus(mode === "read" ? emptySaveStatus : { state: "clean" });
+      setAppError(null);
+      return true;
+    } catch (error) {
+      setAppError(toMessage(error));
+      return false;
+    }
+  }, [activeTabId, currentDocument]);
+
   const openDocumentInTabs = useCallback(async (
     document: WorkspaceDocument,
     candidateWorkspace: WorkspacePayload | null = workspace,
-    options: { skipSaveBeforeSwitch?: boolean } = {},
+    options: { skipSaveBeforeSwitch?: boolean; mode?: DocumentOpenMode } = {},
   ) => {
+    const requestedMode = document.kind === "lake" ? options.mode ?? "edit" : undefined;
     const existingTab = openTabs.find((tab) => tab.path === document.path);
     if (existingTab?.id === activeTabId) {
+      const existingMode = currentDocument?.kind === "lake" ? currentDocument.mode ?? existingTab.mode ?? "edit" : existingTab.mode;
+      if (requestedMode && existingMode !== requestedMode) {
+        if (!await setCurrentLakeDocumentMode(requestedMode)) {
+          return;
+        }
+      }
       setAppError(null);
       return;
     }
@@ -450,12 +497,18 @@ export function AppController() {
 
     try {
       if (existingTab) {
-        await activateDocumentTab(existingTab.id, openTabs, candidateWorkspace);
+        const nextTabs = requestedMode
+          ? openTabs.map((tab) => (tab.id === existingTab.id ? { ...tab, mode: requestedMode } : tab))
+          : openTabs;
+        if (requestedMode) {
+          setOpenTabs(nextTabs);
+        }
+        await activateDocumentTab(existingTab.id, nextTabs, candidateWorkspace);
         return;
       }
 
       const activeTab = openTabs.find((tab) => tab.id === activeTabId);
-      const nextTab = createOpenDocumentTab(document);
+      const nextTab = createOpenDocumentTab(document, requestedMode);
       const nextTabs = activeTab && !activeTab.locked
         ? openTabs.map((tab) => (tab.id === activeTab.id ? nextTab : tab))
         : [...openTabs, nextTab];
@@ -468,7 +521,7 @@ export function AppController() {
     } catch (error) {
       setAppError(toMessage(error));
     }
-  }, [activateDocumentTab, activeTabId, openTabs, saveBeforeLeavingCurrentTab, workspace]);
+  }, [activateDocumentTab, activeTabId, currentDocument, openTabs, saveBeforeLeavingCurrentTab, setCurrentLakeDocumentMode, workspace]);
 
   const toggleTabLocked = useCallback((tabId: string) => {
     setOpenTabs((tabs) => tabs.map((tab) => (
@@ -850,8 +903,12 @@ export function AppController() {
   }, [activateDocumentTab, currentDocument?.entry.path, openTabs]);
 
   const openDocument = useCallback(async (document: WorkspaceDocument) => {
-    await openDocumentInTabs(document);
-  }, [openDocumentInTabs]);
+    await openDocumentInTabs(document, workspace, { mode: "edit" });
+  }, [openDocumentInTabs, workspace]);
+
+  const openDocumentReadOnly = useCallback(async (document: WorkspaceDocument) => {
+    await openDocumentInTabs(document, workspace, { mode: "read" });
+  }, [openDocumentInTabs, workspace]);
 
   const saveDocument = useCallback(async (relativePath: string, content: string) => {
     await writeLakeDocument(relativePath, content);
@@ -1605,6 +1662,7 @@ export function AppController() {
         collapsed={sidebarCollapsed}
         currentPath={currentPath}
         onOpenDocument={openDocument}
+        onOpenDocumentReadOnly={openDocumentReadOnly}
         onCreateDocument={createDocument}
         onCreateSpreadsheet={createSpreadsheet}
         onCreateMultidimensionalTable={createMultidimensionalTable}
@@ -1628,9 +1686,13 @@ export function AppController() {
           document={currentDocument?.entry ?? null}
           openTabs={visibleOpenTabs}
           activeTabId={activeTabId}
+          documentMode={currentDocument?.kind === "lake" ? currentDocument.mode ?? "edit" : "edit"}
           saveStatus={saveStatus}
           onManualSave={() => setManualSaveRequest((current) => current + 1)}
           onOpenAiAssistant={openAiAssistant}
+          onSetDocumentMode={(mode) => {
+            void setCurrentLakeDocumentMode(mode);
+          }}
           onActivateTab={activateTab}
           onToggleTabLocked={toggleTabLocked}
           onCloseTab={closeTab}
@@ -1696,6 +1758,7 @@ export function AppController() {
           <LakeEditor
             document={currentDocument?.entry ?? null}
             content={currentDocument?.kind === "lake" ? currentDocument.content : ""}
+            mode={currentDocument?.kind === "lake" ? currentDocument.mode ?? "edit" : "edit"}
             manualSaveRequest={manualSaveRequest}
             exportRequest={exportRequest}
             onSave={saveDocument}
@@ -1831,6 +1894,7 @@ function toMessage(error: unknown): string {
 
 const editorScrollContainerSelectors = [
   ".lake-editor-root .ne-editor-wrap",
+  ".lake-editor-root.is-read-mode",
   ".multitable-grid",
   ".multitable-board",
   ".spreadsheet-editor-container",
@@ -1984,7 +2048,7 @@ function formatExportLabel(format: DocumentExportFormat): string {
   }
 }
 
-async function readDocumentState(document: WorkspaceDocument): Promise<CurrentDocumentState> {
+async function readDocumentState(document: WorkspaceDocument, mode: DocumentOpenMode = "edit"): Promise<CurrentDocumentState> {
   if (document.kind === "spreadsheet") {
     return {
       kind: "spreadsheet",
@@ -2003,6 +2067,7 @@ async function readDocumentState(document: WorkspaceDocument): Promise<CurrentDo
     kind: "lake",
     entry: asLakeDocument(document),
     content: await readLakeDocument(document.path),
+    mode,
   };
 }
 
@@ -2027,11 +2092,12 @@ function asMultidimensionalTableDocument(document: WorkspaceDocument): Workspace
   return document as WorkspaceDocument & { kind: "multidimensional-table" };
 }
 
-function createOpenDocumentTab(document: WorkspaceDocument): OpenDocumentTab {
+function createOpenDocumentTab(document: WorkspaceDocument, mode?: DocumentOpenMode): OpenDocumentTab {
   return {
     id: document.path,
     path: document.path,
     locked: false,
+    mode,
   };
 }
 

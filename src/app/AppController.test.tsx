@@ -194,6 +194,7 @@ vi.mock("../components/DocumentSidebar", () => ({
     onCreateMultidimensionalTable,
     onExportWorkspaceMarkdown,
     onOpenDocument,
+    onOpenDocumentReadOnly,
     onDeleteDocument,
     onRenameDocument,
     onDeleteDirectory,
@@ -209,6 +210,7 @@ vi.mock("../components/DocumentSidebar", () => ({
     onCreateMultidimensionalTable: (parentPath: string) => void;
     onExportWorkspaceMarkdown: () => void;
     onOpenDocument: (document: { path: string; name: string; parentPath: string; size: number }) => void;
+    onOpenDocumentReadOnly: (document: { path: string; name: string; parentPath: string; size: number }) => void;
     onDeleteDocument: (document: { path: string; name: string; parentPath: string; size: number }) => void;
     onRenameDocument: (document: { path: string; name: string; parentPath: string; size: number }) => void;
     onDeleteDirectory: (directory: { path: string; name: string; parentPath: string }) => void;
@@ -254,6 +256,9 @@ vi.mock("../components/DocumentSidebar", () => ({
             onClick={() => onOpenDocument(document)}
           >
             {document.name}
+          </button>
+          <button type="button" onClick={() => onOpenDocumentReadOnly(document)}>
+            阅读 {document.name}
           </button>
           <button type="button" onClick={() => onDeleteDocument(document)}>
             删除 {document.name}
@@ -763,6 +768,34 @@ test("打开第二个文档时未锁定标签会被替换", async () => {
     expect(screen.getByTestId("current-path")).toHaveTextContent("b.lake");
     expect(screen.getAllByRole("tab")).toHaveLength(1);
     expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true");
+  });
+});
+
+test("侧栏阅读入口打开 Lake 文档后可以从右上角切回编辑模式", async () => {
+  const user = userEvent.setup();
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [
+      { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+    ],
+    order: ["document:a.lake"],
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("button", { name: "阅读 a" }));
+
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: "进入编辑模式" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
+  });
+
+  await user.click(screen.getByRole("button", { name: "进入编辑模式" }));
+
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: "进入阅读模式" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存" })).toBeEnabled();
   });
 });
 

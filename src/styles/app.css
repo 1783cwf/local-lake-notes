@@ -1123,9 +1123,20 @@ button {
   overflow: hidden;
 }
 
+.lake-editor-root.is-read-mode {
+  padding: 36px 48px 72px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
 .lake-editor-mount {
   height: 100%;
   min-height: 0;
+}
+
+.lake-editor-root.is-read-mode .lake-editor-mount {
+  height: auto;
+  min-height: 100%;
 }
 
 .lake-editor-root .ne-editor,
@@ -1143,6 +1154,55 @@ button {
   width: 100% !important;
   max-width: none !important;
   margin: 0 !important;
+}
+
+.lake-editor-root.is-read-mode .ne-doc-major-viewer,
+.lake-editor-root.is-read-mode .ne-viewer,
+.lake-editor-root.is-read-mode .ne-viewer-body,
+.lake-editor-root.is-read-mode .ne-viewer-layout-mode-fixed,
+.lake-editor-root.is-read-mode .ne-engine,
+.lake-editor-root.is-read-mode .ne-engine-content,
+.lake-editor-root.is-read-mode .ne-engine-wrap {
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+}
+
+.lake-editor-root.is-read-mode .ne-doc-major-viewer .ne-viewer-layout-mode-fixed .ne-viewer-body {
+  padding-right: 50px !important;
+  padding-left: 50px !important;
+}
+
+/* 阅读态保留右侧大纲空间，但正文从左侧自然起排，避免左侧出现大块空白。 */
+.lake-editor-root.is-read-mode .ne-doc-major-viewer .ne-viewer-layout-mode-fixed .ne-viewer-body > *,
+.lake-editor-root.is-read-mode .ne-doc-major-viewer .ne-viewer-layout-mode-fixed .ne-viewer-body > .ne-viewer-b-filler {
+  width: auto !important;
+  max-width: calc(100% - 280px) !important;
+  margin-right: 280px !important;
+  margin-left: 0 !important;
+}
+
+.lake-editor-root.is-read-mode .ne-doc-major-viewer .ne-viewer-layout-mode-fixed .ne-viewer-body ne-table-hole.ne-full-width,
+.lake-editor-root.is-read-mode .ne-doc-major-viewer .ne-viewer-layout-mode-fixed .ne-viewer-body ne-root-card-hole.ne-full-width {
+  width: auto !important;
+  max-width: calc(100% - 280px) !important;
+  margin-right: 280px !important;
+  margin-left: 0 !important;
+}
+
+.lake-editor-root.is-read-mode .ne-doc-major-viewer .ne-viewer-layout-mode-fixed .ne-viewer-body ne-table-hole.ne-full-width ne-table-wrap,
+.lake-editor-root.is-read-mode .ne-doc-major-viewer .ne-viewer-layout-mode-fixed .ne-viewer-body ne-root-card-hole.ne-full-width > ne-card {
+  min-width: min(100%, 750px) !important;
+  width: auto !important;
+}
+
+.lake-editor-root.is-read-mode .ne-table,
+.lake-editor-root.is-read-mode table,
+.lake-editor-root.is-read-mode pre,
+.lake-editor-root.is-read-mode .ne-codeblock,
+.lake-editor-root.is-read-mode ne-card[data-card-name='codeblock'] {
+  max-width: 100% !important;
 }
 
 .ai-assistant-panel {
@@ -4008,6 +4068,38 @@ button {
   outline: none;
 }
 
+.lake-editor-root .lake-codeblock-copy-menu {
+  background: #f7f7f7;
+  border-bottom: 1px solid #eceef0;
+}
+
+.lake-editor-root .lake-codeblock-copy-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 5px;
+  color: #585a5a;
+  background: transparent;
+  font-size: 14px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.lake-editor-root .lake-codeblock-copy-button:hover,
+.lake-editor-root .lake-codeblock-copy-button:focus-visible {
+  color: #1677ff;
+  background: #edf4ff;
+  outline: none;
+}
+
+.lake-editor-root .lake-codeblock-copy-button svg {
+  flex: 0 0 auto;
+}
+
 .empty-editor-state {
   display: flex;
   flex: 1;
@@ -4878,6 +4970,10 @@ button {
   .lake-editor-root,
   .empty-editor-state {
     padding: 32px 20px;
+  }
+
+  .lake-editor-root.is-read-mode {
+    padding: 24px 20px 56px;
   }
 
   .settings-panel__body {

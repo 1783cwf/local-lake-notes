@@ -25,6 +25,7 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof DocumentSidebar>
     onRenameWorkspace: vi.fn(),
     onExportWorkspaceMarkdown: vi.fn(),
     onOpenDocument: vi.fn(),
+    onOpenDocumentReadOnly: vi.fn(),
     onRenameDocument: vi.fn(),
     onDeleteDocument: vi.fn(),
     onRenameDirectory: vi.fn(),
@@ -344,6 +345,36 @@ test("点击行操作不会触发打开文档", () => {
 
   expect(onDeleteDocument).toHaveBeenCalledTimes(1);
   expect(onOpenDocument).not.toHaveBeenCalled();
+});
+
+test("Lake 文档行可以通过小眼睛入口按阅读模式打开", async () => {
+  const user = userEvent.setup();
+  const onOpenDocument = vi.fn();
+  const onOpenDocumentReadOnly = vi.fn();
+  const { props } = renderSidebar({ onOpenDocument, onOpenDocumentReadOnly });
+
+  await user.click(screen.getByRole("button", { name: "阅读文档" }));
+
+  expect(onOpenDocumentReadOnly).toHaveBeenCalledWith(props.documents[0]);
+  expect(onOpenDocument).not.toHaveBeenCalled();
+});
+
+test("非 Lake 文档不显示阅读模式入口", () => {
+  renderSidebar({
+    currentPath: "notes/budget.json",
+    documents: [
+      {
+        id: "notes/budget.json",
+        path: "notes/budget.json",
+        name: "budget",
+        parentPath: "notes",
+        size: 1,
+        kind: "spreadsheet",
+      },
+    ],
+  });
+
+  expect(screen.queryByRole("button", { name: "阅读文档" })).not.toBeInTheDocument();
 });
 
 test("目录区域右键可以新建目录、文档、表格和多维表格", async () => {

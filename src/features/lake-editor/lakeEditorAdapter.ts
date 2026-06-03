@@ -9,6 +9,11 @@ export interface CreateLakeEditorOptions {
   tocEnabled?: boolean;
 }
 
+export interface CreateLakeViewerOptions {
+  downloadFile: (file: LakeFileDownload) => void | Promise<void>;
+  tocEnabled?: boolean;
+}
+
 export interface LakeFileDownload {
   name: string;
   src: string;
@@ -22,9 +27,15 @@ interface LakeFileCard {
 
 const fileCardHostSelector = "ne-card[data-card-name='file'], ne-card[data-card-name='localdoc']";
 const fileCardBodySelector = ".ne-card-file, .ne-card-local-doc";
+const codeblockSelector = ".ne-codeblock, pre.ne-codeblock, pre[data-language], .ne-code-viewer";
+const codeblockCopySelector = ".ne-codeblock-copy, .ne-codeblock-copy-icon, [data-lake-codeblock-action='copy']";
 
 export function hasLakeEditorRuntime(): boolean {
   return Boolean(window.Doc?.createOpenEditor);
+}
+
+export function hasLakeViewerRuntime(): boolean {
+  return Boolean(window.Doc?.createOpenViewer);
 }
 
 export function createLakeEditor(
@@ -35,23 +46,10 @@ export function createLakeEditor(
     throw new Error("语雀编辑器资源未加载");
   }
 
-  const mountElement = document.createElement("div");
-  mountElement.className = "lake-editor-mount ne-doc-major-editor";
-  element.replaceChildren(mountElement);
-
+  const mountElement = createLakeMount(element, "ne-doc-major-editor");
   const editor = window.Doc.createOpenEditor(mountElement, {
     input: {},
-    defaultFontsize: 19,
-    toc: {
-      enable: options.tocEnabled ?? true,
-      normalView: options.tocEnabled ?? true,
-    },
-    codeblock: {
-      codemirrorURL: "/vendor/lakex-doc/codemirror.js",
-    },
-    math: {
-      KaTexURL: "/vendor/lakex-doc/katex.min.js",
-    },
+    ...createLakeRuntimeOptions(options),
     image: {
       createUploadPromise: options.uploadImage,
       isCaptureImageURL(url: string) {
@@ -59,56 +57,38 @@ export function createLakeEditor(
       },
     },
     file: {
+      ...createLakeFileOptions(options.downloadFile),
       createUploadPromise: options.uploadFile,
-      getFileDownloadURL(src: string) {
-        return normalizeFileUrl(src);
-      },
-      getPreviewUrl(src: string) {
-        return normalizeFileUrl(src);
-      },
-      canDownload(cardData: unknown) {
-        return Boolean(extractCardDataSrc(cardData));
-      },
-      canPreview(cardData: unknown) {
-        return Boolean(extractCardDataSrc(cardData));
-      },
-      downloadFileHandler(cardData: unknown) {
-        downloadFileCard(cardData, options.downloadFile);
-      },
-      previewFileHandler(cardData: unknown) {
-        downloadFileCard(cardData, options.downloadFile);
-      },
-      onViewerInlineFileClick(event: MouseEvent, ui: unknown) {
-        event.preventDefault();
-        downloadFileCard(ui, options.downloadFile);
-      },
     },
   });
 
-  const unbindFileToolbar = bindRenderedFileToolbar(element, editor, options.downloadFile);
-  const destroy = editor.destroy?.bind(editor);
-  const destory = editor.destory?.bind(editor);
-  let destroyed = false;
-  const destroyEditor = () => {
-    if (destroyed) {
-      return;
-    }
-    destroyed = true;
-    unbindFileToolbar();
-    if (destroy) {
-      destroy();
-    } else {
-      destory?.();
-    }
-    // Lake destroy 可能会移除自己的挂载节点；这里兜底清理外层壳内残留，
-    // 但外层壳始终交给 React 卸载，避免 React 再 removeChild 一个已被第三方移除的节点。
-    element.replaceChildren();
-  };
-  editor.destroy = destroyEditor;
-  editor.destory = destroyEditor;
-
+  bindLakeInstanceCleanup(element, editor, [
+    bindRenderedFileToolbar(element, editor, options.downloadFile),
+    bindRenderedCodeblockCopyButton(element),
+  ]);
   editor.on("contentchange", options.onContentChange);
   return editor;
+}
+
+export function createLakeViewer(
+  element: HTMLElement,
+  options: CreateLakeViewerOptions,
+): LakeEditorInstance {
+  if (!window.Doc?.createOpenViewer) {
+    throw new Error("语雀阅读器资源未加载");
+  }
+
+  const mountElement = createLakeMount(element, "ne-doc-major-viewer");
+  const viewer = window.Doc.createOpenViewer(mountElement, {
+    input: {},
+    ...createLakeRuntimeOptions(options),
+  });
+
+  bindLakeInstanceCleanup(element, viewer, [
+    bindRenderedFileToolbar(element, viewer, options.downloadFile),
+    bindRenderedCodeblockCopyButton(element),
+  ]);
+  return viewer;
 }
 
 export function destroyLakeEditor(editor: LakeEditorInstance | null): void {
@@ -142,6 +122,84 @@ export function extractLakeFileCards(content: string): LakeFileCard[] {
       src: normalizeFileUrl(value.src),
       download: value.download,
     }));
+}
+
+function createLakeMount(element: HTMLElement, className: string): HTMLDivElement {
+  const mountElement = document.createElement("div");
+  mountElement.className = `lake-editor-mount ${className}`;
+  element.replaceChildren(mountElement);
+  return mountElement;
+}
+
+function createLakeRuntimeOptions(options: CreateLakeViewerOptions): Record<string, unknown> {
+  return {
+    defaultFontsize: 19,
+    toc: {
+      enable: options.tocEnabled ?? true,
+      normalView: options.tocEnabled ?? true,
+    },
+    codeblock: {
+      codemirrorURL: "/vendor/lakex-doc/codemirror.js",
+    },
+    math: {
+      KaTexURL: "/vendor/lakex-doc/katex.min.js",
+    },
+    file: createLakeFileOptions(options.downloadFile),
+  };
+}
+
+function createLakeFileOptions(downloadFile: (file: LakeFileDownload) => void | Promise<void>): Record<string, unknown> {
+  return {
+    getFileDownloadURL(src: string) {
+      return normalizeFileUrl(src);
+    },
+    getPreviewUrl(src: string) {
+      return normalizeFileUrl(src);
+    },
+    canDownload(cardData: unknown) {
+      return Boolean(extractCardDataSrc(cardData));
+    },
+    canPreview(cardData: unknown) {
+      return Boolean(extractCardDataSrc(cardData));
+    },
+    downloadFileHandler(cardData: unknown) {
+      downloadFileCard(cardData, downloadFile);
+    },
+    previewFileHandler(cardData: unknown) {
+      downloadFileCard(cardData, downloadFile);
+    },
+    onViewerInlineFileClick(event: MouseEvent, ui: unknown) {
+      event.preventDefault();
+      downloadFileCard(ui, downloadFile);
+    },
+  };
+}
+
+function bindLakeInstanceCleanup(
+  element: HTMLElement,
+  editor: LakeEditorInstance,
+  unbinders: Array<() => void>,
+): void {
+  const destroy = editor.destroy?.bind(editor);
+  const destory = editor.destory?.bind(editor);
+  let destroyed = false;
+  const destroyEditor = () => {
+    if (destroyed) {
+      return;
+    }
+    destroyed = true;
+    unbinders.forEach((unbind) => unbind());
+    if (destroy) {
+      destroy();
+    } else {
+      destory?.();
+    }
+    // Lake destroy 可能会移除自己的挂载节点；这里兜底清理外层壳内残留，
+    // 但外层壳始终交给 React 卸载，避免 React 再 removeChild 一个已被第三方移除的节点。
+    element.replaceChildren();
+  };
+  editor.destroy = destroyEditor;
+  editor.destory = destroyEditor;
 }
 
 function bindRenderedFileToolbar(
@@ -237,6 +295,184 @@ function bindRenderedFileToolbar(
     toolbar.querySelector("[data-lake-file-action='download']")?.removeEventListener("click", onDownload);
     toolbar.remove();
   };
+}
+
+function bindRenderedCodeblockCopyButton(element: HTMLElement): () => void {
+  const observer = new MutationObserver(() => {
+    enhanceRenderedCodeblocks(element);
+  });
+
+  enhanceRenderedCodeblocks(element);
+  observer.observe(element, { childList: true, subtree: true });
+
+  return () => {
+    observer.disconnect();
+    element.querySelectorAll("[data-lake-codeblock-action='copy']").forEach((button) => button.remove());
+  };
+}
+
+function enhanceRenderedCodeblocks(element: HTMLElement): void {
+  element.querySelectorAll(codeblockSelector).forEach((codeblock) => {
+    if (!(codeblock instanceof HTMLElement) || codeblock.querySelector(codeblockCopySelector)) {
+      return;
+    }
+
+    const codeText = readRenderedCodeblockText(codeblock);
+    if (!codeText) {
+      return;
+    }
+
+    const button = createCodeblockCopyButton(codeblock);
+    const endNav = findOrCreateCodeblockEndNav(codeblock);
+    endNav.append(button);
+  });
+}
+
+function createCodeblockCopyButton(codeblock: HTMLElement): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "ne-codeblock-copy lake-codeblock-copy-button";
+  button.dataset.lakeCodeblockAction = "copy";
+  button.title = "复制代码";
+  button.setAttribute("aria-label", "复制代码");
+  button.innerHTML = `${iconSvg("copy")}<span>复制代码</span>`;
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void copyRenderedCodeblock(codeblock, button);
+  });
+  return button;
+}
+
+async function copyRenderedCodeblock(codeblock: HTMLElement, button: HTMLButtonElement): Promise<void> {
+  const codeText = readRenderedCodeblockText(codeblock);
+  if (!codeText) {
+    return;
+  }
+
+  // 桌面 WebView 可能限制 Clipboard API；失败时回退到 execCommand，保证代码块操作可用。
+  const copied = await writeClipboardText(codeText);
+  showCodeblockCopyState(button, copied ? "已复制" : "复制失败");
+}
+
+async function writeClipboardText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // 继续走兼容路径。
+  }
+
+  return copyTextBySelection(text);
+}
+
+function copyTextBySelection(text: string): boolean {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.top = "-9999px";
+  textarea.style.opacity = "0";
+  document.body.append(textarea);
+  textarea.select();
+
+  try {
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    textarea.remove();
+  }
+}
+
+function showCodeblockCopyState(button: HTMLButtonElement, text: string): void {
+  const label = button.querySelector("span");
+  const previousText = label?.textContent ?? "复制代码";
+  if (label) {
+    label.textContent = text;
+  }
+
+  window.setTimeout(() => {
+    if (label?.isConnected) {
+      label.textContent = previousText;
+    }
+  }, 1400);
+}
+
+function findOrCreateCodeblockEndNav(codeblock: HTMLElement): HTMLElement {
+  const existingEndNav = codeblock.querySelector(".codeblock-menu .end-nav");
+  if (existingEndNav instanceof HTMLElement) {
+    return existingEndNav;
+  }
+
+  const existingMenu = codeblock.querySelector(".codeblock-menu");
+  if (existingMenu instanceof HTMLElement) {
+    const endNav = document.createElement("div");
+    endNav.className = "end-nav";
+    existingMenu.append(endNav);
+    return endNav;
+  }
+
+  const menu = document.createElement("div");
+  menu.className = "codeblock-menu lake-codeblock-copy-menu";
+  const startNav = document.createElement("div");
+  startNav.className = "start-nav";
+  const languageLabel = readRenderedCodeblockLanguage(codeblock);
+  if (languageLabel) {
+    const language = document.createElement("span");
+    language.className = "ne-codeblock-mode-name";
+    language.textContent = languageLabel;
+    startNav.append(language);
+  }
+  const endNav = document.createElement("div");
+  endNav.className = "end-nav";
+  menu.append(startNav, endNav);
+  codeblock.prepend(menu);
+  return endNav;
+}
+
+function readRenderedCodeblockText(codeblock: HTMLElement): string {
+  // CodeMirror 5/6 的 DOM 都按行渲染；必须逐行读取，避免 textContent 把换行和缩进压成一行。
+  const codeMirrorLines = readCodeMirrorLines(codeblock);
+  if (codeMirrorLines.length > 0) {
+    return codeMirrorLines.join("\n");
+  }
+
+  const codeElement = codeblock.querySelector("code");
+  if (codeElement?.textContent) {
+    return codeElement.textContent;
+  }
+
+  const cloned = codeblock.cloneNode(true);
+  if (!(cloned instanceof HTMLElement)) {
+    return "";
+  }
+  cloned.querySelectorAll(".codeblock-menu, .lake-codeblock-copy-button").forEach((node) => node.remove());
+  return cloned.textContent ?? "";
+}
+
+function readCodeMirrorLines(codeblock: HTMLElement): string[] {
+  const codeMirror6Lines = Array.from(codeblock.querySelectorAll(".cm-content .cm-line, .cm-line"))
+    .filter((line) => !line.closest(".codeblock-menu"))
+    .map((line) => line.textContent ?? "");
+  if (codeMirror6Lines.length > 0) {
+    return codeMirror6Lines;
+  }
+
+  return Array.from(codeblock.querySelectorAll(".CodeMirror-code pre.CodeMirror-line, .CodeMirror-code pre.CodeMirror-line-like, .CodeMirror-code pre, .CodeMirror-line"))
+    .filter((line) => !line.closest(".codeblock-menu"))
+    .map((line) => line.textContent ?? "");
+}
+
+function readRenderedCodeblockLanguage(codeblock: HTMLElement): string {
+  return (
+    codeblock.getAttribute("data-codeblock-mode") ??
+    codeblock.getAttribute("data-language") ??
+    codeblock.querySelector(".ne-codeblock-mode-name")?.textContent ??
+    ""
+  );
 }
 
 function targetElement(target: EventTarget | null): Element | null {
@@ -337,9 +573,10 @@ function positionFileToolbar(toolbar: HTMLElement, fileCard: HTMLElement): void 
   toolbar.style.top = `${top}px`;
 }
 
-function iconSvg(name: "download"): string {
+function iconSvg(name: "download" | "copy"): string {
   const paths = {
     download: '<path d="M12 15V3" /><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="m7 10 5 5 5-5" />',
+    copy: '<rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />',
   };
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;

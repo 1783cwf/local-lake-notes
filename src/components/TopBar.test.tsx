@@ -92,6 +92,62 @@ test("表格文档显示 Excel 导入导出菜单", async () => {
   expect(onExportSpreadsheetExcel).toHaveBeenCalledTimes(1);
 });
 
+test("Lake 文档右上角可以从编辑模式切换到阅读模式", async () => {
+  const user = userEvent.setup();
+  const onSetDocumentMode = vi.fn();
+
+  render(
+    <TopBar
+      document={{
+        id: "测试文件1.lake",
+        path: "测试文件1.lake",
+        name: "测试文件1",
+        parentPath: "",
+        size: 1,
+        kind: "lake",
+      }}
+      documentMode="edit"
+      saveStatus={{ state: "clean" }}
+      onManualSave={vi.fn()}
+      onSetDocumentMode={onSetDocumentMode}
+    />,
+  );
+
+  await user.click(screen.getByRole("button", { name: "进入阅读模式" }));
+
+  expect(onSetDocumentMode).toHaveBeenCalledWith("read");
+  expect(screen.getByRole("button", { name: "保存" })).toBeEnabled();
+});
+
+test("Lake 文档阅读模式下可以切回编辑且禁用保存和 AI 文档助手", async () => {
+  const user = userEvent.setup();
+  const onSetDocumentMode = vi.fn();
+
+  render(
+    <TopBar
+      document={{
+        id: "测试文件1.lake",
+        path: "测试文件1.lake",
+        name: "测试文件1",
+        parentPath: "",
+        size: 1,
+        kind: "lake",
+      }}
+      documentMode="read"
+      saveStatus={{ state: "clean" }}
+      onManualSave={vi.fn()}
+      onSetDocumentMode={onSetDocumentMode}
+    />,
+  );
+
+  expect(screen.queryByRole("button", { name: "AI 文档助手" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
+
+  await user.click(screen.getByRole("button", { name: "进入编辑模式" }));
+
+  expect(onSetDocumentMode).toHaveBeenCalledWith("edit");
+});
+
 test("多维表格只显示保存和分享，不显示文档或 Excel 导出菜单", () => {
   render(
     <TopBar

@@ -1,12 +1,22 @@
 import {
   createLakeEditor,
+  createLakeViewer,
   destroyLakeEditor,
   extractLakeFileCards,
   hasLakeEditorRuntime,
+  hasLakeViewerRuntime,
 } from "./lakeEditorAdapter";
 import type { LakeEditorInstance } from "./editorTypes";
 
+const originalNavigatorClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+
 afterEach(() => {
+  vi.restoreAllMocks();
+  if (originalNavigatorClipboardDescriptor) {
+    Object.defineProperty(navigator, "clipboard", originalNavigatorClipboardDescriptor);
+  } else {
+    Reflect.deleteProperty(navigator, "clipboard");
+  }
   document.body.innerHTML = "";
   window.Doc = undefined;
 });
@@ -15,6 +25,7 @@ test("缺少 window.Doc 时报告运行时不可用", () => {
   window.Doc = undefined;
 
   expect(hasLakeEditorRuntime()).toBe(false);
+  expect(hasLakeViewerRuntime()).toBe(false);
   expect(() =>
     createLakeEditor(document.createElement("div"), {
       onContentChange: vi.fn(),
@@ -23,6 +34,11 @@ test("缺少 window.Doc 时报告运行时不可用", () => {
       downloadFile: vi.fn(),
     }),
   ).toThrow("语雀编辑器资源未加载");
+  expect(() =>
+    createLakeViewer(document.createElement("div"), {
+      downloadFile: vi.fn(),
+    }),
+  ).toThrow("语雀阅读器资源未加载");
 });
 
 test("创建编辑器时配置 Lake 图片、附件上传和大纲能力", () => {
@@ -94,6 +110,79 @@ test("嵌入式 Lake 编辑器可以关闭大纲", () => {
   });
 
   expect(window.Doc.createOpenEditor).toHaveBeenCalledWith(
+    expect.any(HTMLDivElement),
+    expect.objectContaining({
+      toc: {
+        enable: false,
+        normalView: false,
+      },
+    }),
+  );
+});
+
+test("创建阅读器时使用语雀 Viewer 并绑定展示态基础能力", () => {
+  const viewer: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => ""),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => {
+      throw new Error("不应创建编辑器");
+    }),
+    createOpenViewer: vi.fn(() => viewer),
+  };
+  const root = document.createElement("div");
+
+  const created = createLakeViewer(root, {
+    downloadFile: vi.fn(),
+  });
+
+  expect(created).toBe(viewer);
+  expect(hasLakeViewerRuntime()).toBe(true);
+  expect(window.Doc.createOpenViewer).toHaveBeenCalledWith(
+    expect.any(HTMLDivElement),
+    expect.objectContaining({
+      input: {},
+      toc: expect.objectContaining({ enable: true }),
+      codeblock: expect.objectContaining({
+        codemirrorURL: "/vendor/lakex-doc/codemirror.js",
+      }),
+      math: expect.objectContaining({
+        KaTexURL: "/vendor/lakex-doc/katex.min.js",
+      }),
+      file: expect.objectContaining({
+        getFileDownloadURL: expect.any(Function),
+        getPreviewUrl: expect.any(Function),
+      }),
+    }),
+  );
+  expect(root.querySelector(".ne-doc-major-viewer")).toBeInstanceOf(HTMLDivElement);
+  expect(window.Doc.createOpenEditor).not.toHaveBeenCalled();
+  destroyLakeEditor(created);
+});
+
+test("阅读器支持按需关闭大纲配置", () => {
+  const viewer: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => ""),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => {
+      throw new Error("不应创建编辑器");
+    }),
+    createOpenViewer: vi.fn(() => viewer),
+  };
+
+  createLakeViewer(document.createElement("div"), {
+    tocEnabled: false,
+    downloadFile: vi.fn(),
+  });
+
+  expect(window.Doc.createOpenViewer).toHaveBeenCalledWith(
     expect.any(HTMLDivElement),
     expect.objectContaining({
       toc: {
@@ -198,6 +287,7 @@ test("点击附件文字节点时也能显示下载工具条", () => {
     createOpenEditor: vi.fn(() => editor),
   };
   const root = document.createElement("div");
+  document.body.append(root);
 
   const created = createLakeEditor(root, {
     onContentChange: vi.fn(),
@@ -211,6 +301,132 @@ test("点击附件文字节点时也能显示下载工具条", () => {
   expect(document.body.querySelector(".lake-file-floating-toolbar")).not.toHaveAttribute("hidden");
   destroyLakeEditor(created);
 });
+
+test("代码块缺少内置复制入口时自动补充右侧复制代码按钮", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  const editor: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => ""),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+  const root = document.createElement("div");
+  document.body.append(root);
+
+  const created = createLakeEditor(root, {
+    onContentChange: vi.fn(),
+    uploadImage: vi.fn(),
+    uploadFile: vi.fn(),
+    downloadFile: vi.fn(),
+  });
+  root.querySelector(".lake-editor-mount")!.innerHTML = `
+    <div class="ne-codeblock" data-codeblock-mode="yaml">
+      <div class="ne-codeblock-inner">
+        <div class="CodeMirror-code">
+          <pre>name: test</pre>
+          <pre>revision: 6</pre>
+        </div>
+      </div>
+    </div>
+  `;
+  await waitForMutationObserver();
+
+  const copyButton = root.querySelector("[data-lake-codeblock-action='copy']");
+  expect(copyButton).toBeInTheDocument();
+  expect(copyButton?.closest(".end-nav")).toBeInTheDocument();
+  copyButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await Promise.resolve();
+
+  expect(writeText).toHaveBeenCalledWith("name: test\nrevision: 6");
+  destroyLakeEditor(created);
+});
+
+test("代码块复制会保留 CodeMirror 行格式和缩进", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  const editor: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => ""),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+  const root = document.createElement("div");
+  document.body.append(root);
+
+  const created = createLakeEditor(root, {
+    onContentChange: vi.fn(),
+    uploadImage: vi.fn(),
+    uploadFile: vi.fn(),
+    downloadFile: vi.fn(),
+  });
+  root.querySelector(".lake-editor-mount")!.innerHTML = `
+    <div class="ne-codeblock" data-codeblock-mode="yaml">
+      <div class="ne-codeblock-inner">
+        <div class="cm-content">
+          <div class="cm-line">spec:</div>
+          <div class="cm-line">  selector:</div>
+          <div class="cm-line">    app: demo</div>
+          <div class="cm-line"></div>
+          <div class="cm-line">  replicas: 2</div>
+        </div>
+      </div>
+    </div>
+  `;
+  await waitForMutationObserver();
+
+  root.querySelector("[data-lake-codeblock-action='copy']")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await Promise.resolve();
+
+  expect(writeText).toHaveBeenCalledWith("spec:\n  selector:\n    app: demo\n\n  replicas: 2");
+  destroyLakeEditor(created);
+});
+
+test("代码块已有内置复制入口时不重复补充按钮", async () => {
+  const editor: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => ""),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+  const root = document.createElement("div");
+
+  const created = createLakeEditor(root, {
+    onContentChange: vi.fn(),
+    uploadImage: vi.fn(),
+    uploadFile: vi.fn(),
+    downloadFile: vi.fn(),
+  });
+  root.querySelector(".lake-editor-mount")!.innerHTML = `
+    <div class="ne-codeblock">
+      <div class="codeblock-menu"><div class="end-nav"><span class="ne-codeblock-copy">复制代码</span></div></div>
+      <code>already has copy</code>
+    </div>
+  `;
+  await waitForMutationObserver();
+
+  expect(root.querySelectorAll("[data-lake-codeblock-action='copy']")).toHaveLength(0);
+  destroyLakeEditor(created);
+});
+
+function waitForMutationObserver(): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, 0));
+}
 
 test("从 Lake 内容中提取附件卡片下载信息", () => {
   const value = `data:${encodeURIComponent(JSON.stringify({

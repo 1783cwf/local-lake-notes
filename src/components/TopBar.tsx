@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Bot, ChevronDown, Cloud, Download, FileSpreadsheet, FileText, Grid2X2, Loader2, Pin, Save, Share2, X } from "lucide-react";
+import { Bot, ChevronDown, Cloud, Download, Eye, FileSpreadsheet, FileText, Grid2X2, Loader2, Pencil, Pin, Save, Share2, X } from "lucide-react";
 
-import type { OpenDocumentTab, SaveStatus } from "../app/appState";
+import type { DocumentOpenMode, OpenDocumentTab, SaveStatus } from "../app/appState";
 import type { DocumentExportFormat, ExportResourceStrategy } from "../features/lake-editor/lakeExport";
 import type { WorkspaceDocument } from "../features/workspace/workspaceStore";
 import { documentTitleFromPath } from "../features/workspace/workspaceStore";
@@ -15,9 +15,11 @@ interface TopBarProps {
   document: WorkspaceDocument | null;
   openTabs?: OpenDocumentTabView[];
   activeTabId?: string | null;
+  documentMode?: DocumentOpenMode;
   saveStatus: SaveStatus;
   onManualSave: () => void;
   onOpenAiAssistant?: () => void;
+  onSetDocumentMode?: (mode: DocumentOpenMode) => void | Promise<void>;
   onActivateTab?: (tabId: string) => void | Promise<void>;
   onToggleTabLocked?: (tabId: string) => void;
   onCloseTab?: (tabId: string) => void | Promise<void>;
@@ -36,9 +38,11 @@ export function TopBar({
   document,
   openTabs = [],
   activeTabId = null,
+  documentMode = "edit",
   saveStatus,
   onManualSave,
   onOpenAiAssistant,
+  onSetDocumentMode,
   onActivateTab,
   onToggleTabLocked,
   onCloseTab,
@@ -62,6 +66,7 @@ export function TopBar({
   const activeTabRef = useRef<HTMLDivElement | null>(null);
   const ttlOptions = Array.from(new Set([ttlSeconds, 3600, 24 * 3600, 7 * 24 * 3600])).sort((left, right) => left - right);
   const menuTab = tabMenu ? openTabs.find((tab) => tab.id === tabMenu.tabId) : null;
+  const lakeReadMode = document?.kind === "lake" && documentMode === "read";
 
   useEffect(() => {
     if (!editingTitle) {
@@ -271,7 +276,7 @@ export function TopBar({
         </span>
       </div>
       <div className="top-bar__actions">
-        {document?.kind === "lake" || document?.kind === "multidimensional-table" || document?.kind === "spreadsheet" ? (
+        {(document?.kind === "lake" && !lakeReadMode) || document?.kind === "multidimensional-table" || document?.kind === "spreadsheet" ? (
           <IconButton
             label={document.kind === "multidimensional-table" ? "AI 多维表格助手" : document.kind === "spreadsheet" ? "AI 表格助手" : "AI 文档助手"}
             onClick={() => onOpenAiAssistant?.()}
@@ -280,7 +285,17 @@ export function TopBar({
             <Bot size={18} />
           </IconButton>
         ) : null}
-        <IconButton label="保存" onClick={onManualSave} disabled={!document}>
+        {document?.kind === "lake" ? (
+          <IconButton
+            label={lakeReadMode ? "进入编辑模式" : "进入阅读模式"}
+            active={lakeReadMode}
+            onClick={() => void onSetDocumentMode?.(lakeReadMode ? "edit" : "read")}
+            disabled={!document}
+          >
+            {lakeReadMode ? <Pencil size={18} /> : <Eye size={18} />}
+          </IconButton>
+        ) : null}
+        <IconButton label="保存" onClick={onManualSave} disabled={!document || lakeReadMode}>
           <Save size={18} />
         </IconButton>
         {document?.kind === "spreadsheet" ? (
