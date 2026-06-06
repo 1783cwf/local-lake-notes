@@ -744,6 +744,77 @@ test("启动时加载已知知识库列表并可切换当前知识库", async ()
   });
 });
 
+test("锁定标签后切换知识库仍保留标签并可切回原知识库内容", async () => {
+  const user = userEvent.setup();
+  const workWorkspace: WorkspacePayload = {
+    root: "/tmp/work",
+    directories: [],
+    documents: [{ id: "same.lake", path: "same.lake", name: "same", parentPath: "", size: 1, kind: "lake" }],
+    order: ["document:same.lake"],
+  };
+  const lifeWorkspace: WorkspacePayload = {
+    root: "/tmp/life",
+    directories: [],
+    documents: [{ id: "same.lake", path: "same.lake", name: "same", parentPath: "", size: 1, kind: "lake" }],
+    order: ["document:same.lake"],
+  };
+  getRecentWorkspace.mockResolvedValue(workWorkspace);
+  listKnownWorkspaces.mockResolvedValue([
+    { root: "/tmp/work", name: "work", lastOpenedAt: "2026-05-08T00:00:00Z" },
+    { root: "/tmp/life", name: "life", lastOpenedAt: "2026-05-07T00:00:00Z" },
+  ]);
+  setWorkspaceRoot.mockImplementation(async (root) => {
+    if (root === "/tmp/life") {
+      return lifeWorkspace;
+    }
+    if (root === "/tmp/work") {
+      return workWorkspace;
+    }
+    throw new Error(`未知知识库 ${root}`);
+  });
+  const readCalls: string[] = [];
+  readLakeDocument.mockImplementation(async (path) => {
+    const workspaceRoot = setWorkspaceRoot.mock.calls.at(-1)?.[0] ?? "/tmp/work";
+    readCalls.push(`${workspaceRoot}:${path}`);
+    return `<p>${workspaceRoot}:${path}</p>`;
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "same" }));
+  await user.pointer({ keys: "[MouseRight]", target: await screen.findByRole("tab", { name: "same" }) });
+  await user.click(screen.getByRole("menuitem", { name: "锁定标签" }));
+  await user.click(screen.getByRole("button", { name: "切换 life" }));
+
+  await waitFor(() => {
+    expect(screen.getByTestId("active-workspace-root")).toHaveTextContent("/tmp/life");
+    expect(screen.getByRole("tab", { name: "same，已锁定" })).toBeInTheDocument();
+    expect(screen.getByTestId("current-path")).toHaveTextContent("");
+  });
+
+  await user.click(screen.getByRole("treeitem", { name: "same" }));
+
+  await waitFor(() => {
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+    expect(screen.getByRole("tab", { name: "same" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("active-workspace-root")).toHaveTextContent("/tmp/life");
+    expect(screen.getByTestId("current-path")).toHaveTextContent("same.lake");
+  });
+
+  await user.click(screen.getByRole("tab", { name: "same，已锁定" }));
+
+  await waitFor(() => {
+    expect(setWorkspaceRoot).toHaveBeenLastCalledWith("/tmp/life");
+    expect(screen.getByTestId("active-workspace-root")).toHaveTextContent("/tmp/life");
+    expect(screen.getByTestId("current-path")).toHaveTextContent("same.lake");
+  });
+  await waitFor(() => {
+    expect(readLakeDocument).toHaveBeenLastCalledWith("same.lake");
+    expect(readCalls).toContain("/tmp/work:same.lake");
+    expect(screen.getByRole("treeitem", { name: "same" })).toBeInTheDocument();
+  });
+});
+
 test("打开第二个文档时未锁定标签会被替换", async () => {
   const user = userEvent.setup();
   getRecentWorkspace.mockResolvedValue({

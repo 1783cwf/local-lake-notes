@@ -895,7 +895,10 @@ button {
     border-color 0.16s ease,
     background 0.16s ease,
     box-shadow 0.16s ease,
-    color 0.16s ease;
+    color 0.16s ease,
+    transform 0.16s ease,
+    opacity 0.16s ease;
+  position: relative;
 }
 
 .document-tab:hover,
@@ -916,6 +919,45 @@ button {
 
 .document-tab.is-locked:not(.is-active) {
   color: #9aa1a7;
+}
+
+.document-tab.is-dragging {
+  opacity: 0.36;
+}
+
+.document-tab.is-drop-before,
+.document-tab.is-drop-after {
+  background: var(--drop-blue-soft);
+  border-color: var(--drop-blue);
+  box-shadow: inset 0 0 0 1px var(--drop-blue-line);
+}
+
+.document-tab.is-drop-before {
+  transform: translateX(5px);
+}
+
+.document-tab.is-drop-after {
+  transform: translateX(-5px);
+}
+
+.document-tab.is-drop-before::before,
+.document-tab.is-drop-after::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  width: 4px;
+  border-radius: 999px;
+  background: var(--drop-blue);
+  box-shadow: 0 0 0 3px var(--drop-blue-soft);
+}
+
+.document-tab.is-drop-before::before {
+  left: -6px;
+}
+
+.document-tab.is-drop-after::after {
+  right: -6px;
 }
 
 .document-tab__icon {
