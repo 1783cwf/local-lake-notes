@@ -19,6 +19,10 @@ export interface LakeEditorRuntime {
     element: HTMLElement,
     options: Record<string, unknown>,
   ): LakeEditorInstance;
+  createOpenViewer?(
+    element: HTMLElement,
+    options: Record<string, unknown>,
+  ): LakeEditorInstance;
 }
 
 declare global {

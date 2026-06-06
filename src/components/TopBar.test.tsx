@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { TopBar } from "./TopBar";
+import { reorderTabIds, TopBar } from "./TopBar";
 
 test("双击文档标题后可以提交新名称", async () => {
   const user = userEvent.setup();
@@ -92,6 +92,62 @@ test("表格文档显示 Excel 导入导出菜单", async () => {
   expect(onExportSpreadsheetExcel).toHaveBeenCalledTimes(1);
 });
 
+test("Lake 文档右上角可以从编辑模式切换到阅读模式", async () => {
+  const user = userEvent.setup();
+  const onSetDocumentMode = vi.fn();
+
+  render(
+    <TopBar
+      document={{
+        id: "测试文件1.lake",
+        path: "测试文件1.lake",
+        name: "测试文件1",
+        parentPath: "",
+        size: 1,
+        kind: "lake",
+      }}
+      documentMode="edit"
+      saveStatus={{ state: "clean" }}
+      onManualSave={vi.fn()}
+      onSetDocumentMode={onSetDocumentMode}
+    />,
+  );
+
+  await user.click(screen.getByRole("button", { name: "进入阅读模式" }));
+
+  expect(onSetDocumentMode).toHaveBeenCalledWith("read");
+  expect(screen.getByRole("button", { name: "保存" })).toBeEnabled();
+});
+
+test("Lake 文档阅读模式下可以切回编辑且禁用保存和 AI 文档助手", async () => {
+  const user = userEvent.setup();
+  const onSetDocumentMode = vi.fn();
+
+  render(
+    <TopBar
+      document={{
+        id: "测试文件1.lake",
+        path: "测试文件1.lake",
+        name: "测试文件1",
+        parentPath: "",
+        size: 1,
+        kind: "lake",
+      }}
+      documentMode="read"
+      saveStatus={{ state: "clean" }}
+      onManualSave={vi.fn()}
+      onSetDocumentMode={onSetDocumentMode}
+    />,
+  );
+
+  expect(screen.queryByRole("button", { name: "AI 文档助手" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
+
+  await user.click(screen.getByRole("button", { name: "进入编辑模式" }));
+
+  expect(onSetDocumentMode).toHaveBeenCalledWith("edit");
+});
+
 test("多维表格只显示保存和分享，不显示文档或 Excel 导出菜单", () => {
   render(
     <TopBar
@@ -157,6 +213,51 @@ test("顶部栏可以渲染多个文档标签并激活非当前标签", async ()
   await user.click(screen.getByRole("tab", { name: "a，已锁定" }));
 
   expect(onActivateTab).toHaveBeenCalledWith("a.lake");
+});
+
+test("顶部栏标签拖拽不再依赖原生 draggable 属性", () => {
+  render(
+    <TopBar
+      document={{
+        id: "c.lake",
+        path: "c.lake",
+        name: "c",
+        parentPath: "",
+        size: 1,
+        kind: "lake",
+      }}
+      openTabs={[
+        {
+          id: "a.lake",
+          path: "a.lake",
+          locked: false,
+          document: { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+        },
+        {
+          id: "b.lake",
+          path: "b.lake",
+          locked: false,
+          document: { id: "b.lake", path: "b.lake", name: "b", parentPath: "", size: 1, kind: "lake" },
+        },
+        {
+          id: "c.lake",
+          path: "c.lake",
+          locked: false,
+          document: { id: "c.lake", path: "c.lake", name: "c", parentPath: "", size: 1, kind: "lake" },
+        },
+      ]}
+      activeTabId="c.lake"
+      saveStatus={{ state: "clean" }}
+      onManualSave={vi.fn()}
+    />,
+  );
+
+  expect(screen.getByRole("tab", { name: "c" })).not.toHaveAttribute("draggable");
+});
+
+test("顶部栏标签排序支持移动到最前面", () => {
+  expect(reorderTabIds(["a.lake", "b.lake", "c.lake"], "c.lake", "a.lake", "before"))
+    .toEqual(["c.lake", "a.lake", "b.lake"]);
 });
 
 test("标签右键菜单支持锁定和解除锁定", async () => {

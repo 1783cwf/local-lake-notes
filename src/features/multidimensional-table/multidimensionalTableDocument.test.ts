@@ -108,11 +108,52 @@ test("字段删除会同步清理记录值和看板视图引用", () => {
     title: "测试记录1",
     date: "2026-05-07T12:30",
   });
-  const deleted = deleteMultidimensionalField({ ...source, records: [record] }, "date");
+  const deleted = deleteMultidimensionalField({
+    ...source,
+    records: [record],
+    views: source.views.map((view) => view.type === "board"
+      ? { ...view, sortFieldId: "date", sortDirection: "desc" }
+      : view),
+  }, "date");
 
   expect(deleted.fields.some((field) => field.id === "date")).toBe(false);
   expect(deleted.records[0].values).not.toHaveProperty("date");
-  expect(deleted.views.find((view) => view.type === "board")?.cardFieldIds).not.toContain("date");
+  const boardView = deleted.views.find((view) => view.type === "board");
+  expect(boardView?.cardFieldIds).not.toContain("date");
+  expect(boardView?.sortFieldId).toBeUndefined();
+  expect(boardView?.sortDirection).toBeUndefined();
+});
+
+test("视图排序配置会解析保存并忽略失效字段", () => {
+  const source = createDefaultMultidimensionalTableDocument();
+  const parsed = parseMultidimensionalTableDocument(JSON.stringify({
+    ...source,
+    views: source.views.map((view) => view.type === "table"
+      ? { ...view, sortFieldId: "title", sortDirection: "desc" }
+      : { ...view, sortFieldId: "missing", sortDirection: "desc" }),
+  }));
+
+  const tableView = parsed.views.find((view) => view.type === "table");
+  const boardView = parsed.views.find((view) => view.type === "board");
+  expect(tableView?.sortFieldId).toBe("title");
+  expect(tableView?.sortDirection).toBe("desc");
+  expect(boardView?.sortFieldId).toBeUndefined();
+  expect(boardView?.sortDirection).toBeUndefined();
+  expect(serializeMultidimensionalTableDocument(parsed)).toContain("\"sortFieldId\": \"title\"");
+});
+
+test("看板隐藏空分组配置会解析并保存", () => {
+  const source = createDefaultMultidimensionalTableDocument();
+  const parsed = parseMultidimensionalTableDocument(JSON.stringify({
+    ...source,
+    views: source.views.map((view) => view.type === "board"
+      ? { ...view, hideEmptyGroups: true }
+      : view),
+  }));
+
+  const boardView = parsed.views.find((view) => view.type === "board");
+  expect(boardView?.hideEmptyGroups).toBe(true);
+  expect(serializeMultidimensionalTableDocument(parsed)).toContain("\"hideEmptyGroups\": true");
 });
 
 test("字段排序只调整字段顺序并保留记录值", () => {

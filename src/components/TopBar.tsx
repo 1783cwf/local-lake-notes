@@ -1,7 +1,28 @@
-import { useEffect, useRef, useState } from "react";
-import { Bot, ChevronDown, Cloud, Download, FileSpreadsheet, FileText, Grid2X2, Loader2, Pin, Save, Share2, X } from "lucide-react";
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  pointerWithin,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type CollisionDetection,
+  type DragEndEvent,
+  type DragMoveEvent,
+  type DragOverEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  type SortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type MutableRefObject } from "react";
+import { Bot, ChevronDown, Cloud, Download, Eye, FileSpreadsheet, FileText, Grid2X2, Loader2, Pencil, Pin, Save, Share2, X } from "lucide-react";
 
-import type { OpenDocumentTab, SaveStatus } from "../app/appState";
+import type { DocumentOpenMode, OpenDocumentTab, SaveStatus } from "../app/appState";
 import type { DocumentExportFormat, ExportResourceStrategy } from "../features/lake-editor/lakeExport";
 import type { WorkspaceDocument } from "../features/workspace/workspaceStore";
 import { documentTitleFromPath } from "../features/workspace/workspaceStore";
@@ -11,14 +32,23 @@ export interface OpenDocumentTabView extends OpenDocumentTab {
   document: WorkspaceDocument;
 }
 
+const tabCollisionDetection: CollisionDetection = (args) => {
+  const pointerCollisions = pointerWithin(args);
+  return pointerCollisions.length > 0 ? pointerCollisions : closestCenter(args);
+};
+const staticTabSortingStrategy: SortingStrategy = () => null;
+
 interface TopBarProps {
   document: WorkspaceDocument | null;
   openTabs?: OpenDocumentTabView[];
   activeTabId?: string | null;
+  documentMode?: DocumentOpenMode;
   saveStatus: SaveStatus;
   onManualSave: () => void;
   onOpenAiAssistant?: () => void;
+  onSetDocumentMode?: (mode: DocumentOpenMode) => void | Promise<void>;
   onActivateTab?: (tabId: string) => void | Promise<void>;
+  onReorderTabs?: (orderedTabIds: string[]) => void;
   onToggleTabLocked?: (tabId: string) => void;
   onCloseTab?: (tabId: string) => void | Promise<void>;
   onRenameDocument?: (title: string) => void | Promise<void>;
@@ -36,10 +66,13 @@ export function TopBar({
   document,
   openTabs = [],
   activeTabId = null,
+  documentMode = "edit",
   saveStatus,
   onManualSave,
   onOpenAiAssistant,
+  onSetDocumentMode,
   onActivateTab,
+  onReorderTabs,
   onToggleTabLocked,
   onCloseTab,
   onRenameDocument,
@@ -57,11 +90,23 @@ export function TopBar({
   const [draftTitle, setDraftTitle] = useState(title);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [tabMenu, setTabMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
+  const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ tabId: string; placement: TabDropPlacement } | null>(null);
   const [resourceStrategy, setResourceStrategy] = useState<ExportResourceStrategy>(defaultExportResourceStrategy);
   const [ttlSeconds, setTtlSeconds] = useState(defaultSignedUrlTtlSeconds);
   const activeTabRef = useRef<HTMLDivElement | null>(null);
   const ttlOptions = Array.from(new Set([ttlSeconds, 3600, 24 * 3600, 7 * 24 * 3600])).sort((left, right) => left - right);
   const menuTab = tabMenu ? openTabs.find((tab) => tab.id === tabMenu.tabId) : null;
+  const lakeReadMode = document?.kind === "lake" && documentMode === "read";
+  const tabIds = openTabs.map((tab) => tab.id);
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 4 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
 
   useEffect(() => {
     if (!editingTitle) {
@@ -101,106 +146,81 @@ export function TopBar({
     setExportMenuOpen(false);
     onExportDocument?.(format, resourceStrategy, ttlSeconds);
   };
+  const finishTabDrag = () => {
+    setDraggingTabId(null);
+    setDropTarget(null);
+  };
+  const updateTabDropIntent = (event: DragMoveEvent | DragOverEvent) => {
+    const sourceTabId = String(event.active.id);
+    const targetTabId = String(event.over?.id ?? "");
+    const placement = resolveTabDropPlacement(targetTabId, pointerX(event));
+    setDropTarget(targetTabId && sourceTabId !== targetTabId && placement ? { tabId: targetTabId, placement } : null);
+  };
+  const onTabDragStart = (event: DragStartEvent) => {
+    setDraggingTabId(String(event.active.id));
+    setTabMenu(null);
+  };
+  const onTabDragMove = (event: DragMoveEvent) => updateTabDropIntent(event);
+  const onTabDragOver = (event: DragOverEvent) => updateTabDropIntent(event);
+  const onTabDragEnd = (event: DragEndEvent) => {
+    const sourceTabId = String(event.active.id);
+    const targetTabId = String(event.over?.id ?? "");
+    const placement = dropTarget?.tabId === targetTabId ? dropTarget.placement : resolveTabDropPlacement(targetTabId, pointerX(event));
+    finishTabDrag();
+    if (!targetTabId || !placement) {
+      return;
+    }
+
+    const orderedTabIds = reorderTabIds(tabIds, sourceTabId, targetTabId, placement);
+    if (orderedTabIds.every((tabId, index) => tabId === openTabs[index]?.id)) {
+      return;
+    }
+    onReorderTabs?.(orderedTabIds);
+  };
 
   return (
     <header className="top-bar">
       <div className="top-bar__title">
         {openTabs.length > 0 ? (
-          <div className="document-tabs" role="tablist" aria-label="打开的文档">
-            {openTabs.map((tab) => {
-              const selected = tab.id === activeTabId;
-              const tabTitle = documentTitleFromPath(tab.document.path);
-
-              return (
-                <div
-                  key={tab.id}
-                  ref={selected ? activeTabRef : null}
-                  className={`document-tab${selected ? " is-active" : ""}${tab.locked ? " is-locked" : ""}`}
-                  role="tab"
-                  tabIndex={0}
-                  aria-selected={selected}
-                  aria-label={`${tabTitle}${tab.locked ? "，已锁定" : ""}`}
-                  onClick={() => {
-                    if (!selected) {
-                      void onActivateTab?.(tab.id);
-                    }
-                  }}
-                  onKeyDown={(event) => {
-                    if ((event.key === "Enter" || event.key === " ") && !selected) {
+          <DndContext
+            sensors={sensors}
+            collisionDetection={tabCollisionDetection}
+            onDragStart={onTabDragStart}
+            onDragMove={onTabDragMove}
+            onDragOver={onTabDragOver}
+            onDragEnd={onTabDragEnd}
+            onDragCancel={finishTabDrag}
+          >
+            <SortableContext items={tabIds} strategy={staticTabSortingStrategy}>
+              <div className="document-tabs" role="tablist" aria-label="打开的文档">
+                {openTabs.map((tab) => (
+                  <SortableDocumentTab
+                    key={tab.id}
+                    tab={tab}
+                    selected={tab.id === activeTabId}
+                    activeTabRef={activeTabRef}
+                    editingTitle={editingTitle}
+                    draftTitle={draftTitle}
+                    dragging={draggingTabId === tab.id}
+                    dropPlacement={dropTarget?.tabId === tab.id ? dropTarget.placement : null}
+                    onActivateTab={onActivateTab}
+                    onCloseTab={onCloseTab}
+                    onSetDraftTitle={setDraftTitle}
+                    onSubmitTitle={submitTitle}
+                    onCancelTitleEdit={() => {
+                      setDraftTitle(title);
+                      setEditingTitle(false);
+                    }}
+                    onStartTitleEdit={() => setEditingTitle(true)}
+                    onOpenContextMenu={(event) => {
                       event.preventDefault();
-                      void onActivateTab?.(tab.id);
-                    }
-                  }}
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    setTabMenu({ tabId: tab.id, x: event.clientX, y: event.clientY });
-                  }}
-                >
-                  {documentKindIcon(tab.document)}
-                  {selected && editingTitle ? (
-                    <input
-                      className="title-edit-input title-edit-input--tab"
-                      aria-label="文档名称"
-                      value={draftTitle}
-                      autoFocus
-                      onFocus={(event) => event.currentTarget.select()}
-                      onClick={(event) => event.stopPropagation()}
-                      onDoubleClick={(event) => event.stopPropagation()}
-                      onChange={(event) => setDraftTitle(event.target.value)}
-                      onBlur={submitTitle}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          event.currentTarget.blur();
-                        }
-                        if (event.key === "Escape") {
-                          setDraftTitle(title);
-                          setEditingTitle(false);
-                        }
-                      }}
-                    />
-                  ) : selected ? (
-                    <h1
-                      className="document-tab__title"
-                      title="双击重命名文档"
-                      onDoubleClick={(event) => {
-                        event.stopPropagation();
-                        setEditingTitle(true);
-                      }}
-                    >
-                      {tabTitle}
-                    </h1>
-                  ) : (
-                    <span className="document-tab__title" title={tabTitle}>
-                      {tabTitle}
-                    </span>
-                  )}
-                  {tab.locked ? (
-                    <Pin size={17} className="document-tab__pin" aria-label="已锁定" />
-                  ) : selected ? (
-                    <button
-                      type="button"
-                      className="document-tab__close"
-                      aria-label={`关闭 ${tabTitle}`}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void onCloseTab?.(tab.id);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          void onCloseTab?.(tab.id);
-                        }
-                      }}
-                    >
-                      <X size={18} />
-                    </button>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
+                      setTabMenu({ tabId: tab.id, x: event.clientX, y: event.clientY });
+                    }}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
         ) : document && editingTitle ? (
           <input
             className="title-edit-input"
@@ -271,7 +291,7 @@ export function TopBar({
         </span>
       </div>
       <div className="top-bar__actions">
-        {document?.kind === "lake" || document?.kind === "multidimensional-table" || document?.kind === "spreadsheet" ? (
+        {(document?.kind === "lake" && !lakeReadMode) || document?.kind === "multidimensional-table" || document?.kind === "spreadsheet" ? (
           <IconButton
             label={document.kind === "multidimensional-table" ? "AI 多维表格助手" : document.kind === "spreadsheet" ? "AI 表格助手" : "AI 文档助手"}
             onClick={() => onOpenAiAssistant?.()}
@@ -280,7 +300,17 @@ export function TopBar({
             <Bot size={18} />
           </IconButton>
         ) : null}
-        <IconButton label="保存" onClick={onManualSave} disabled={!document}>
+        {document?.kind === "lake" ? (
+          <IconButton
+            label={lakeReadMode ? "进入编辑模式" : "进入阅读模式"}
+            active={lakeReadMode}
+            onClick={() => void onSetDocumentMode?.(lakeReadMode ? "edit" : "read")}
+            disabled={!document}
+          >
+            {lakeReadMode ? <Pencil size={18} /> : <Eye size={18} />}
+          </IconButton>
+        ) : null}
+        <IconButton label="保存" onClick={onManualSave} disabled={!document || lakeReadMode}>
           <Save size={18} />
         </IconButton>
         {document?.kind === "spreadsheet" ? (
@@ -408,6 +438,199 @@ function documentKindIcon(document: WorkspaceDocument) {
     return <Grid2X2 size={18} className="document-tab__icon" aria-hidden="true" />;
   }
   return <FileText size={18} className="document-tab__icon" aria-hidden="true" />;
+}
+
+type TabDropPlacement = "before" | "after";
+
+function SortableDocumentTab({
+  tab,
+  selected,
+  activeTabRef,
+  editingTitle,
+  draftTitle,
+  dragging,
+  dropPlacement,
+  onActivateTab,
+  onCloseTab,
+  onSetDraftTitle,
+  onSubmitTitle,
+  onCancelTitleEdit,
+  onStartTitleEdit,
+  onOpenContextMenu,
+}: {
+  tab: OpenDocumentTabView;
+  selected: boolean;
+  activeTabRef: MutableRefObject<HTMLDivElement | null>;
+  editingTitle: boolean;
+  draftTitle: string;
+  dragging: boolean;
+  dropPlacement: TabDropPlacement | null;
+  onActivateTab?: (tabId: string) => void | Promise<void>;
+  onCloseTab?: (tabId: string) => void | Promise<void>;
+  onSetDraftTitle: (title: string) => void;
+  onSubmitTitle: () => void;
+  onCancelTitleEdit: () => void;
+  onStartTitleEdit: () => void;
+  onOpenContextMenu: (event: ReactMouseEvent<HTMLDivElement>) => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: tab.id });
+  const tabTitle = documentTitleFromPath(tab.document.path);
+  const dropBefore = dropPlacement === "before";
+  const dropAfter = dropPlacement === "after";
+  const className = `document-tab${selected ? " is-active" : ""}${tab.locked ? " is-locked" : ""}${dragging || isDragging ? " is-dragging" : ""}${dropBefore ? " is-drop-before" : ""}${dropAfter ? " is-drop-after" : ""}`;
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  } satisfies CSSProperties;
+
+  return (
+    <div
+      ref={(node) => {
+        setNodeRef(node);
+        if (selected) {
+          activeTabRef.current = node;
+        }
+      }}
+      {...attributes}
+      {...listeners}
+      className={className}
+      style={style}
+      role="tab"
+      tabIndex={0}
+      aria-selected={selected}
+      aria-label={`${tabTitle}${tab.locked ? "，已锁定" : ""}`}
+      data-document-tab-id={tab.id}
+      onClick={() => {
+        if (!selected) {
+          void onActivateTab?.(tab.id);
+        }
+      }}
+      onKeyDown={(event) => {
+        if ((event.key === "Enter" || event.key === " ") && !selected) {
+          event.preventDefault();
+          void onActivateTab?.(tab.id);
+        }
+      }}
+      onContextMenu={onOpenContextMenu}
+    >
+      {documentKindIcon(tab.document)}
+      {selected && editingTitle ? (
+        <input
+          className="title-edit-input title-edit-input--tab"
+          aria-label="文档名称"
+          value={draftTitle}
+          autoFocus
+          onFocus={(event) => event.currentTarget.select()}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+          onDoubleClick={(event) => event.stopPropagation()}
+          onChange={(event) => onSetDraftTitle(event.target.value)}
+          onBlur={onSubmitTitle}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              event.currentTarget.blur();
+            }
+            if (event.key === "Escape") {
+              onCancelTitleEdit();
+            }
+          }}
+        />
+      ) : selected ? (
+        <h1
+          className="document-tab__title"
+          title="双击重命名文档"
+          onDoubleClick={(event) => {
+            event.stopPropagation();
+            onStartTitleEdit();
+          }}
+        >
+          {tabTitle}
+        </h1>
+      ) : (
+        <span className="document-tab__title" title={tabTitle}>
+          {tabTitle}
+        </span>
+      )}
+      {tab.locked ? (
+        <Pin size={17} className="document-tab__pin" aria-label="已锁定" />
+      ) : selected ? (
+        <button
+          type="button"
+          className="document-tab__close"
+          aria-label={`关闭 ${tabTitle}`}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            void onCloseTab?.(tab.id);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              event.stopPropagation();
+              void onCloseTab?.(tab.id);
+            }
+          }}
+        >
+          <X size={18} />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+export function reorderTabIds(tabIds: string[], sourceTabId: string, targetTabId: string, placement: TabDropPlacement): string[] {
+  if (sourceTabId === targetTabId) {
+    return tabIds;
+  }
+  const sourceIndex = tabIds.indexOf(sourceTabId);
+  const targetIndex = tabIds.indexOf(targetTabId);
+  if (sourceIndex < 0 || targetIndex < 0) {
+    return tabIds;
+  }
+
+  const nextTabIds = tabIds.filter((tabId) => tabId !== sourceTabId);
+  const targetIndexWithoutSource = nextTabIds.indexOf(targetTabId);
+  const insertIndex = placement === "after" ? targetIndexWithoutSource + 1 : targetIndexWithoutSource;
+  return [
+    ...nextTabIds.slice(0, insertIndex),
+    sourceTabId,
+    ...nextTabIds.slice(insertIndex),
+  ];
+}
+
+function resolveTabDropPlacement(targetTabId: string, clientX: number | null): TabDropPlacement | null {
+  if (!targetTabId) {
+    return null;
+  }
+
+  const targetElement = document.querySelector<HTMLElement>(`[data-document-tab-id="${escapeAttributeValue(targetTabId)}"]`);
+  const rect = targetElement?.getBoundingClientRect();
+  if (!rect || clientX === null) {
+    return "before";
+  }
+
+  const ratio = rect.width > 0 ? (clientX - rect.left) / rect.width : 0.5;
+  return ratio > 0.5 ? "after" : "before";
+}
+
+function pointerX(event: DragMoveEvent | DragOverEvent | DragEndEvent): number | null {
+  const activator = event.activatorEvent;
+  if (activator && "clientX" in activator && typeof activator.clientX === "number") {
+    return activator.clientX + event.delta.x;
+  }
+  return null;
+}
+
+function escapeAttributeValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
 }
 
 function formatTtlLabel(seconds: number): string {

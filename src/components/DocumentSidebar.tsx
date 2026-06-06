@@ -28,6 +28,7 @@ import {
   FileSpreadsheet,
   FolderPlus,
   GripVertical,
+  Eye,
   LayoutGrid,
   Pencil,
   Search,
@@ -67,6 +68,7 @@ interface DocumentSidebarProps {
   order: string[];
   currentPath: string | null;
   onOpenDocument: (document: WorkspaceDocument) => void;
+  onOpenDocumentReadOnly: (document: WorkspaceDocument) => void;
   onCreateDocument: (parentPath: string) => void;
   onCreateSpreadsheet: (parentPath: string) => void;
   onCreateMultidimensionalTable: (parentPath: string) => void;
@@ -101,6 +103,7 @@ export function DocumentSidebar({
   order,
   currentPath,
   onOpenDocument,
+  onOpenDocumentReadOnly,
   onCreateDocument,
   onCreateSpreadsheet,
   onCreateMultidimensionalTable,
@@ -313,6 +316,7 @@ export function DocumentSidebar({
                     dropState={dropState}
                     onToggleFolder={toggleFolder}
                     onOpenDocument={onOpenDocument}
+                    onOpenDocumentReadOnly={onOpenDocumentReadOnly}
                     onCreateDocument={onCreateDocument}
                     onCreateSpreadsheet={onCreateSpreadsheet}
                     onCreateMultidimensionalTable={onCreateMultidimensionalTable}
@@ -361,6 +365,7 @@ function SortableTreeRow({
   dropState,
   onToggleFolder,
   onOpenDocument,
+  onOpenDocumentReadOnly,
   onCreateDocument,
   onCreateSpreadsheet,
   onCreateMultidimensionalTable,
@@ -378,6 +383,7 @@ function SortableTreeRow({
   dropState: { intent: WorkspaceDropIntent; resolution: WorkspaceMoveResolution } | null;
   onToggleFolder: (itemId: string) => void;
   onOpenDocument: (document: WorkspaceDocument) => void;
+  onOpenDocumentReadOnly: (document: WorkspaceDocument) => void;
   onCreateDocument: (parentPath: string) => void;
   onCreateSpreadsheet: (parentPath: string) => void;
   onCreateMultidimensionalTable: (parentPath: string) => void;
@@ -494,6 +500,9 @@ function SortableTreeRow({
           <span className="tree-row__label">{node.name}</span>
           {node.document ? (
             <RowActions>
+              {node.document.kind === "lake" ? (
+                <RowButton label="阅读文档" onClick={() => onOpenDocumentReadOnly(node.document!)} icon={<Eye size={14} />} />
+              ) : null}
               <RowButton label="重命名文档" onClick={() => onRenameDocument(node.document!)} icon={<Pencil size={14} />} />
               <RowButton label="删除文档" onClick={() => onDeleteDocument(node.document!)} icon={<Trash2 size={14} />} />
             </RowActions>

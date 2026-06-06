@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import type { FileDownloadInput, SaveStatus, UploadImageInput, UploadImageOutput } from "../../app/appState";
+import type { DocumentOpenMode, FileDownloadInput, SaveStatus, UploadImageInput, UploadImageOutput } from "../../app/appState";
 import type { WorkspaceDocument } from "../workspace/workspaceStore";
 import type { LakeEditorInstance } from "./editorTypes";
 import type { LakeAiImportContentType } from "./lakeAiImport";
 import type { LakeDocumentExportRequest } from "./lakeExport";
-import { createLakeEditor, destroyLakeEditor, hasLakeEditorRuntime } from "./lakeEditorAdapter";
+import { createLakeEditor, createLakeViewer, destroyLakeEditor, hasLakeEditorRuntime, hasLakeViewerRuntime } from "./lakeEditorAdapter";
 import { prepareAiMarkdownForLakeImport } from "./lakeAiImport";
 import {
   lakeSelectionCapability,
@@ -32,6 +32,7 @@ import { useLakeAutosave } from "./useLakeAutosave";
 interface LakeEditorProps {
   document: WorkspaceDocument | null;
   content: string;
+  mode?: DocumentOpenMode;
   manualSaveRequest: number;
   exportRequest: LakeDocumentExportRequest | null;
   onSave: (relativePath: string, content: string) => Promise<void>;
@@ -56,6 +57,7 @@ interface LakeEditorProps {
 export function LakeEditor({
   document,
   content,
+  mode = "edit",
   manualSaveRequest,
   exportRequest,
   onSave,
@@ -82,6 +84,7 @@ export function LakeEditor({
   const resourcePreviewsRef = useRef<ResourcePreview[]>([]);
   const lastAssistantSelectionRef = useRef<string | null>(null);
   const documentPath = document?.path ?? null;
+  const isReadMode = mode === "read";
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const readLakeContent = useCallback(() => {
@@ -151,7 +154,7 @@ export function LakeEditor({
   );
 
   const { status, setStatus, scheduleSave, saveNow, saveNowOrThrow } = useLakeAutosave({
-    enabled: Boolean(documentPath),
+    enabled: Boolean(documentPath) && !isReadMode,
     readContent,
     saveContent,
   });
@@ -161,19 +164,19 @@ export function LakeEditor({
   }, [onSaveStatusChange, status]);
 
   useEffect(() => {
-    onRegisterSaveNow?.(documentPath ? saveNowOrThrow : null);
+    onRegisterSaveNow?.(documentPath && !isReadMode ? saveNowOrThrow : null);
     return () => onRegisterSaveNow?.(null);
-  }, [documentPath, onRegisterSaveNow, saveNowOrThrow]);
+  }, [documentPath, isReadMode, onRegisterSaveNow, saveNowOrThrow]);
 
   useEffect(() => {
-    onRegisterReadContent?.(documentPath ? readAssistantContent : null);
+    onRegisterReadContent?.(documentPath && !isReadMode ? readAssistantContent : null);
     return () => onRegisterReadContent?.(null);
-  }, [documentPath, onRegisterReadContent, readAssistantContent]);
+  }, [documentPath, isReadMode, onRegisterReadContent, readAssistantContent]);
 
   useEffect(() => {
-    onRegisterReadSelection?.(documentPath ? readAssistantSelection : null);
+    onRegisterReadSelection?.(documentPath && !isReadMode ? readAssistantSelection : null);
     return () => onRegisterReadSelection?.(null);
-  }, [documentPath, onRegisterReadSelection, readAssistantSelection]);
+  }, [documentPath, isReadMode, onRegisterReadSelection, readAssistantSelection]);
 
   useEffect(() => {
     const replaceSelection = (markdown: string) => {
@@ -185,9 +188,9 @@ export function LakeEditor({
       }
       return replaced;
     };
-    onRegisterReplaceSelection?.(documentPath ? replaceSelection : null);
+    onRegisterReplaceSelection?.(documentPath && !isReadMode ? replaceSelection : null);
     return () => onRegisterReplaceSelection?.(null);
-  }, [documentPath, onRegisterReplaceSelection, scheduleSave]);
+  }, [documentPath, isReadMode, onRegisterReplaceSelection, scheduleSave]);
 
   // Lake 实例只跟容器和文档路径绑定；内容刷新单独处理，避免 workspace 刷新时销毁编辑器导致右侧空白。
   useLayoutEffect(() => {
@@ -199,9 +202,10 @@ export function LakeEditor({
       return;
     }
 
-    if (!hasLakeEditorRuntime()) {
+    const hasRuntime = isReadMode ? hasLakeViewerRuntime() : hasLakeEditorRuntime();
+    if (!hasRuntime) {
       onSelectionCapabilityChange?.({ canReadSelection: false, canReplaceSelection: false });
-      setLoadError("语雀编辑器资源未加载，请检查本地 vendor 文件");
+      setLoadError(`${isReadMode ? "语雀阅读器" : "语雀编辑器"}资源未加载，请检查本地 vendor 文件`);
       return;
     }
 
@@ -209,16 +213,24 @@ export function LakeEditor({
     destroyLakeEditor(editorRef.current);
     let editor: LakeEditorInstance;
     try {
-      editor = createLakeEditor(containerRef.current, {
-        onContentChange: () => {
-          scheduleSave();
-        },
-        uploadImage: async (request) => registerUploadPreview(await createEditorImageUpload(request, onUploadImage)),
-        uploadFile: async (file) => registerUploadPreview(await createEditorFileUpload(file, onUploadFile)),
-        downloadFile: (file) => onDownloadFile({ url: file.src, filename: file.name, resourceRef: resolveResourceRef(file.src) }),
-      });
+      const downloadFile = (file: { src: string; name: string }) => (
+        onDownloadFile({ url: file.src, filename: file.name, resourceRef: resolveResourceRef(file.src) })
+      );
+      editor = isReadMode
+        ? createLakeViewer(containerRef.current, {
+          downloadFile,
+        })
+        : createLakeEditor(containerRef.current, {
+          onContentChange: () => {
+            scheduleSave();
+          },
+          uploadImage: async (request) => registerUploadPreview(await createEditorImageUpload(request, onUploadImage)),
+          uploadFile: async (file) => registerUploadPreview(await createEditorFileUpload(file, onUploadFile)),
+          downloadFile,
+        });
       editorRef.current = editor;
-      onSelectionCapabilityChange?.(lakeSelectionCapability(editor));
+      // 阅读模式只暴露 viewer，不提供替换选区能力，避免 AI 或快捷操作改写只读文档。
+      onSelectionCapabilityChange?.(isReadMode ? { canReadSelection: false, canReplaceSelection: false } : lakeSelectionCapability(editor));
     } catch (error) {
       editorRef.current = null;
       onSelectionCapabilityChange?.({ canReadSelection: false, canReplaceSelection: false });
@@ -233,10 +245,10 @@ export function LakeEditor({
       }
       onSelectionCapabilityChange?.({ canReadSelection: false, canReplaceSelection: false });
     };
-  }, [documentPath, onDownloadFile, onSelectionCapabilityChange, onUploadFile, onUploadImage, registerUploadPreview, resolveResourceRef, scheduleSave]);
+  }, [documentPath, isReadMode, onDownloadFile, onSelectionCapabilityChange, onUploadFile, onUploadImage, registerUploadPreview, resolveResourceRef, scheduleSave]);
 
   useEffect(() => {
-    if (!documentPath) {
+    if (!documentPath || isReadMode) {
       lastAssistantSelectionRef.current = null;
       return;
     }
@@ -257,7 +269,7 @@ export function LakeEditor({
       containerRef.current?.removeEventListener("mouseup", rememberCurrentSelection);
       containerRef.current?.removeEventListener("keyup", rememberCurrentSelection);
     };
-  }, [documentPath]);
+  }, [documentPath, isReadMode]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -269,7 +281,7 @@ export function LakeEditor({
     resourcePreviewsRef.current = [];
     lastAssistantSelectionRef.current = null;
     setLoadError(null);
-    const resourceRefs = Array.from(new Set(collectResourceReferences(content, { includeFileCards: true })));
+    const resourceRefs = isReadMode ? [] : Array.from(new Set(collectResourceReferences(content, { includeFileCards: true })));
     const placeholderPreviews = resourceRefs.map((resourceRef) => ({
       resourceRef,
       previewUrl: createLakeResourcePlaceholder(resourceRef),
@@ -310,22 +322,22 @@ export function LakeEditor({
     return () => {
       cancelled = true;
     };
-  }, [content, documentPath, onPrepareResourcePreview, rememberPreview, resourcePreviewConcurrency, setStatus]);
+  }, [content, documentPath, isReadMode, onPrepareResourcePreview, rememberPreview, resourcePreviewConcurrency, setStatus]);
 
   useEffect(() => {
-    if (manualSaveRequest > 0) {
+    if (!isReadMode && manualSaveRequest > 0) {
       void saveNow();
     }
-  }, [manualSaveRequest, saveNow]);
+  }, [isReadMode, manualSaveRequest, saveNow]);
 
   useEffect(() => {
-    if (!aiPreviewContent || aiPreviewRequestId <= 0 || !documentPath || !editorRef.current) {
+    if (isReadMode || !aiPreviewContent || aiPreviewRequestId <= 0 || !documentPath || !editorRef.current) {
       return;
     }
     editorRef.current.setDocument(aiPreviewContentType, aiPreviewContent);
     scheduleSave();
     onAiPreviewApplied?.();
-  }, [aiPreviewContent, aiPreviewContentType, aiPreviewRequestId, documentPath, onAiPreviewApplied, scheduleSave]);
+  }, [aiPreviewContent, aiPreviewContentType, aiPreviewRequestId, documentPath, isReadMode, onAiPreviewApplied, scheduleSave]);
 
   useEffect(() => {
     if (
@@ -342,14 +354,14 @@ export function LakeEditor({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+      if (!isReadMode && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
         void saveNow();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [saveNow]);
+  }, [isReadMode, saveNow]);
 
   if (!document) {
     return (
@@ -369,7 +381,7 @@ export function LakeEditor({
     );
   }
 
-  return <div ref={containerRef} className="lake-editor-root" />;
+  return <div ref={containerRef} className={`lake-editor-root ${isReadMode ? "is-read-mode" : "is-edit-mode"}`} />;
 }
 
 function rememberPreviewInList(previews: ResourcePreview[], resourceRef: string, previewUrl: string): ResourcePreview[] {

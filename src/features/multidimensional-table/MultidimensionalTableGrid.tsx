@@ -41,7 +41,7 @@ interface MultidimensionalTableGridProps {
   document: MultidimensionalTableDocument;
   records?: MultidimensionalTableRecord[];
   onChange: (document: MultidimensionalTableDocument) => void;
-  onAddRecord: (values?: Record<string, MultidimensionalTableFieldValue>) => void;
+  onAddRecord: (values?: Record<string, MultidimensionalTableFieldValue>) => string;
   onDeleteRecord: (recordId: string) => void;
   onUploadFile?: (input: UploadImageInput) => Promise<UploadImageOutput>;
   onDownloadFile?: (input: FileDownloadInput) => Promise<void>;

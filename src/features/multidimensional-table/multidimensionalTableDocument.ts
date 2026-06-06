@@ -83,9 +83,12 @@ export interface MultidimensionalTableView {
   name: string;
   type: MultidimensionalTableViewType;
   groupByFieldId?: string;
+  hideEmptyGroups?: boolean;
   cardFieldIds?: string[];
   cardFieldConfigExplicit?: boolean;
   filterRules?: MultidimensionalTableFilterRule[];
+  sortFieldId?: string;
+  sortDirection?: "asc" | "desc";
 }
 
 export interface MultidimensionalTableFilterRule {
@@ -572,6 +575,8 @@ export function deleteMultidimensionalField(
       groupByFieldId: view.groupByFieldId === fieldId ? undefined : view.groupByFieldId,
       cardFieldIds: view.cardFieldIds?.filter((cardFieldId) => cardFieldId !== fieldId),
       filterRules: view.filterRules?.filter((rule) => rule.fieldId !== fieldId),
+      sortFieldId: view.sortFieldId === fieldId ? undefined : view.sortFieldId,
+      sortDirection: view.sortFieldId === fieldId ? undefined : view.sortDirection,
     })),
   };
 }
@@ -704,11 +709,16 @@ function normalizeViews(
       name: view.name,
       type: view.type === "board" ? "board" as const : "table" as const,
       groupByFieldId: view.groupByFieldId && fieldIds.has(view.groupByFieldId) ? view.groupByFieldId : undefined,
+      hideEmptyGroups: Boolean(view.hideEmptyGroups),
       cardFieldIds: Array.isArray(view.cardFieldIds)
         ? view.cardFieldIds.filter((fieldId) => fieldIds.has(fieldId))
         : undefined,
       cardFieldConfigExplicit: Boolean(view.cardFieldConfigExplicit),
       filterRules: normalizeFilterRules(view.filterRules, fieldIds),
+      sortFieldId: typeof view.sortFieldId === "string" && fieldIds.has(view.sortFieldId) ? view.sortFieldId : undefined,
+      sortDirection: typeof view.sortFieldId === "string" && fieldIds.has(view.sortFieldId)
+        ? normalizeSortDirection(view.sortDirection)
+        : undefined,
     }));
 
   // 表格和看板共享同一份数据；缺省视图必须补齐，避免旧文件或手工编辑后打不开。
@@ -740,6 +750,10 @@ function normalizeFilterRules(value: unknown, fieldIds: Set<string>): Multidimen
 
 function normalizeFilterOperator(value: unknown): MultidimensionalTableFilterOperator {
   return isFilterOperator(value) ? value : "contains";
+}
+
+function normalizeSortDirection(value: unknown): "asc" | "desc" {
+  return value === "desc" ? "desc" : "asc";
 }
 
 function parseDelimitedRows(value: string): string[][] {

@@ -8,27 +8,36 @@ export interface SaveStatus {
   savedAt?: string;
 }
 
+export type DocumentOpenMode = "edit" | "read";
+
 export type CurrentDocumentState =
   | {
     kind: "lake";
     entry: WorkspaceDocument & { kind: "lake" };
     content: string;
+    workspaceRoot?: string;
+    mode?: DocumentOpenMode;
   }
   | {
     kind: "spreadsheet";
     entry: WorkspaceDocument & { kind: "spreadsheet" };
     content: string;
+    workspaceRoot?: string;
   }
   | {
     kind: "multidimensional-table";
     entry: WorkspaceDocument & { kind: "multidimensional-table" };
     content: string;
+    workspaceRoot?: string;
   };
 
 export interface OpenDocumentTab {
   id: string;
   path: string;
+  workspaceRoot?: string;
+  document?: WorkspaceDocument;
   locked: boolean;
+  mode?: DocumentOpenMode;
 }
 
 export interface UploadImageInput {

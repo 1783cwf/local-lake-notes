@@ -49,8 +49,10 @@ interface MultidimensionalTableBoardProps {
   document: MultidimensionalTableDocument;
   records?: MultidimensionalTableRecord[];
   onChange: (document: MultidimensionalTableDocument) => void;
-  onAddRecord: (values?: Record<string, MultidimensionalTableFieldValue>) => void;
+  onAddRecord: (values?: Record<string, MultidimensionalTableFieldValue>) => string;
   onDeleteRecord: (recordId: string) => void;
+  selectedRecordId: string | null;
+  onSelectedRecordIdChange: (recordId: string | null) => void;
   onUploadImage?: (input: UploadImageInput) => Promise<UploadImageOutput>;
   onUploadFile?: (input: UploadImageInput) => Promise<UploadImageOutput>;
   onDownloadFile?: (input: FileDownloadInput) => Promise<void>;
@@ -66,6 +68,8 @@ export function MultidimensionalTableBoard({
   onChange,
   onAddRecord,
   onDeleteRecord,
+  selectedRecordId,
+  onSelectedRecordIdChange,
   onUploadImage,
   onUploadFile,
   onDownloadFile,
@@ -79,12 +83,18 @@ export function MultidimensionalTableBoard({
   const primaryField = document.fields.find((field) => field.primary) ?? document.fields[0];
   const cardFields = cardFieldsForView(document, boardView, primaryField, groupField);
   const showPrimaryField = cardFields.some((field) => field.id === primaryField?.id);
-  const columns = useMemo(() => boardColumns(records, groupField), [records, groupField]);
+  const columns = useMemo(
+    () => boardColumns(records, groupField, Boolean(boardView?.hideEmptyGroups)),
+    [boardView?.hideEmptyGroups, records, groupField],
+  );
   const [draggingRecordId, setDraggingRecordId] = useState<string | null>(null);
-  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const draggingRecord = draggingRecordId ? document.records.find((record) => record.id === draggingRecordId) ?? null : null;
   const selectedRecord = selectedRecordId ? document.records.find((record) => record.id === selectedRecordId) ?? null : null;
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 3 } }));
+  const addRecordAndOpen = (values: Record<string, MultidimensionalTableFieldValue> = {}) => {
+    // 看板筛选可能让新建空记录立即离开当前列；先记住 ID，确保详情面板能直接打开完整记录。
+    onSelectedRecordIdChange(onAddRecord(values));
+  };
 
   const onDragStart = (event: DragStartEvent) => {
     setDraggingRecordId(String(event.active.id));
@@ -129,8 +139,8 @@ export function MultidimensionalTableBoard({
               cardFields={cardFields}
               groupField={groupField}
               showPrimaryField={showPrimaryField}
-              onOpenRecord={setSelectedRecordId}
-              onAddRecord={() => onAddRecord({ [groupField.id]: column.id === unassignedColumnId ? "" : column.id })}
+              onOpenRecord={onSelectedRecordIdChange}
+              onAddRecord={() => addRecordAndOpen({ [groupField.id]: column.id === unassignedColumnId ? "" : column.id })}
             />
           ))}
           <button type="button" className="multitable-board__add-column" onClick={addColumn}>
@@ -145,11 +155,11 @@ export function MultidimensionalTableBoard({
             primaryField={primaryField}
             fields={document.fields}
             onChange={onChange}
-            onClose={() => setSelectedRecordId(null)}
-            onAddNext={() => onAddRecord({ [groupField.id]: selectedRecord.values[groupField.id] ?? "" })}
+            onClose={() => onSelectedRecordIdChange(null)}
+            onAddNext={() => addRecordAndOpen({ [groupField.id]: selectedRecord.values[groupField.id] ?? "" })}
             onDelete={() => {
               onDeleteRecord(selectedRecord.id);
-              setSelectedRecordId(null);
+              onSelectedRecordIdChange(null);
             }}
             onUploadImage={onUploadImage}
             onUploadFile={onUploadFile}
@@ -605,14 +615,18 @@ interface BoardColumnData {
 function boardColumns(
   records: MultidimensionalTableRecord[],
   groupField: MultidimensionalTableField | undefined,
+  hideEmptyGroups: boolean,
 ): BoardColumnData[] {
   const options = groupField?.options ?? [];
-  const columns = options.map((option) => ({
-    id: option.id,
-    title: option.label,
-    option,
-    records: records.filter((record) => record.values[groupField!.id] === option.id),
-  }));
+  const columns = options
+    .map((option) => ({
+      id: option.id,
+      title: option.label,
+      option,
+      records: records.filter((record) => record.values[groupField!.id] === option.id),
+    }))
+    // 隐藏空分组只影响已有选项列；未分组列仍按是否存在记录决定，避免丢失未归类数据入口。
+    .filter((column) => !hideEmptyGroups || column.records.length > 0);
   const unassigned = records.filter((record) => !groupField || !record.values[groupField.id]);
   return unassigned.length > 0
     ? [...columns, { id: unassignedColumnId, title: "未分组", option: null, records: unassigned }]

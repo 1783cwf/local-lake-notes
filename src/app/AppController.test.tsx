@@ -194,6 +194,7 @@ vi.mock("../components/DocumentSidebar", () => ({
     onCreateMultidimensionalTable,
     onExportWorkspaceMarkdown,
     onOpenDocument,
+    onOpenDocumentReadOnly,
     onDeleteDocument,
     onRenameDocument,
     onDeleteDirectory,
@@ -209,6 +210,7 @@ vi.mock("../components/DocumentSidebar", () => ({
     onCreateMultidimensionalTable: (parentPath: string) => void;
     onExportWorkspaceMarkdown: () => void;
     onOpenDocument: (document: { path: string; name: string; parentPath: string; size: number }) => void;
+    onOpenDocumentReadOnly: (document: { path: string; name: string; parentPath: string; size: number }) => void;
     onDeleteDocument: (document: { path: string; name: string; parentPath: string; size: number }) => void;
     onRenameDocument: (document: { path: string; name: string; parentPath: string; size: number }) => void;
     onDeleteDirectory: (directory: { path: string; name: string; parentPath: string }) => void;
@@ -254,6 +256,9 @@ vi.mock("../components/DocumentSidebar", () => ({
             onClick={() => onOpenDocument(document)}
           >
             {document.name}
+          </button>
+          <button type="button" onClick={() => onOpenDocumentReadOnly(document)}>
+            阅读 {document.name}
           </button>
           <button type="button" onClick={() => onDeleteDocument(document)}>
             删除 {document.name}
@@ -739,6 +744,77 @@ test("启动时加载已知知识库列表并可切换当前知识库", async ()
   });
 });
 
+test("锁定标签后切换知识库仍保留标签并可切回原知识库内容", async () => {
+  const user = userEvent.setup();
+  const workWorkspace: WorkspacePayload = {
+    root: "/tmp/work",
+    directories: [],
+    documents: [{ id: "same.lake", path: "same.lake", name: "same", parentPath: "", size: 1, kind: "lake" }],
+    order: ["document:same.lake"],
+  };
+  const lifeWorkspace: WorkspacePayload = {
+    root: "/tmp/life",
+    directories: [],
+    documents: [{ id: "same.lake", path: "same.lake", name: "same", parentPath: "", size: 1, kind: "lake" }],
+    order: ["document:same.lake"],
+  };
+  getRecentWorkspace.mockResolvedValue(workWorkspace);
+  listKnownWorkspaces.mockResolvedValue([
+    { root: "/tmp/work", name: "work", lastOpenedAt: "2026-05-08T00:00:00Z" },
+    { root: "/tmp/life", name: "life", lastOpenedAt: "2026-05-07T00:00:00Z" },
+  ]);
+  setWorkspaceRoot.mockImplementation(async (root) => {
+    if (root === "/tmp/life") {
+      return lifeWorkspace;
+    }
+    if (root === "/tmp/work") {
+      return workWorkspace;
+    }
+    throw new Error(`未知知识库 ${root}`);
+  });
+  const readCalls: string[] = [];
+  readLakeDocument.mockImplementation(async (path) => {
+    const workspaceRoot = setWorkspaceRoot.mock.calls.at(-1)?.[0] ?? "/tmp/work";
+    readCalls.push(`${workspaceRoot}:${path}`);
+    return `<p>${workspaceRoot}:${path}</p>`;
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "same" }));
+  await user.pointer({ keys: "[MouseRight]", target: await screen.findByRole("tab", { name: "same" }) });
+  await user.click(screen.getByRole("menuitem", { name: "锁定标签" }));
+  await user.click(screen.getByRole("button", { name: "切换 life" }));
+
+  await waitFor(() => {
+    expect(screen.getByTestId("active-workspace-root")).toHaveTextContent("/tmp/life");
+    expect(screen.getByRole("tab", { name: "same，已锁定" })).toBeInTheDocument();
+    expect(screen.getByTestId("current-path")).toHaveTextContent("");
+  });
+
+  await user.click(screen.getByRole("treeitem", { name: "same" }));
+
+  await waitFor(() => {
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+    expect(screen.getByRole("tab", { name: "same" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("active-workspace-root")).toHaveTextContent("/tmp/life");
+    expect(screen.getByTestId("current-path")).toHaveTextContent("same.lake");
+  });
+
+  await user.click(screen.getByRole("tab", { name: "same，已锁定" }));
+
+  await waitFor(() => {
+    expect(setWorkspaceRoot).toHaveBeenLastCalledWith("/tmp/life");
+    expect(screen.getByTestId("active-workspace-root")).toHaveTextContent("/tmp/life");
+    expect(screen.getByTestId("current-path")).toHaveTextContent("same.lake");
+  });
+  await waitFor(() => {
+    expect(readLakeDocument).toHaveBeenLastCalledWith("same.lake");
+    expect(readCalls).toContain("/tmp/work:same.lake");
+    expect(screen.getByRole("treeitem", { name: "same" })).toBeInTheDocument();
+  });
+});
+
 test("打开第二个文档时未锁定标签会被替换", async () => {
   const user = userEvent.setup();
   getRecentWorkspace.mockResolvedValue({
@@ -763,6 +839,34 @@ test("打开第二个文档时未锁定标签会被替换", async () => {
     expect(screen.getByTestId("current-path")).toHaveTextContent("b.lake");
     expect(screen.getAllByRole("tab")).toHaveLength(1);
     expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true");
+  });
+});
+
+test("侧栏阅读入口打开 Lake 文档后可以从右上角切回编辑模式", async () => {
+  const user = userEvent.setup();
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [
+      { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+    ],
+    order: ["document:a.lake"],
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("button", { name: "阅读 a" }));
+
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: "进入编辑模式" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
+  });
+
+  await user.click(screen.getByRole("button", { name: "进入编辑模式" }));
+
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: "进入阅读模式" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存" })).toBeEnabled();
   });
 });
 
@@ -817,6 +921,59 @@ test("再次打开已经存在的标签只激活已有标签", async () => {
     expect(screen.getAllByRole("tab")).toHaveLength(2);
     expect(screen.getByRole("tab", { name: "a，已锁定" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("current-path")).toHaveTextContent("a.lake");
+  });
+});
+
+test("切换回已打开标签时恢复之前浏览位置", async () => {
+  const user = userEvent.setup();
+  window.Doc = {
+    createOpenEditor: vi.fn((mountElement: HTMLElement) => {
+      const wrap = document.createElement("div");
+      wrap.className = "ne-editor-wrap";
+      mountElement.appendChild(wrap);
+      return {
+        setDocument: vi.fn((_: string, content: string) => {
+          wrap.textContent = content;
+        }),
+        getDocument: vi.fn(() => wrap.textContent ?? ""),
+        on: vi.fn(),
+        destroy: vi.fn(),
+      };
+    }),
+  };
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [
+      { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+      { id: "b.lake", path: "b.lake", name: "b", parentPath: "", size: 1, kind: "lake" },
+    ],
+    order: ["document:a.lake", "document:b.lake"],
+  });
+  readLakeDocument.mockImplementation(async (path) => `<p>${path}</p>`);
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "a" }));
+  await user.pointer({ keys: "[MouseRight]", target: await screen.findByRole("tab", { name: "a" }) });
+  await user.click(screen.getByRole("menuitem", { name: "锁定标签" }));
+  const firstScrollContainer = await waitFor(() => {
+    const element = document.querySelector<HTMLElement>(".ne-editor-wrap");
+    expect(element).not.toBeNull();
+    return element!;
+  });
+  firstScrollContainer.scrollTop = 360;
+  firstScrollContainer.scrollLeft = 24;
+
+  await user.click(screen.getByRole("treeitem", { name: "b" }));
+  await waitFor(() => expect(screen.getByTestId("current-path")).toHaveTextContent("b.lake"));
+  await user.click(screen.getByRole("tab", { name: "a，已锁定" }));
+
+  await waitFor(() => {
+    expect(screen.getByTestId("current-path")).toHaveTextContent("a.lake");
+    const restored = document.querySelector<HTMLElement>(".ne-editor-wrap");
+    expect(restored?.scrollTop).toBe(360);
+    expect(restored?.scrollLeft).toBe(24);
   });
 });
 

@@ -74,9 +74,8 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
   const [importError, setImportError] = useState("");
   const [importSummary, setImportSummary] = useState("");
   const [searchText, setSearchText] = useState("");
-  const [sortFieldId, setSortFieldId] = useState("");
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [boardConfigOpen, setBoardConfigOpen] = useState(false);
+  const [selectedBoardRecordId, setSelectedBoardRecordId] = useState<string | null>(null);
   const [viewMenuId, setViewMenuId] = useState<string | null>(null);
   const [renamingViewId, setRenamingViewId] = useState<string | null>(null);
   const [viewNameDraft, setViewNameDraft] = useState("");
@@ -89,6 +88,7 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
     const parsed = parseMultidimensionalTableDocument(content);
     tableDocumentRef.current = parsed;
     setTableDocument(parsed);
+    setSelectedBoardRecordId(null);
     setStatus({ state: "clean" });
   // 这里只在文档路径或初始内容变化时重置 draft；普通输入走本地 state，避免保存状态刷新抢焦点。
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -127,6 +127,8 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
   const documentTitle = documentTitleFromPath(document.path);
   const tableViewName = tableView?.name ?? "表格";
   const activeFilterRules = activeView?.filterRules ?? [];
+  const sortFieldId = activeView?.sortFieldId ?? "";
+  const sortDirection = activeView?.sortDirection ?? "asc";
   const sortField = tableDocument.fields.find((field) => field.id === sortFieldId);
   const visibleRecords = useMemo(() => {
     return applyRecordViewState(tableDocument.records, tableDocument.fields, {
@@ -285,16 +287,26 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
     setBoardConfigOpen(false);
   };
   const addRecord = useCallback((values: Record<string, MultidimensionalTableFieldValue> = {}) => {
+    const nextRecord = createEmptyMultidimensionalTableRecord(tableDocumentRef.current.fields, values);
     commitChange({
       ...tableDocumentRef.current,
       records: [
         ...tableDocumentRef.current.records,
-        createEmptyMultidimensionalTableRecord(tableDocumentRef.current.fields, values),
+        nextRecord,
       ],
     });
+    return nextRecord.id;
   }, [commitChange]);
+  const addRecordFromActionbar = () => {
+    const nextRecordId = addRecord();
+    if (activeViewType === "board") {
+      // 顶部添加同样遵循看板体验：创建后直接打开详情，避免被筛选条件静默隐藏。
+      setSelectedBoardRecordId(nextRecordId);
+    }
+  };
   const deleteRecord = useCallback((recordId: string) => {
     commitChange(deleteMultidimensionalRecord(tableDocumentRef.current, recordId));
+    setSelectedBoardRecordId((currentRecordId) => currentRecordId === recordId ? null : currentRecordId);
   }, [commitChange]);
   const setActiveViewFilterRules = useCallback((filterRules: MultidimensionalTableFilterRule[]) => {
     const currentDocument = tableDocumentRef.current;
@@ -303,6 +315,18 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
       ...currentDocument,
       views: currentDocument.views.map((view) => view.id === currentActiveViewId
         ? { ...view, filterRules: filterRules.length > 0 ? filterRules : undefined }
+        : view),
+    });
+  }, [commitChange]);
+  const setActiveViewSort = useCallback((fieldId: string, direction: "asc" | "desc" = "asc") => {
+    const currentDocument = tableDocumentRef.current;
+    const currentActiveViewId = currentDocument.activeViewId;
+
+    commitChange({
+      ...currentDocument,
+      views: currentDocument.views.map((view) => view.id === currentActiveViewId
+        // 排序属于视图配置，必须跟随文档保存；字段清空时同步移除方向，避免旧排序在重新打开后复活。
+        ? { ...view, sortFieldId: fieldId || undefined, sortDirection: fieldId ? direction : undefined }
         : view),
     });
   }, [commitChange]);
@@ -325,8 +349,7 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
   const clearViewConditions = () => {
     setSearchText("");
     setActiveViewFilterRules([]);
-    setSortFieldId("");
-    setSortDirection("asc");
+    setActiveViewSort("");
   };
   const toggleToolbarPanel = (panel: "filter" | "sort" | "search") => {
     setBoardConfigOpen(false);
@@ -371,6 +394,18 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
       ...tableDocument,
       views: tableDocument.views.map((view) => view.id === nextBoardView.id
         ? { ...view, cardFieldIds: nextFieldIds, cardFieldConfigExplicit: true }
+        : view),
+    });
+  };
+  const setBoardHideEmptyGroups = (hideEmptyGroups: boolean) => {
+    const nextBoardView = activeBoardView;
+    if (!nextBoardView) {
+      return;
+    }
+    commitChange({
+      ...tableDocument,
+      views: tableDocument.views.map((view) => view.id === nextBoardView.id
+        ? { ...view, hideEmptyGroups }
         : view),
     });
   };
@@ -509,7 +544,7 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
                 </button>
               ) : null}
               <span className="multitable-actionbar__divider" />
-              <button type="button" className="multitable-actionbar__primary" onClick={() => addRecord()}>
+              <button type="button" className="multitable-actionbar__primary" onClick={addRecordFromActionbar}>
                 <Plus size={16} />
                 添加记录
               </button>
@@ -521,7 +556,9 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
               visibleFieldIds={activeBoardView?.cardFieldConfigExplicit && activeBoardView.cardFieldIds
                 ? activeBoardView.cardFieldIds
                 : defaultBoardCardFieldIds(tableDocument.fields, boardGroupField)}
+              hideEmptyGroups={Boolean(activeBoardView?.hideEmptyGroups)}
               onToggleField={toggleBoardConfigField}
+              onHideEmptyGroupsChange={setBoardHideEmptyGroups}
             />
           ) : null}
           {importPanelOpen && activeViewType === "table" ? (
@@ -555,8 +592,8 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
               onUpdateFilterRule={updateFilterRule}
               onRemoveFilterRule={removeFilterRule}
               onClearFilterRules={() => setActiveViewFilterRules([])}
-              onSortFieldIdChange={setSortFieldId}
-              onSortDirectionChange={setSortDirection}
+              onSortFieldIdChange={(fieldId) => setActiveViewSort(fieldId, sortDirection)}
+              onSortDirectionChange={(direction) => setActiveViewSort(sortFieldId, direction)}
             />
           ) : null}
         </div>
@@ -578,6 +615,8 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
           onChange={commitChange}
           onAddRecord={addRecord}
           onDeleteRecord={deleteRecord}
+          selectedRecordId={selectedBoardRecordId}
+          onSelectedRecordIdChange={setSelectedBoardRecordId}
           onUploadImage={onUploadImage}
           onUploadFile={onUploadFile}
           onDownloadFile={onDownloadFile}
@@ -704,11 +743,15 @@ function ViewTab({
 function BoardConfigPanel({
   fields,
   visibleFieldIds,
+  hideEmptyGroups,
   onToggleField,
+  onHideEmptyGroupsChange,
 }: {
   fields: MultidimensionalTableField[];
   visibleFieldIds: string[];
+  hideEmptyGroups: boolean;
   onToggleField: (fieldId: string) => void;
+  onHideEmptyGroupsChange: (hideEmptyGroups: boolean) => void;
 }) {
   const configurableFields = fields;
 
@@ -733,6 +776,17 @@ function BoardConfigPanel({
           </label>
         ))}
       </div>
+      <label className="multitable-board-config-panel__option">
+        <input
+          type="checkbox"
+          checked={hideEmptyGroups}
+          onChange={(event) => onHideEmptyGroupsChange(event.target.checked)}
+        />
+        <span>
+          隐藏空分组
+          <small>开启后不显示没有记录的分组列</small>
+        </span>
+      </label>
     </div>
   );
 }
