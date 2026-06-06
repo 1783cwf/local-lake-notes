@@ -86,13 +86,14 @@ argument-hint: "[版本号，可选，例如 1.7.4 或 v1.7.4]"
    ```
 2. 检查通过后通过 GitHub PR 合并，禁止本地直接 merge 后 push 到 `main`：
    ```bash
-   gh pr merge <PR编号或URL> --merge --delete-branch
+   gh pr merge <PR编号或URL> --merge
    ```
 3. 如果仓库要求 auto-merge 或检查尚未完成，使用：
    ```bash
-   gh pr merge <PR编号或URL> --merge --auto --delete-branch
+   gh pr merge <PR编号或URL> --merge --auto
    ```
    然后轮询 `gh pr view`，直到 PR 已合并；如果 CI 失败或 GitHub 拒绝自动合并，停止并报告。
+4. 合并阶段不要删除 release 分支，发布完成后统一清理本地和远程 release 分支。
 
 ## 从 main 打 tag 并创建 Release
 
@@ -111,7 +112,14 @@ argument-hint: "[版本号，可选，例如 1.7.4 或 v1.7.4]"
    ```bash
    gh release create vX.Y.Z --target main --title "vX.Y.Z" --notes-file /tmp/release-notes-vX.Y.Z.md
    ```
-5. 发布后确认：
+5. 发布后删除本地和远程 release 分支，并切回 `devlop`：
+   ```bash
+   git push origin --delete release/vX.Y.Z || true
+   git branch -D release/vX.Y.Z || true
+   git switch devlop
+   git pull --ff-only origin devlop
+   ```
+6. 发布后确认：
    ```bash
    gh release view vX.Y.Z --json tagName,name,isDraft,isPrerelease,url
    git status --short --branch
@@ -121,6 +129,6 @@ argument-hint: "[版本号，可选，例如 1.7.4 或 v1.7.4]"
 
 最终回复只汇总关键结果：
 
-- 目标版本、release 分支、PR URL、tag、Release URL。
+- 目标版本、release 分支、PR URL、tag、Release URL，以及 release 分支删除结果和最终所在分支。
 - 执行过的验证命令及结果。
 - 如果失败，说明停在哪一步、失败命令、下一步需要用户处理什么。
