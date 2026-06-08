@@ -1,4 +1,4 @@
-import type { UploadImageOutput } from "../../app/appState";
+import type { TypographySettings, UploadImageOutput } from "../../app/appState";
 import type { LakeEditorInstance } from "./editorTypes";
 
 export interface CreateLakeEditorOptions {
@@ -7,11 +7,13 @@ export interface CreateLakeEditorOptions {
   downloadFile: (file: LakeFileDownload) => void | Promise<void>;
   onContentChange: () => void;
   tocEnabled?: boolean;
+  typography?: TypographySettings;
 }
 
 export interface CreateLakeViewerOptions {
   downloadFile: (file: LakeFileDownload) => void | Promise<void>;
   tocEnabled?: boolean;
+  typography?: TypographySettings;
 }
 
 export interface LakeFileDownload {
@@ -133,7 +135,7 @@ function createLakeMount(element: HTMLElement, className: string): HTMLDivElemen
 
 function createLakeRuntimeOptions(options: CreateLakeViewerOptions): Record<string, unknown> {
   return {
-    defaultFontsize: 19,
+    defaultFontsize: options.typography?.defaultFontSize ?? 19,
     toc: {
       enable: options.tocEnabled ?? true,
       normalView: options.tocEnabled ?? true,

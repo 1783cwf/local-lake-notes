@@ -10,6 +10,15 @@ export interface SaveStatus {
 
 export type DocumentOpenMode = "edit" | "read";
 
+export interface TypographySettings {
+  fontFamily: string;
+  defaultFontSize: number;
+}
+
+export type GlobalTypographySettings = TypographySettings;
+
+export type DocumentTypographySettings = Partial<TypographySettings>;
+
 export type CurrentDocumentState =
   | {
     kind: "lake";
@@ -17,6 +26,7 @@ export type CurrentDocumentState =
     content: string;
     workspaceRoot?: string;
     mode?: DocumentOpenMode;
+    documentTypography?: DocumentTypographySettings;
   }
   | {
     kind: "spreadsheet";

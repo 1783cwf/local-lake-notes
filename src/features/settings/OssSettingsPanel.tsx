@@ -1,6 +1,6 @@
 import type { FormEvent, MouseEvent } from "react";
 import { useEffect, useState } from "react";
-import { Bot, Check, CloudUpload, Database, DatabaseBackup, FolderOpen, ShieldCheck, X } from "lucide-react";
+import { Bot, Check, CloudUpload, Database, DatabaseBackup, FolderOpen, Palette, ShieldCheck, X } from "lucide-react";
 
 import type {
   AiFetchedModel,
@@ -9,6 +9,7 @@ import type {
   BackupKeyStatus,
   BackupRecord,
   DatabaseLocationSettings,
+  GlobalTypographySettings,
   OssSettings,
   ResourceMigrationAnalysisOutput,
   ResourceMigrationInput,
@@ -23,6 +24,11 @@ import { AiSettingsPanel } from "./AiSettingsPanel";
 import { BackupSettingsPanel } from "./BackupSettingsPanel";
 import { mergeOssSettings, validateOssSettings } from "./ossSettingsStore";
 import { ResourceSecurityPanel } from "./ResourceSecurityPanel";
+import {
+  mergeTypographySettings,
+  supportedDefaultFontSizes,
+  validateTypographySettings,
+} from "./typographySettingsStore";
 
 type StorageConnectionNotice = {
   type: "success" | "error" | "pending";
@@ -32,10 +38,12 @@ type StorageConnectionNotice = {
 interface OssSettingsPanelProps {
   open: boolean;
   settings: OssSettings | null;
+  typographySettings: GlobalTypographySettings;
   aiSettings: AiSettings;
   databaseLocation: DatabaseLocationSettings | null;
   onClose: () => void;
   onSave: (settings: OssSettings) => Promise<void>;
+  onSaveTypographySettings: (settings: GlobalTypographySettings) => Promise<GlobalTypographySettings>;
   onSaveAiSettings: (input: SaveAiSettingsInput) => Promise<AiSettings>;
   onListAiModels: (profileId: string) => Promise<AiFetchedModel[]>;
   onAddAiModel: (profileId: string, model: AiFetchedModel, capabilityTypes: AiModelCapabilityType[]) => Promise<AiSettings>;
@@ -63,10 +71,12 @@ interface OssSettingsPanelProps {
 export function OssSettingsPanel({
   open,
   settings,
+  typographySettings,
   aiSettings,
   databaseLocation,
   onClose,
   onSave,
+  onSaveTypographySettings,
   onSaveAiSettings,
   onListAiModels,
   onAddAiModel,
@@ -100,7 +110,7 @@ export function OssSettingsPanel({
   const [databaseSaving, setDatabaseSaving] = useState(false);
   const [databaseError, setDatabaseError] = useState<string | null>(null);
   const [databaseMessage, setDatabaseMessage] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"ai" | "upload" | "storage" | "security" | "backup">("upload");
+  const [activeTab, setActiveTab] = useState<"appearance" | "ai" | "upload" | "storage" | "security" | "backup">("upload");
 
   useEffect(() => {
     if (open) {
@@ -271,6 +281,14 @@ export function OssSettingsPanel({
           <nav className="settings-menu" aria-label="设置菜单">
             <button
               type="button"
+              className={`settings-menu__item${activeTab === "appearance" ? " is-active" : ""}`}
+              onClick={() => setActiveTab("appearance")}
+            >
+              <Palette size={16} />
+              外观
+            </button>
+            <button
+              type="button"
               className={`settings-menu__item${activeTab === "ai" ? " is-active" : ""}`}
               onClick={() => setActiveTab("ai")}
             >
@@ -311,7 +329,13 @@ export function OssSettingsPanel({
             </button>
           </nav>
 
-          {activeTab === "ai" ? (
+          {activeTab === "appearance" ? (
+            <TypographySettingsForm
+              settings={typographySettings}
+              onSave={onSaveTypographySettings}
+              onClose={onClose}
+            />
+          ) : activeTab === "ai" ? (
             <AiSettingsPanel
               settings={aiSettings}
               onSave={onSaveAiSettings}
@@ -669,6 +693,100 @@ function StoragePolicyFields({
         打开含多张图片或附件的文档时，同时请求 4-8 个资源预览，文档内容会先显示。
       </p>
     </div>
+  );
+}
+
+function TypographySettingsForm({
+  settings,
+  onSave,
+  onClose,
+}: {
+  settings: GlobalTypographySettings;
+  onSave: (settings: GlobalTypographySettings) => Promise<GlobalTypographySettings>;
+  onClose: () => void;
+}) {
+  const [draft, setDraft] = useState(() => mergeTypographySettings(settings));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(mergeTypographySettings(settings));
+    setError(null);
+  }, [settings]);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    const validationError = validateTypographySettings(draft);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    try {
+      const saved = await onSave(draft);
+      setDraft(saved);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : String(saveError));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form className="settings-content" onSubmit={submit} aria-labelledby="appearance-settings-title">
+      <div className="settings-content__heading">
+        <h3 id="appearance-settings-title">外观</h3>
+        <button type="submit" className="primary-button settings-content__save" disabled={saving}>
+          <Check size={16} />
+          {saving ? "保存中" : "保存外观设置"}
+        </button>
+      </div>
+
+      <div className="settings-card">
+        <div className="settings-card__title">
+          <Palette size={16} />
+          字体
+        </div>
+        <p className="settings-card__text">
+          全局字体会作为后续新建 Lake 文档的初始字体；已有文档仅在没有文档级设置时按全局设置显示。
+        </p>
+        <div className="settings-provider-fields">
+          <label>
+            全局字体
+            <input
+              value={draft.fontFamily}
+              placeholder="例如 Songti SC, serif"
+              onChange={(event) => setDraft((current) => ({ ...current, fontFamily: event.target.value }))}
+            />
+          </label>
+          <label>
+            默认字号
+            <select
+              value={draft.defaultFontSize}
+              onChange={(event) => setDraft((current) => ({ ...current, defaultFontSize: Number(event.target.value) }))}
+            >
+              {supportedDefaultFontSizes.map((size) => (
+                <option key={size} value={size}>{size}px</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </div>
+
+      {error ? <p className="settings-error">{error}</p> : null}
+
+      <div className="settings-actions">
+        <button type="button" className="secondary-button" onClick={onClose}>
+          取消
+        </button>
+        <button type="submit" className="primary-button" disabled={saving}>
+          <Check size={16} />
+          保存
+        </button>
+      </div>
+    </form>
   );
 }
 

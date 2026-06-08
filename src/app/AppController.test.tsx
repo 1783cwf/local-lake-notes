@@ -10,10 +10,11 @@ import type {
   MoveWorkspaceItemInput,
   WorkspacePayload,
 } from "../features/workspace/workspaceStore";
-import type { OssSettings } from "./appState";
+import type { GlobalTypographySettings, OssSettings } from "./appState";
 import { AppController } from "./AppController";
 
-const createLakeDocument = vi.fn<(title: string, parentPath?: string) => Promise<CreateDocumentPayload>>();
+const defaultTestTypography: GlobalTypographySettings = { fontFamily: "system-ui", defaultFontSize: 19 };
+const createLakeDocument = vi.fn<(title: string, parentPath?: string, typography?: GlobalTypographySettings) => Promise<CreateDocumentPayload>>();
 const createSpreadsheetDocument = vi.fn<(title: string, parentPath?: string) => Promise<CreateDocumentPayload>>();
 const createMultidimensionalTableDocument = vi.fn<(title: string, parentPath?: string) => Promise<CreateDocumentPayload>>();
 const createWorkspaceRoot = vi.fn<(parentPath: string, name: string) => Promise<WorkspacePayload>>();
@@ -44,6 +45,8 @@ const getDatabaseLocation = vi.fn(async () => ({
   custom: false,
 }));
 const getOssSettings = vi.fn<() => Promise<OssSettings | null>>(async () => null);
+const getTypographySettings = vi.fn<() => Promise<GlobalTypographySettings>>(async () => defaultTestTypography);
+const saveTypographySettings = vi.fn(async (settings: GlobalTypographySettings) => settings);
 const getBackupKeyStatus = vi.fn(async () => ({ configured: false, needsKey: false }));
 const getAiSettings = vi.fn(async () => ({ profiles: [] }));
 const listAiModels = vi.fn<(input: { profileId: string }) => Promise<{ profileId: string; models: [] }>>(
@@ -469,7 +472,7 @@ vi.mock("../lib/tauri", () => ({
   chooseWorkspaceDirectory: vi.fn(async () => "/tmp/kb"),
   createLakeDirectory: (parentPath: string, name: string) => createLakeDirectory(parentPath, name),
   createBackup: (input: { forceFull: boolean }) => createBackup(input),
-  createLakeDocument: (title: string, parentPath?: string) => createLakeDocument(title, parentPath),
+  createLakeDocument: (title: string, parentPath?: string, typography?: GlobalTypographySettings) => createLakeDocument(title, parentPath, typography),
   createMultidimensionalTableDocument: (title: string, parentPath?: string) => createMultidimensionalTableDocument(title, parentPath),
   createSpreadsheetDocument: (title: string, parentPath?: string) => createSpreadsheetDocument(title, parentPath),
   createWorkspaceRoot: (parentPath: string, name: string) => createWorkspaceRoot(parentPath, name),
@@ -485,6 +488,7 @@ vi.mock("../lib/tauri", () => ({
   getDatabaseLocation: () => getDatabaseLocation(),
   getAiSettings: () => getAiSettings(),
   getOssSettings: () => getOssSettings(),
+  getTypographySettings: () => getTypographySettings(),
   getBackupKeyStatus: () => getBackupKeyStatus(),
   getResourceKeyStatus: () => getResourceKeyStatus(),
   verifyBackupKeyStatus: () => verifyBackupKeyStatus(),
@@ -506,6 +510,7 @@ vi.mock("../lib/tauri", () => ({
   renameWorkspace: vi.fn(),
   saveAiSettings: (input: { settings: { profiles: unknown[] } }) => saveAiSettings(input),
   saveOssSettings: vi.fn(),
+  saveTypographySettings: (settings: GlobalTypographySettings) => saveTypographySettings(settings),
   saveBinaryExport: (defaultPath: string, bytes: Uint8Array, filters: Array<{ name: string; extensions: string[] }>) => saveBinaryExport(defaultPath, bytes, filters),
   savePdfExport: (defaultPath: string, html: string, filters: Array<{ name: string; extensions: string[] }>) => savePdfExport(defaultPath, html, filters),
   saveTextExport: (defaultPath: string, content: string, filters: Array<{ name: string; extensions: string[] }>) => saveTextExport(defaultPath, content, filters),
@@ -638,6 +643,10 @@ beforeEach(() => {
   getResourceKeyStatus.mockResolvedValue({ configured: false, needsKey: false, knownFingerprints: [] });
   getOssSettings.mockReset();
   getOssSettings.mockResolvedValue(null);
+  getTypographySettings.mockReset();
+  getTypographySettings.mockResolvedValue(defaultTestTypography);
+  saveTypographySettings.mockReset();
+  saveTypographySettings.mockImplementation(async (settings) => settings);
   verifyBackupKeyStatus.mockReset();
   verifyBackupKeyStatus.mockResolvedValue({ configured: false, needsKey: false });
   verifyResourceKeyStatus.mockReset();
@@ -1358,7 +1367,7 @@ test("连续创建嵌套目录后可以在子目录中新建并打开 Lake 文�
   await user.click(await screen.findByRole("button", { name: "在 测试目录2 下新建文档" }));
 
   await waitFor(() => {
-    expect(createLakeDocument).toHaveBeenCalledWith("未命名文档", "测试目录1/测试目录2");
+    expect(createLakeDocument).toHaveBeenCalledWith("未命名文档", "测试目录1/测试目录2", defaultTestTypography);
     expect(readLakeDocument).toHaveBeenCalledWith("测试目录1/测试目录2/未命名文档.lake");
     expect(screen.getByTestId("current-path")).toHaveTextContent("测试目录1/测试目录2/未命名文档.lake");
     expect(screen.getByRole("heading", { name: "未命名文档" })).toBeInTheDocument();
@@ -1872,10 +1881,12 @@ test("AI 长文拆分确认后创建当前文档子文档", async () => {
   await user.click(screen.getByRole("button", { name: "确认创建" }));
 
   await waitFor(() => {
-    expect(createLakeDocument).toHaveBeenNthCalledWith(1, "第一部分", "a");
-    expect(createLakeDocument).toHaveBeenNthCalledWith(2, "第二部分", "a");
-    expect(writeLakeDocument).toHaveBeenCalledWith("a/第一部分.lake", "# 第一部分");
-    expect(writeLakeDocument).toHaveBeenCalledWith("a/第二部分.lake", "# 第二部分");
+    expect(createLakeDocument).toHaveBeenNthCalledWith(1, "第一部分", "a", defaultTestTypography);
+    expect(createLakeDocument).toHaveBeenNthCalledWith(2, "第二部分", "a", defaultTestTypography);
+    expect(writeLakeDocument).toHaveBeenCalledWith("a/第一部分.lake", expect.stringContaining("yuque-lake-notes:typography"));
+    expect(writeLakeDocument).toHaveBeenCalledWith("a/第一部分.lake", expect.stringContaining("# 第一部分"));
+    expect(writeLakeDocument).toHaveBeenCalledWith("a/第二部分.lake", expect.stringContaining("yuque-lake-notes:typography"));
+    expect(writeLakeDocument).toHaveBeenCalledWith("a/第二部分.lake", expect.stringContaining("# 第二部分"));
   });
 });
 

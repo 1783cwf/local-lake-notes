@@ -11,6 +11,10 @@ import { AiSpreadsheetAssistant, AiTableAssistant } from "../features/ai/AiTable
 import { previewAiDocumentPatch, type AiDocumentPatchPreview } from "../features/ai/documentPatch";
 import { applyAiSpreadsheetPatch } from "../features/ai/spreadsheetAi";
 import { prepareAiMarkdownForLakeImport } from "../features/lake-editor/lakeAiImport";
+import {
+  composeLakeDocumentWithTypography,
+  splitLakeDocumentTypography,
+} from "../features/lake-editor/lakeDocumentTypography";
 import { LakeEditor } from "../features/lake-editor/LakeEditor";
 import type { LakeSelectionCapability } from "../features/lake-editor/lakeSelectionAdapter";
 import type { MultidimensionalTableEditorHandle } from "../features/multidimensional-table/MultidimensionalTableEditor";
@@ -76,6 +80,7 @@ import {
   readResourceBytes,
   getAiSettings,
   getOssSettings,
+  getTypographySettings,
   getRecentWorkspace,
   listKnownWorkspaces,
   forgetWorkspaceRoot,
@@ -94,6 +99,7 @@ import {
   renameWorkspace,
   saveAiSettings,
   saveOssSettings,
+  saveTypographySettings,
   saveBinaryExport,
   saveDatabaseLocation,
   savePdfExport,
@@ -141,7 +147,9 @@ import type {
   BackupRecord,
   DatabaseLocationSettings,
   FileDownloadInput,
+  GlobalTypographySettings,
   OssSettings,
+  DocumentTypographySettings,
   OpenDocumentTab,
   ResourceKeyStatus,
   RestoreBackupOutput,
@@ -151,6 +159,7 @@ import type {
   UploadImageOutput,
 } from "./appState";
 import { emptySaveStatus } from "./appState";
+import { defaultTypographySettings } from "../features/settings/typographySettingsStore";
 
 const SpreadsheetEditor = lazy(() => (
   import("../features/spreadsheet/SpreadsheetEditor").then((module) => ({ default: module.SpreadsheetEditor }))
@@ -229,6 +238,7 @@ export function AppController() {
     canReplaceSelection: false,
   });
   const [ossSettings, setOssSettings] = useState<OssSettings | null>(null);
+  const [typographySettings, setTypographySettings] = useState<GlobalTypographySettings>(defaultTypographySettings);
   const [aiSettings, setAiSettings] = useState<AiSettings>({ profiles: [] });
   const [databaseLocation, setDatabaseLocation] = useState<DatabaseLocationSettings | null>(null);
   const [backupKeyStatus, setBackupKeyStatus] = useState<BackupKeyStatus>({ configured: false, needsKey: false });
@@ -287,10 +297,11 @@ export function AppController() {
 
   const boot = async () => {
     try {
-      const [recentWorkspace, knownWorkspaceList, settings, aiModelSettings, keyStatus, resourceStatus, database] = await Promise.all([
+      const [recentWorkspace, knownWorkspaceList, settings, typography, aiModelSettings, keyStatus, resourceStatus, database] = await Promise.all([
         getRecentWorkspace(),
         listKnownWorkspaces(),
         getOssSettings(),
+        getTypographySettings(),
         getAiSettings(),
         getBackupKeyStatus(),
         getResourceKeyStatus(),
@@ -299,6 +310,7 @@ export function AppController() {
       setWorkspace(recentWorkspace);
       setKnownWorkspaces(knownWorkspaceList);
       setOssSettings(settings);
+      setTypographySettings(typography);
       setAiSettings(aiModelSettings);
       setBackupKeyStatus(keyStatus);
       setResourceKeyStatus(resourceStatus);
@@ -697,7 +709,7 @@ export function AppController() {
 
     try {
       const title = "未命名文档";
-      const payload = await createLakeDocument(title, parentPath);
+      const payload = await createLakeDocument(title, parentPath, typographySettings);
       setWorkspace({
         root: payload.root,
         directories: payload.directories,
@@ -1155,6 +1167,41 @@ export function AppController() {
     setOssSettings(saved);
   }, []);
 
+  const saveGlobalTypographySettings = useCallback(async (settings: GlobalTypographySettings): Promise<GlobalTypographySettings> => {
+    const saved = await saveTypographySettings(settings);
+    setTypographySettings(saved);
+    return saved;
+  }, []);
+
+  const saveCurrentDocumentTypography = useCallback(async (settings: DocumentTypographySettings) => {
+    if (!currentDocument || currentDocument.kind !== "lake") {
+      return;
+    }
+
+    const latestContent = readCurrentLakeContentRef.current?.() ?? currentDocument.content;
+    const parsed = splitLakeDocumentTypography(latestContent);
+    const nextContent = composeLakeDocumentWithTypography(parsed.body, settings);
+    await saveDocument(currentDocument.entry.path, nextContent);
+    setCurrentDocument((current) => (
+      current?.kind === "lake" && isSameCurrentDocument(current, currentDocument)
+        ? { ...current, content: nextContent, documentTypography: settings }
+        : current
+    ));
+    setSaveStatus({ state: "saved", savedAt: new Date().toISOString() });
+  }, [currentDocument, saveDocument]);
+
+  const updateCurrentDocumentTypographyFromContent = useCallback((settings: DocumentTypographySettings) => {
+    setCurrentDocument((current) => {
+      if (current?.kind !== "lake") {
+        return current;
+      }
+      if (JSON.stringify(current.documentTypography ?? {}) === JSON.stringify(settings)) {
+        return current;
+      }
+      return { ...current, documentTypography: settings };
+    });
+  }, []);
+
   const saveModelSettings = useCallback(async (input: SaveAiSettingsInput): Promise<AiSettings> => {
     const saved = await saveAiSettings(input);
     setAiSettings(saved);
@@ -1329,7 +1376,7 @@ export function AppController() {
       let latestWorkspace: WorkspacePayload | null = workspace;
       let firstCreatedDocument: WorkspaceDocument | null = null;
       for (const part of aiSplitResult.parts) {
-        const payload = await createLakeDocument(part.title, parentPath);
+        const payload = await createLakeDocument(part.title, parentPath, typographySettings);
         latestWorkspace = {
           root: payload.root,
           directories: payload.directories,
@@ -1337,7 +1384,7 @@ export function AppController() {
           order: payload.order,
         };
         firstCreatedDocument ??= payload.createdDocument;
-        await writeLakeDocument(payload.createdDocument.path, part.content);
+        await writeLakeDocument(payload.createdDocument.path, composeLakeDocumentWithTypography(part.content, typographySettings));
       }
       if (latestWorkspace) {
         setWorkspace(latestWorkspace);
@@ -1352,7 +1399,7 @@ export function AppController() {
     } finally {
       setAiRunning(false);
     }
-  }, [aiSplitResult, currentDocument, openDocumentInTabs, workspace]);
+  }, [aiSplitResult, currentDocument, openDocumentInTabs, typographySettings, workspace]);
 
   const runCurrentTableAiAction = useCallback(async (
     actionType: AiTableActionType,
@@ -1720,6 +1767,9 @@ export function AppController() {
           onSetDocumentMode={(mode) => {
             void setCurrentLakeDocumentMode(mode);
           }}
+          globalTypography={typographySettings}
+          documentTypography={currentDocument?.kind === "lake" ? currentDocument.documentTypography : undefined}
+          onSaveDocumentTypography={saveCurrentDocumentTypography}
           onActivateTab={activateTab}
           onReorderTabs={reorderOpenTabs}
           onToggleTabLocked={toggleTabLocked}
@@ -1774,6 +1824,7 @@ export function AppController() {
               onDownloadFile={downloadEditorFile}
               onPrepareResourcePreview={prepareEditorResourcePreview}
               resourcePreviewConcurrency={ossSettings?.resourcePreviewConcurrency}
+              typography={typographySettings}
               onSaveStatusChange={setSaveStatus}
               onRegisterSaveNow={registerEditorSaveNow}
               onRegisterReadTable={registerTableReadDocument}
@@ -1796,6 +1847,9 @@ export function AppController() {
             onDownloadFile={downloadEditorFile}
             onPrepareResourcePreview={prepareEditorResourcePreview}
             resourcePreviewConcurrency={ossSettings?.resourcePreviewConcurrency}
+            globalTypography={typographySettings}
+            documentTypography={currentDocument?.kind === "lake" ? currentDocument.documentTypography : undefined}
+            onDocumentTypographyChange={updateCurrentDocumentTypographyFromContent}
             onSaveStatusChange={setSaveStatus}
             onRegisterSaveNow={registerEditorSaveNow}
             onRegisterReadContent={registerLakeReadContent}
@@ -1878,10 +1932,12 @@ export function AppController() {
       <OssSettingsPanel
         open={settingsOpen}
         settings={ossSettings}
+        typographySettings={typographySettings}
         aiSettings={aiSettings}
         databaseLocation={databaseLocation}
         onClose={() => setSettingsOpen(false)}
         onSave={saveSettings}
+        onSaveTypographySettings={saveGlobalTypographySettings}
         onSaveAiSettings={saveModelSettings}
         onListAiModels={fetchAiModels}
         onAddAiModel={addModelToProfile}
@@ -2056,11 +2112,13 @@ async function readDocumentState(
       workspaceRoot: workspaceRoot ?? undefined,
     };
   }
+  const content = await withWorkspaceRoot(workspaceRoot, visibleWorkspaceRoot, () => readLakeDocument(document.path));
   return {
     kind: "lake",
     entry: asLakeDocument(document),
-    content: await withWorkspaceRoot(workspaceRoot, visibleWorkspaceRoot, () => readLakeDocument(document.path)),
+    content,
     workspaceRoot: workspaceRoot ?? undefined,
+    documentTypography: splitLakeDocumentTypography(content).documentTypography,
     mode,
   };
 }

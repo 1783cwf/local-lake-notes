@@ -9,7 +9,8 @@ use tauri::{AppHandle, Manager};
 
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    AiSettings, DatabaseLocationSettings, KnownWorkspace, OssSettings, WorkspaceOrder,
+    AiSettings, DatabaseLocationSettings, GlobalTypographySettings, KnownWorkspace, OssSettings,
+    WorkspaceOrder,
 };
 
 pub const DATABASE_FILE: &str = "yuque-lake-notes.sqlite3";
@@ -17,6 +18,7 @@ const DATABASE_LOCATION_FILE: &str = "database-location.json";
 const RECENT_WORKSPACE_KEY: &str = "recent_workspace";
 const OSS_SETTINGS_KEY: &str = "oss_settings";
 const AI_SETTINGS_KEY: &str = "ai_settings";
+const TYPOGRAPHY_SETTINGS_KEY: &str = "typography_settings";
 const AI_PROFILE_SECRETS_KEY: &str = "ai_profile_secrets";
 const BACKUP_KEY_METADATA_KEY: &str = "backup_key_metadata";
 const RESOURCE_KEY_METADATA_KEY: &str = "resource_key_metadata";
@@ -166,6 +168,19 @@ pub fn save_ai_settings(app: &AppHandle, settings: &AiSettings) -> AppResult<()>
     save_ai_settings_at(&database_path(app)?, settings)
 }
 
+pub fn load_typography_settings(app: &AppHandle) -> AppResult<GlobalTypographySettings> {
+    let path = database_path(app)?;
+    migrate_legacy_app_settings(app, &path)?;
+    load_typography_settings_at(&path)
+}
+
+pub fn save_typography_settings(
+    app: &AppHandle,
+    settings: &GlobalTypographySettings,
+) -> AppResult<()> {
+    save_typography_settings_at(&database_path(app)?, settings)
+}
+
 pub fn read_workspace_order(app: &AppHandle, root: &Path) -> AppResult<Vec<String>> {
     let path = database_path(app)?;
     let order = read_workspace_order_at(&path, root)?;
@@ -305,6 +320,24 @@ pub fn save_ai_settings_at(database_path: &Path, settings: &AiSettings) -> AppRe
     set_setting_at(
         database_path,
         AI_SETTINGS_KEY,
+        &serde_json::to_string(settings)?,
+    )
+}
+
+pub fn load_typography_settings_at(database_path: &Path) -> AppResult<GlobalTypographySettings> {
+    Ok(get_setting_at(database_path, TYPOGRAPHY_SETTINGS_KEY)?
+        .map(|content| serde_json::from_str(&content))
+        .transpose()?
+        .unwrap_or_default())
+}
+
+pub fn save_typography_settings_at(
+    database_path: &Path,
+    settings: &GlobalTypographySettings,
+) -> AppResult<()> {
+    set_setting_at(
+        database_path,
+        TYPOGRAPHY_SETTINGS_KEY,
         &serde_json::to_string(settings)?,
     )
 }

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 
-import type { FileDownloadInput, UploadImageInput, UploadImageOutput } from "../../app/appState";
+import type { FileDownloadInput, TypographySettings, UploadImageInput, UploadImageOutput } from "../../app/appState";
 import type { LakeEditorInstance } from "../lake-editor/editorTypes";
 import { createLakeEditor, destroyLakeEditor, hasLakeEditorRuntime } from "../lake-editor/lakeEditorAdapter";
 import {
@@ -27,6 +27,7 @@ interface MultidimensionalTableRichTextEditorProps {
   onPrepareResourcePreview?: (resourceRef: string) => Promise<string>;
   resourcePreviewConcurrency?: number;
   tocEnabled?: boolean;
+  typography?: TypographySettings;
 }
 
 export function MultidimensionalTableRichTextEditor({
@@ -39,6 +40,7 @@ export function MultidimensionalTableRichTextEditor({
   onPrepareResourcePreview,
   resourcePreviewConcurrency,
   tocEnabled = false,
+  typography,
 }: MultidimensionalTableRichTextEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<LakeEditorInstance | null>(null);
@@ -98,6 +100,7 @@ export function MultidimensionalTableRichTextEditor({
       editor = createLakeEditor(containerRef.current, {
         // 记录详情内嵌正文需要保持紧凑；全屏正文则复用 Lake 自带大纲，方便长正文导航。
         tocEnabled,
+        typography,
         onContentChange: () => {
           if (settingDocumentRef.current) {
             return;
@@ -125,7 +128,7 @@ export function MultidimensionalTableRichTextEditor({
         editorRef.current = null;
       }
     };
-  }, [registerUploadPreview, resolveResourceRef]);
+  }, [registerUploadPreview, resolveResourceRef, typography, tocEnabled]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -194,14 +197,32 @@ export function MultidimensionalTableRichTextEditor({
         aria-label={ariaLabel}
         placeholder="点击输入正文内容"
         value={value}
+        style={typographyStyle(typography)}
         onChange={(event) => onChange(event.target.value)}
       />
     );
   }
 
-  return <div ref={containerRef} className="multitable-record-body-editor lake-editor-root" aria-label={ariaLabel} />;
+  return (
+    <div
+      ref={containerRef}
+      className="multitable-record-body-editor lake-editor-root"
+      aria-label={ariaLabel}
+      style={typographyStyle(typography)}
+    />
+  );
 }
 
 async function rejectUpload(): Promise<UploadImageOutput> {
   throw new Error("请先配置 OSS 上传信息");
+}
+
+function typographyStyle(typography: TypographySettings | undefined): CSSProperties | undefined {
+  if (!typography) {
+    return undefined;
+  }
+  return {
+    "--app-document-font-family": typography.fontFamily,
+    "--app-document-font-size": `${typography.defaultFontSize}px`,
+  } as CSSProperties;
 }

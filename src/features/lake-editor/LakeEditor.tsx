@@ -1,12 +1,25 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
-import type { DocumentOpenMode, FileDownloadInput, SaveStatus, UploadImageInput, UploadImageOutput } from "../../app/appState";
+import type {
+  DocumentOpenMode,
+  DocumentTypographySettings,
+  FileDownloadInput,
+  GlobalTypographySettings,
+  SaveStatus,
+  TypographySettings,
+  UploadImageInput,
+  UploadImageOutput,
+} from "../../app/appState";
 import type { WorkspaceDocument } from "../workspace/workspaceStore";
 import type { LakeEditorInstance } from "./editorTypes";
 import type { LakeAiImportContentType } from "./lakeAiImport";
 import type { LakeDocumentExportRequest } from "./lakeExport";
 import { createLakeEditor, createLakeViewer, destroyLakeEditor, hasLakeEditorRuntime, hasLakeViewerRuntime } from "./lakeEditorAdapter";
 import { prepareAiMarkdownForLakeImport } from "./lakeAiImport";
+import {
+  composeLakeDocumentWithTypography,
+  splitLakeDocumentTypography,
+} from "./lakeDocumentTypography";
 import {
   lakeSelectionCapability,
   readLakeEditorSelection,
@@ -27,6 +40,7 @@ import {
   rewriteLakeResourceUrls,
   type ResourcePreview,
 } from "./resourceReference";
+import { defaultTypographySettings, resolveTypographySettings } from "../settings/typographySettingsStore";
 import { useLakeAutosave } from "./useLakeAutosave";
 
 interface LakeEditorProps {
@@ -42,6 +56,9 @@ interface LakeEditorProps {
   onDownloadFile: (input: FileDownloadInput) => Promise<void>;
   onPrepareResourcePreview: (resourceRef: string) => Promise<string>;
   resourcePreviewConcurrency?: number;
+  globalTypography?: GlobalTypographySettings;
+  documentTypography?: DocumentTypographySettings;
+  onDocumentTypographyChange?: (settings: DocumentTypographySettings) => void;
   onSaveStatusChange: (status: SaveStatus) => void;
   onRegisterSaveNow?: (saveNow: (() => Promise<void>) | null) => void;
   onRegisterReadContent?: (readContent: (() => string) | null) => void;
@@ -67,6 +84,9 @@ export function LakeEditor({
   onDownloadFile,
   onPrepareResourcePreview,
   resourcePreviewConcurrency,
+  globalTypography = defaultTypographySettings,
+  documentTypography,
+  onDocumentTypographyChange,
   onSaveStatusChange,
   onRegisterSaveNow,
   onRegisterReadContent,
@@ -85,11 +105,22 @@ export function LakeEditor({
   const lastAssistantSelectionRef = useRef<string | null>(null);
   const documentPath = document?.path ?? null;
   const isReadMode = mode === "read";
+  const parsedContent = useMemo(() => splitLakeDocumentTypography(content), [content]);
+  const effectiveDocumentTypography = documentTypography ?? parsedContent.documentTypography;
+  const parsedDocumentTypography = parsedContent.documentTypography;
+  const effectiveTypography = useMemo<TypographySettings>(() => (
+    resolveTypographySettings(effectiveDocumentTypography, globalTypography)
+  ), [effectiveDocumentTypography, globalTypography]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  useEffect(() => {
+    onDocumentTypographyChange?.(parsedDocumentTypography);
+  }, [onDocumentTypographyChange, parsedDocumentTypography]);
+
   const readLakeContent = useCallback(() => {
-    return dehydrateLakeResources(editorRef.current?.getDocument("text/lake") ?? content, resourcePreviewsRef.current);
-  }, [content]);
+    const body = dehydrateLakeResources(editorRef.current?.getDocument("text/lake") ?? parsedContent.body, resourcePreviewsRef.current);
+    return composeLakeDocumentWithTypography(body, effectiveDocumentTypography);
+  }, [effectiveDocumentTypography, parsedContent.body]);
 
   const rememberPreview = useCallback((resourceRef: string, previewUrl: string) => {
     resourcePreviewsRef.current = rememberPreviewInList(resourcePreviewsRef.current, resourceRef, previewUrl);
@@ -219,6 +250,7 @@ export function LakeEditor({
       editor = isReadMode
         ? createLakeViewer(containerRef.current, {
           downloadFile,
+          typography: effectiveTypography,
         })
         : createLakeEditor(containerRef.current, {
           onContentChange: () => {
@@ -227,6 +259,7 @@ export function LakeEditor({
           uploadImage: async (request) => registerUploadPreview(await createEditorImageUpload(request, onUploadImage)),
           uploadFile: async (file) => registerUploadPreview(await createEditorFileUpload(file, onUploadFile)),
           downloadFile,
+          typography: effectiveTypography,
         });
       editorRef.current = editor;
       // 阅读模式只暴露 viewer，不提供替换选区能力，避免 AI 或快捷操作改写只读文档。
@@ -245,7 +278,7 @@ export function LakeEditor({
       }
       onSelectionCapabilityChange?.({ canReadSelection: false, canReplaceSelection: false });
     };
-  }, [documentPath, isReadMode, onDownloadFile, onSelectionCapabilityChange, onUploadFile, onUploadImage, registerUploadPreview, resolveResourceRef, scheduleSave]);
+  }, [documentPath, effectiveTypography, isReadMode, onDownloadFile, onSelectionCapabilityChange, onUploadFile, onUploadImage, registerUploadPreview, resolveResourceRef, scheduleSave]);
 
   useEffect(() => {
     if (!documentPath || isReadMode) {
@@ -281,13 +314,13 @@ export function LakeEditor({
     resourcePreviewsRef.current = [];
     lastAssistantSelectionRef.current = null;
     setLoadError(null);
-    const resourceRefs = isReadMode ? [] : Array.from(new Set(collectResourceReferences(content, { includeFileCards: true })));
+    const resourceRefs = isReadMode ? [] : Array.from(new Set(collectResourceReferences(parsedContent.body, { includeFileCards: true })));
     const placeholderPreviews = resourceRefs.map((resourceRef) => ({
       resourceRef,
       previewUrl: createLakeResourcePlaceholder(resourceRef),
     }));
     resourcePreviewsRef.current = placeholderPreviews;
-    const placeholderContent = hydrateLakeResourcesWithPreviews(content, placeholderPreviews, { includeFileCards: true });
+    const placeholderContent = hydrateLakeResourcesWithPreviews(parsedContent.body, placeholderPreviews, { includeFileCards: true });
     editor.setDocument("text/lake", placeholderContent);
     setStatus({ state: "clean" });
 
@@ -322,7 +355,7 @@ export function LakeEditor({
     return () => {
       cancelled = true;
     };
-  }, [content, documentPath, isReadMode, onPrepareResourcePreview, rememberPreview, resourcePreviewConcurrency, setStatus]);
+  }, [documentPath, isReadMode, onPrepareResourcePreview, parsedContent.body, rememberPreview, resourcePreviewConcurrency, setStatus]);
 
   useEffect(() => {
     if (!isReadMode && manualSaveRequest > 0) {
@@ -381,7 +414,16 @@ export function LakeEditor({
     );
   }
 
-  return <div ref={containerRef} className={`lake-editor-root ${isReadMode ? "is-read-mode" : "is-edit-mode"}`} />;
+  return (
+    <div
+      ref={containerRef}
+      className={`lake-editor-root ${isReadMode ? "is-read-mode" : "is-edit-mode"}`}
+      style={{
+        "--app-document-font-family": effectiveTypography.fontFamily,
+        "--app-document-font-size": `${effectiveTypography.defaultFontSize}px`,
+      } as CSSProperties}
+    />
+  );
 }
 
 function rememberPreviewInList(previews: ResourcePreview[], resourceRef: string, previewUrl: string): ResourcePreview[] {

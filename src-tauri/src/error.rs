@@ -27,6 +27,8 @@ pub enum AppError {
     InvalidExternalUrl,
     #[error("OSS 设置不完整：{0}")]
     InvalidOssSettings(String),
+    #[error("字体设置无效：{0}")]
+    InvalidTypographySettings(String),
     #[error("文件系统错误：{0}")]
     Io(#[from] std::io::Error),
     #[error("JSON 错误：{0}")]

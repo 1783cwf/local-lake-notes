@@ -84,6 +84,7 @@ export interface MultidimensionalTableView {
   type: MultidimensionalTableViewType;
   groupByFieldId?: string;
   hideEmptyGroups?: boolean;
+  showCardTitle?: boolean;
   cardFieldIds?: string[];
   cardFieldConfigExplicit?: boolean;
   filterRules?: MultidimensionalTableFilterRule[];
@@ -112,6 +113,7 @@ export const multidimensionalTableFieldTypeOptions: Array<{
   label: string;
 }> = [
   { type: "text", label: "文本" },
+  { type: "longText", label: "多行文本" },
   { type: "singleSelect", label: "单选" },
   { type: "multiSelect", label: "多选" },
   { type: "number", label: "数字" },
@@ -257,10 +259,6 @@ export function createTextField(existingFields: MultidimensionalTableField[]): M
 }
 
 export function fieldTypeLabel(type: MultidimensionalTableFieldType): string {
-  if (type === "longText") {
-    return "文本";
-  }
-
   return multidimensionalTableFieldTypeOptions.find((option) => option.type === type)?.label ?? "文本";
 }
 
@@ -710,6 +708,7 @@ function normalizeViews(
       type: view.type === "board" ? "board" as const : "table" as const,
       groupByFieldId: view.groupByFieldId && fieldIds.has(view.groupByFieldId) ? view.groupByFieldId : undefined,
       hideEmptyGroups: Boolean(view.hideEmptyGroups),
+      showCardTitle: view.type === "board" && typeof view.showCardTitle === "boolean" ? view.showCardTitle : undefined,
       cardFieldIds: Array.isArray(view.cardFieldIds)
         ? view.cardFieldIds.filter((fieldId) => fieldIds.has(fieldId))
         : undefined,

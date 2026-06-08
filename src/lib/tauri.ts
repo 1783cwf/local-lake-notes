@@ -23,6 +23,7 @@ import type {
   DeleteBackupInput,
   DeleteBackupOutput,
   FileDownloadInput,
+  GlobalTypographySettings,
   OssSettings,
   RestoreBackupInput,
   RestoreBackupOutput,
@@ -50,14 +51,17 @@ import {
   MULTIDIMENSIONAL_TABLE_EXTENSION,
   serializeMultidimensionalTableDocument,
 } from "../features/multidimensional-table/multidimensionalTableDocument";
+import { createInitialLakeDocumentContent } from "../features/lake-editor/lakeDocumentTypography";
 import { mergeAiSettings } from "../features/settings/aiSettingsStore";
 import { mergeOssSettings } from "../features/settings/ossSettingsStore";
+import { mergeTypographySettings } from "../features/settings/typographySettingsStore";
 
 const browserWorkspaceKey = "yuque-lake-notes.browser-workspace";
 const browserCurrentWorkspaceRootKey = "yuque-lake-notes.browser-current-workspace-root";
 const browserKnownWorkspacesKey = "yuque-lake-notes.browser-known-workspaces";
 const browserSettingsKey = "yuque-lake-notes.browser-oss-settings";
 const browserAiSettingsKey = "yuque-lake-notes.browser-ai-settings";
+const browserTypographySettingsKey = "yuque-lake-notes.browser-typography-settings";
 const browserDatabaseLocationKey = "yuque-lake-notes.browser-database-location";
 const browserBackupKeyStatusKey = "yuque-lake-notes.browser-backup-key-status";
 const browserResourceKeyStatusKey = "yuque-lake-notes.browser-resource-key-status";
@@ -336,7 +340,11 @@ export async function moveWorkspaceItem(input: MoveWorkspaceItemInput): Promise<
   return invoke<WorkspacePayload>("move_workspace_item", { input });
 }
 
-export async function createLakeDocument(title: string, parentPath = ""): Promise<CreateDocumentPayload> {
+export async function createLakeDocument(
+  title: string,
+  parentPath = "",
+  typography?: GlobalTypographySettings,
+): Promise<CreateDocumentPayload> {
   if (!isTauriRuntime()) {
     const workspace = await listLakeDocuments();
     const path = nextBrowserDocumentPath(title, parentPath, workspace.documents.map((document) => document.path), "lake");
@@ -365,11 +373,15 @@ export async function createLakeDocument(title: string, parentPath = ""): Promis
       createdDocument,
     };
     saveBrowserWorkspace(payload);
-    writeBrowserDocument(workspace.root, createdDocument.path, "<p><span class=\"ne-text\"> </span></p>");
+    writeBrowserDocument(
+      workspace.root,
+      createdDocument.path,
+      createInitialLakeDocumentContent("<p><span class=\"ne-text\"> </span></p>", typography),
+    );
     return payload;
   }
 
-  return invoke<CreateDocumentPayload>("create_lake_document", { title, parentPath });
+  return invoke<CreateDocumentPayload>("create_lake_document", { title, parentPath, typography });
 }
 
 export async function createSpreadsheetDocument(title: string, parentPath = ""): Promise<CreateDocumentPayload> {
@@ -674,6 +686,25 @@ export async function saveOssSettings(settings: OssSettings): Promise<OssSetting
   }
 
   return invoke<OssSettings>("save_oss_settings", { settings: normalized });
+}
+
+export async function getTypographySettings(): Promise<GlobalTypographySettings> {
+  if (!isTauriRuntime()) {
+    const stored = window.localStorage.getItem(browserTypographySettingsKey);
+    return mergeTypographySettings(stored ? JSON.parse(stored) as GlobalTypographySettings : null);
+  }
+
+  return invoke<GlobalTypographySettings>("get_typography_settings");
+}
+
+export async function saveTypographySettings(settings: GlobalTypographySettings): Promise<GlobalTypographySettings> {
+  const normalized = mergeTypographySettings(settings);
+  if (!isTauriRuntime()) {
+    window.localStorage.setItem(browserTypographySettingsKey, JSON.stringify(normalized));
+    return normalized;
+  }
+
+  return invoke<GlobalTypographySettings>("save_typography_settings", { settings: normalized });
 }
 
 export async function testStorageConnection(settings: OssSettings): Promise<StorageConnectionTestOutput> {

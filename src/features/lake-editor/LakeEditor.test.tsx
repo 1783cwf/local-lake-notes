@@ -68,6 +68,100 @@ test("打开文档时把 text/lake 内容设置进语雀编辑器", async () => 
   });
 });
 
+test("打开带文档字体元数据的文档时只把正文传给语雀编辑器", async () => {
+  const editor: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => "<p>正文</p>"),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+
+  render(
+    <LakeEditor
+      document={documentEntry}
+      content={"<!--yuque-lake-notes:typography {\"fontFamily\":\"Songti SC\",\"defaultFontSize\":22}-->\n<p>正文</p>"}
+      manualSaveRequest={0}
+      exportRequest={null}
+      onSave={vi.fn()}
+      onExportContent={vi.fn()}
+      onUploadImage={vi.fn()}
+      onUploadFile={vi.fn()}
+      onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={vi.fn(async (resourceRef) => resourceRef)}
+      onSaveStatusChange={vi.fn()}
+    />,
+  );
+
+  await waitFor(() => {
+    expect(editor.setDocument).toHaveBeenCalledWith("text/lake", "<p>正文</p>");
+  });
+  expect(window.Doc.createOpenEditor).toHaveBeenCalledWith(
+    expect.any(HTMLDivElement),
+    expect.objectContaining({
+      defaultFontsize: 22,
+    }),
+  );
+});
+
+test("保存时把文档字体元数据写回 Lake 原始内容", async () => {
+  const onSave = vi.fn().mockResolvedValue(undefined);
+  const editor: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => "<p>更新正文</p>"),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+
+  const { rerender } = render(
+    <LakeEditor
+      document={documentEntry}
+      content={"<!--yuque-lake-notes:typography {\"fontFamily\":\"Songti SC\",\"defaultFontSize\":22}-->\n<p>正文</p>"}
+      manualSaveRequest={0}
+      exportRequest={null}
+      onSave={onSave}
+      onExportContent={vi.fn()}
+      onUploadImage={vi.fn()}
+      onUploadFile={vi.fn()}
+      onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={vi.fn(async (resourceRef) => resourceRef)}
+      onSaveStatusChange={vi.fn()}
+    />,
+  );
+
+  rerender(
+    <LakeEditor
+      document={documentEntry}
+      content={"<!--yuque-lake-notes:typography {\"fontFamily\":\"Songti SC\",\"defaultFontSize\":22}-->\n<p>正文</p>"}
+      manualSaveRequest={1}
+      exportRequest={null}
+      onSave={onSave}
+      onExportContent={vi.fn()}
+      onUploadImage={vi.fn()}
+      onUploadFile={vi.fn()}
+      onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={vi.fn(async (resourceRef) => resourceRef)}
+      onSaveStatusChange={vi.fn()}
+    />,
+  );
+
+  await waitFor(() => {
+    expect(onSave).toHaveBeenCalledWith(
+      "a.lake",
+      expect.stringContaining("yuque-lake-notes:typography"),
+    );
+  });
+  expect(onSave).toHaveBeenCalledWith(
+    "a.lake",
+    expect.stringContaining("<p>更新正文</p>"),
+  );
+});
+
 test("阅读模式使用语雀 Viewer 且不注册保存和替换能力", async () => {
   const onRegisterSaveNow = vi.fn();
   const onRegisterReadContent = vi.fn();

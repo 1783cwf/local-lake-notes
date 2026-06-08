@@ -1,5 +1,8 @@
-use yuque_lake_notes_lib::commands::settings::validate_oss_settings;
-use yuque_lake_notes_lib::models::{OssSettings, StorageProviderKind};
+use yuque_lake_notes_lib::commands::settings::{
+    create_global_typography_settings, normalize_font_family, normalize_typography_settings,
+    validate_oss_settings,
+};
+use yuque_lake_notes_lib::models::{GlobalTypographySettings, OssSettings, StorageProviderKind};
 
 fn valid_settings() -> OssSettings {
     OssSettings {
@@ -73,4 +76,32 @@ fn validates_resource_preview_concurrency_range() {
     settings.resource_preview_concurrency = 9;
 
     assert!(validate_oss_settings(&settings).is_err());
+}
+
+#[test]
+fn normalizes_typography_settings() {
+    let settings = create_global_typography_settings("Songti SC, serif", 22).unwrap();
+
+    assert_eq!(settings.font_family, "\"Songti SC\", serif");
+    assert_eq!(settings.default_font_size, 22);
+}
+
+#[test]
+fn rejects_unsupported_typography_font_size() {
+    let error = normalize_typography_settings(GlobalTypographySettings {
+        font_family: "Songti SC".to_string(),
+        default_font_size: 18,
+    })
+    .unwrap_err();
+
+    assert!(error.to_string().contains("默认字号"));
+}
+
+#[test]
+fn drops_dangerous_typography_font_family_parts() {
+    assert_eq!(normalize_font_family("Songti SC; color:red"), None);
+    assert_eq!(
+        normalize_font_family("Songti SC, serif").as_deref(),
+        Some("\"Songti SC\", serif")
+    );
 }

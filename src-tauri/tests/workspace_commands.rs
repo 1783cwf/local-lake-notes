@@ -17,6 +17,7 @@ use yuque_lake_notes_lib::commands::workspace::{
 };
 use yuque_lake_notes_lib::error::AppError;
 use yuque_lake_notes_lib::models::{MoveWorkspaceItemInput, WorkspaceDocumentKind};
+use yuque_lake_notes_lib::models::GlobalTypographySettings;
 
 const WORKBOOK_SNAPSHOT: &str =
     r#"{"sheetOrder":["sheet-0001"],"sheets":{"sheet-0001":{"id":"sheet-0001","name":"Sheet1"}}}"#;
@@ -228,6 +229,22 @@ fn creates_document_inside_missing_document_child_container() {
 
     assert_eq!(path, "长文/第一部分.lake");
     assert!(dir.path().join("长文").join("第一部分.lake").exists());
+}
+
+#[test]
+fn creates_initial_lake_document_content_with_typography() {
+    let content = yuque_lake_notes_lib::commands::documents::initial_lake_document_content(Some(
+        GlobalTypographySettings {
+            font_family: "Songti SC".to_string(),
+            default_font_size: 22,
+        },
+    ))
+    .unwrap();
+
+    assert!(content.starts_with("<!--yuque-lake-notes:typography "));
+    assert!(content.contains("\"fontFamily\":\"\\\"Songti SC\\\"\""));
+    assert!(content.contains("\"defaultFontSize\":22"));
+    assert!(content.contains("<p><span class=\"ne-text\"> </span></p>"));
 }
 
 #[test]

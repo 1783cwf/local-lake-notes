@@ -24,7 +24,7 @@ import {
 import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
-import type { FileDownloadInput, UploadImageInput, UploadImageOutput } from "../../app/appState";
+import type { FileDownloadInput, TypographySettings, UploadImageInput, UploadImageOutput } from "../../app/appState";
 import type {
   MultidimensionalTableDocument,
   MultidimensionalTableField,
@@ -58,6 +58,7 @@ interface MultidimensionalTableBoardProps {
   onDownloadFile?: (input: FileDownloadInput) => Promise<void>;
   onPrepareResourcePreview?: (resourceRef: string) => Promise<string>;
   resourcePreviewConcurrency?: number;
+  typography?: TypographySettings;
 }
 
 const unassignedColumnId = "__unassigned__";
@@ -75,6 +76,7 @@ export function MultidimensionalTableBoard({
   onDownloadFile,
   onPrepareResourcePreview,
   resourcePreviewConcurrency,
+  typography,
 }: MultidimensionalTableBoardProps) {
   const boardView = document.views.find((view) => view.id === document.activeViewId && view.type === "board") ??
     document.views.find((view) => view.type === "board");
@@ -82,7 +84,10 @@ export function MultidimensionalTableBoard({
     document.fields.find((field) => field.type === "singleSelect");
   const primaryField = document.fields.find((field) => field.primary) ?? document.fields[0];
   const cardFields = cardFieldsForView(document, boardView, primaryField, groupField);
-  const showPrimaryField = cardFields.some((field) => field.id === primaryField?.id);
+  const showPrimaryField = boardView?.showCardTitle !== false;
+  const visibleCardFields = showPrimaryField
+    ? cardFields.filter((field) => field.id !== primaryField?.id)
+    : cardFields;
   const columns = useMemo(
     () => boardColumns(records, groupField, Boolean(boardView?.hideEmptyGroups)),
     [boardView?.hideEmptyGroups, records, groupField],
@@ -136,7 +141,7 @@ export function MultidimensionalTableBoard({
               key={column.id}
               column={column}
               primaryField={primaryField}
-              cardFields={cardFields}
+              cardFields={visibleCardFields}
               groupField={groupField}
               showPrimaryField={showPrimaryField}
               onOpenRecord={onSelectedRecordIdChange}
@@ -166,6 +171,7 @@ export function MultidimensionalTableBoard({
             onDownloadFile={onDownloadFile}
             onPrepareResourcePreview={onPrepareResourcePreview}
             resourcePreviewConcurrency={resourcePreviewConcurrency}
+            typography={typography}
           />
         ) : null}
       </div>
@@ -174,7 +180,7 @@ export function MultidimensionalTableBoard({
           <RecordCard
             record={draggingRecord}
             primaryField={primaryField}
-            cardFields={cardFields}
+            cardFields={visibleCardFields}
             groupField={groupField}
             showPrimaryField={showPrimaryField}
             dragging
@@ -365,6 +371,7 @@ function RecordDetailPanel({
   onDownloadFile,
   onPrepareResourcePreview,
   resourcePreviewConcurrency,
+  typography,
 }: {
   document: MultidimensionalTableDocument;
   record: MultidimensionalTableRecord;
@@ -379,6 +386,7 @@ function RecordDetailPanel({
   onDownloadFile?: (input: FileDownloadInput) => Promise<void>;
   onPrepareResourcePreview?: (resourceRef: string) => Promise<string>;
   resourcePreviewConcurrency?: number;
+  typography?: TypographySettings;
 }) {
   const [fieldPanelOpen, setFieldPanelOpen] = useState(false);
   const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
@@ -526,6 +534,7 @@ function RecordDetailPanel({
               onDownloadFile={onDownloadFile}
               onPrepareResourcePreview={onPrepareResourcePreview}
               resourcePreviewConcurrency={resourcePreviewConcurrency}
+              typography={typography}
             />
           )}
         </section>
@@ -541,6 +550,7 @@ function RecordDetailPanel({
           onDownloadFile={onDownloadFile}
           onPrepareResourcePreview={onPrepareResourcePreview}
           resourcePreviewConcurrency={resourcePreviewConcurrency}
+          typography={typography}
         />,
         window.document.body,
       ) : null}
@@ -564,6 +574,7 @@ function RecordBodyFullscreenEditor({
   onDownloadFile,
   onPrepareResourcePreview,
   resourcePreviewConcurrency,
+  typography,
 }: {
   title: string;
   value: string;
@@ -574,6 +585,7 @@ function RecordBodyFullscreenEditor({
   onDownloadFile?: (input: FileDownloadInput) => Promise<void>;
   onPrepareResourcePreview?: (resourceRef: string) => Promise<string>;
   resourcePreviewConcurrency?: number;
+  typography?: TypographySettings;
 }) {
   return (
     <div className="multitable-record-body-fullscreen" role="dialog" aria-modal="true" aria-label="正文全屏编辑">
@@ -598,6 +610,7 @@ function RecordBodyFullscreenEditor({
             onDownloadFile={onDownloadFile}
             onPrepareResourcePreview={onPrepareResourcePreview}
             resourcePreviewConcurrency={resourcePreviewConcurrency}
+            typography={typography}
           />
         </div>
       </section>

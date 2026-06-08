@@ -9,11 +9,12 @@ use crate::commands::workspace::{
     resolve_existing_lake_path, resolve_writable_lake_path, workspace_payload_for_app,
 };
 use crate::error::{AppError, AppResult};
-use crate::models::{CreateDocumentPayload, WorkspacePayload};
+use crate::models::{CreateDocumentPayload, GlobalTypographySettings, WorkspacePayload};
 use crate::state::AppState;
 use crate::storage::app_database::{
     prune_workspace_order_path, push_workspace_order_item, rewrite_workspace_order_path,
 };
+use crate::commands::settings::normalize_typography_settings;
 
 const EMPTY_LAKE_DOCUMENT: &str = "<p><span class=\"ne-text\"> </span></p>";
 const MULTIDIMENSIONAL_TABLE_KIND: &str = "multidimensional-table";
@@ -31,12 +32,14 @@ pub struct DocumentRename {
 pub fn create_lake_document(
     title: String,
     parent_path: Option<String>,
+    typography: Option<GlobalTypographySettings>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<CreateDocumentPayload> {
     let root = state.workspace_root().ok_or(AppError::MissingWorkspace)?;
     let parent_path = parent_path.unwrap_or_default();
-    let created_path = create_document_at(&root, &parent_path, &title)?;
+    let content = initial_lake_document_content(typography)?;
+    let created_path = create_document_from_content_at(&root, &parent_path, &title, &content)?;
     push_workspace_order_item(&app, &root, format!("document:{created_path}"))?;
     let payload = workspace_payload_for_app(&app, &root)?;
     let created_document = payload
@@ -343,6 +346,15 @@ pub fn create_multidimensional_table(root: &Path, title: &str) -> AppResult<Stri
 }
 
 pub fn create_document_at(root: &Path, parent_path: &str, title: &str) -> AppResult<String> {
+    create_document_from_content_at(root, parent_path, title, EMPTY_LAKE_DOCUMENT)
+}
+
+pub fn create_document_from_content_at(
+    root: &Path,
+    parent_path: &str,
+    title: &str,
+    content: &str,
+) -> AppResult<String> {
     let stem = safe_file_stem(title)?;
     ensure_document_child_container_parent(root, parent_path)?;
     let parent = resolve_existing_directory_path(root, parent_path)?;
@@ -365,8 +377,31 @@ pub fn create_document_at(root: &Path, parent_path: &str, title: &str) -> AppRes
         format!("{normalized_parent}/{candidate}")
     };
     let path = resolve_writable_lake_path(root, &relative_path)?;
-    atomic_write(&path, EMPTY_LAKE_DOCUMENT)?;
+    atomic_write(&path, content)?;
     Ok(relative_path)
+}
+
+pub fn initial_lake_document_content(
+    typography: Option<GlobalTypographySettings>,
+) -> AppResult<String> {
+    let Some(typography) = typography else {
+        return Ok(EMPTY_LAKE_DOCUMENT.to_string());
+    };
+    let typography = normalize_typography_settings(typography)?;
+    Ok(format!(
+        "<!--yuque-lake-notes:typography {{\"fontFamily\":\"{}\",\"defaultFontSize\":{}}}-->\n{}",
+        escape_json_string(&typography.font_family),
+        typography.default_font_size,
+        EMPTY_LAKE_DOCUMENT
+    ))
+}
+
+fn escape_json_string(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
 }
 
 pub fn create_spreadsheet_at(root: &Path, parent_path: &str, title: &str) -> AppResult<String> {

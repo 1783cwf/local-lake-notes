@@ -156,6 +156,20 @@ test("看板隐藏空分组配置会解析并保存", () => {
   expect(serializeMultidimensionalTableDocument(parsed)).toContain("\"hideEmptyGroups\": true");
 });
 
+test("看板显示标题配置会解析并保存", () => {
+  const source = createDefaultMultidimensionalTableDocument();
+  const parsed = parseMultidimensionalTableDocument(JSON.stringify({
+    ...source,
+    views: source.views.map((view) => view.type === "board"
+      ? { ...view, showCardTitle: false }
+      : view),
+  }));
+
+  const boardView = parsed.views.find((view) => view.type === "board");
+  expect(boardView?.showCardTitle).toBe(false);
+  expect(serializeMultidimensionalTableDocument(parsed)).toContain("\"showCardTitle\": false");
+});
+
 test("字段排序只调整字段顺序并保留记录值", () => {
   const source = createDefaultMultidimensionalTableDocument();
   const record = createEmptyMultidimensionalTableRecord(source.fields, {

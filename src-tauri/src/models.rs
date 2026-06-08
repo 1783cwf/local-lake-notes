@@ -99,6 +99,24 @@ pub struct OssSettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GlobalTypographySettings {
+    #[serde(default = "default_typography_font_family")]
+    pub font_family: String,
+    #[serde(default = "default_typography_font_size")]
+    pub default_font_size: u8,
+}
+
+impl Default for GlobalTypographySettings {
+    fn default() -> Self {
+        Self {
+            font_family: default_typography_font_family(),
+            default_font_size: default_typography_font_size(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum StorageProviderKind {
     S3,
@@ -847,6 +865,14 @@ fn default_allow_signed_url_export() -> bool {
 
 pub fn default_resource_preview_concurrency() -> u8 {
     6
+}
+
+pub fn default_typography_font_family() -> String {
+    "system-ui".to_string()
+}
+
+pub fn default_typography_font_size() -> u8 {
+    19
 }
 
 fn default_true() -> bool {

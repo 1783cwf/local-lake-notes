@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { MultidimensionalTableEditor } from "./MultidimensionalTableEditor";
@@ -565,20 +565,28 @@ test("看板配置可以控制卡片字段显示隐藏", async () => {
   const onSave = vi.fn(async () => undefined);
   renderEditor({ onSave });
 
+  const board = screen.getByTestId("multitable-board");
+  expect(within(board).getAllByText("测试记录1")).toHaveLength(1);
+  expect(within(board).queryByText("标题")).not.toBeInTheDocument();
   expect(screen.getAllByText("主要内容").length).toBeGreaterThan(0);
 
   await user.click(screen.getByRole("button", { name: "看板配置" }));
-  expect(screen.getByLabelText(/标题/)).toBeInTheDocument();
-  expect(screen.getByLabelText(/状态/)).toBeInTheDocument();
-  await user.click(screen.getByLabelText(/主要内容/));
+  expect(screen.getByRole("checkbox", { name: /^标题/ })).toBeInTheDocument();
+  expect(screen.getByRole("checkbox", { name: /^状态/ })).toBeInTheDocument();
+  expect(screen.getByRole("checkbox", { name: /^显示标题/ })).toBeChecked();
+  await user.click(screen.getByRole("checkbox", { name: /^主要内容/ }));
 
   expect(screen.queryByText("测试内容1")).not.toBeInTheDocument();
   await waitFor(() => {
     expect(onSave).toHaveBeenCalledWith("project.dbtable.json", expect.stringContaining("\"cardFieldIds\""));
   }, { timeout: 1400 });
 
-  await user.click(screen.getByLabelText(/标题/));
-  expect(screen.queryByRole("button", { name: /测试记录1/ })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("checkbox", { name: /^显示标题/ }));
+  expect(within(board).getByText("标题")).toBeInTheDocument();
+  expect(within(board).getAllByText("测试记录1")).toHaveLength(1);
+  await waitFor(() => {
+    expect(onSave).toHaveBeenCalledWith("project.dbtable.json", expect.stringContaining("\"showCardTitle\": false"));
+  }, { timeout: 1400 });
 });
 
 test("看板配置可以隐藏空分组", async () => {

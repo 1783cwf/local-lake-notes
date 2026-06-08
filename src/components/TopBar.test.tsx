@@ -148,6 +148,39 @@ test("Lake 文档阅读模式下可以切回编辑且禁用保存和 AI 文档�
   expect(onSetDocumentMode).toHaveBeenCalledWith("edit");
 });
 
+test("Lake 编辑模式可以保存文档级字体设置", async () => {
+  const user = userEvent.setup();
+  const onSaveDocumentTypography = vi.fn();
+
+  render(
+    <TopBar
+      document={{
+        id: "测试文件1.lake",
+        path: "测试文件1.lake",
+        name: "测试文件1",
+        parentPath: "",
+        size: 1,
+        kind: "lake",
+      }}
+      documentMode="edit"
+      globalTypography={{ fontFamily: "system-ui", defaultFontSize: 19 }}
+      saveStatus={{ state: "clean" }}
+      onManualSave={vi.fn()}
+      onSaveDocumentTypography={onSaveDocumentTypography}
+    />,
+  );
+
+  await user.click(screen.getByRole("button", { name: "文档字体" }));
+  await user.type(screen.getByLabelText("字体名称"), "Songti SC");
+  await user.selectOptions(screen.getByLabelText("文档字号"), "22");
+  await user.click(screen.getByRole("button", { name: "保存文档字体" }));
+
+  expect(onSaveDocumentTypography).toHaveBeenCalledWith({
+    fontFamily: "Songti SC",
+    defaultFontSize: 22,
+  });
+});
+
 test("多维表格只显示保存和分享，不显示文档或 Excel 导出菜单", () => {
   render(
     <TopBar

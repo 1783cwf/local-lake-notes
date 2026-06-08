@@ -9,6 +9,7 @@ function renderPanel(overrides: Partial<Parameters<typeof OssSettingsPanel>[0]> 
     <OssSettingsPanel
       open
       settings={null}
+      typographySettings={{ fontFamily: "system-ui", defaultFontSize: 19 }}
       aiSettings={{ profiles: [] }}
       databaseLocation={{
         directory: "/tmp/local-lake-db",
@@ -17,6 +18,7 @@ function renderPanel(overrides: Partial<Parameters<typeof OssSettingsPanel>[0]> 
       }}
       onClose={vi.fn()}
       onSave={vi.fn()}
+      onSaveTypographySettings={vi.fn(async (settings) => settings)}
       onSaveAiSettings={vi.fn(async (input) => input.settings)}
       onListAiModels={vi.fn(async () => [])}
       onAddAiModel={vi.fn(async () => ({ profiles: [] }))}
@@ -103,6 +105,26 @@ test("可以切换到备份恢复并设置密钥", async () => {
   await user.click(screen.getByRole("button", { name: "设置密钥" }));
 
   expect(onSetBackupKey).toHaveBeenCalledWith("test-secret-key", false);
+  expect(onSave).not.toHaveBeenCalled();
+});
+
+test("可以保存全局字体设置且不触发文件存储保存", async () => {
+  const user = userEvent.setup();
+  const onSave = vi.fn();
+  const onSaveTypographySettings = vi.fn(async (settings) => settings);
+
+  renderPanel({ onSave, onSaveTypographySettings });
+
+  await user.click(screen.getByRole("button", { name: "外观" }));
+  await user.clear(screen.getByLabelText("全局字体"));
+  await user.type(screen.getByLabelText("全局字体"), "Songti SC, serif");
+  await user.selectOptions(screen.getByLabelText("默认字号"), "22");
+  await user.click(screen.getByRole("button", { name: "保存外观设置" }));
+
+  expect(onSaveTypographySettings).toHaveBeenCalledWith({
+    fontFamily: "Songti SC, serif",
+    defaultFontSize: 22,
+  });
   expect(onSave).not.toHaveBeenCalled();
 });
 
