@@ -22,6 +22,7 @@ import type {
   DatabaseLocationSettings,
   DeleteBackupInput,
   DeleteBackupOutput,
+  DocumentTabGroup,
   FileDownloadInput,
   GlobalTypographySettings,
   OssSettings,
@@ -62,6 +63,7 @@ const browserKnownWorkspacesKey = "yuque-lake-notes.browser-known-workspaces";
 const browserSettingsKey = "yuque-lake-notes.browser-oss-settings";
 const browserAiSettingsKey = "yuque-lake-notes.browser-ai-settings";
 const browserTypographySettingsKey = "yuque-lake-notes.browser-typography-settings";
+const browserDocumentTabGroupsKey = "yuque-lake-notes.browser-document-tab-groups";
 const browserDatabaseLocationKey = "yuque-lake-notes.browser-database-location";
 const browserBackupKeyStatusKey = "yuque-lake-notes.browser-backup-key-status";
 const browserResourceKeyStatusKey = "yuque-lake-notes.browser-resource-key-status";
@@ -707,6 +709,27 @@ export async function saveTypographySettings(settings: GlobalTypographySettings)
   return invoke<GlobalTypographySettings>("save_typography_settings", { settings: normalized });
 }
 
+export async function getDocumentTabGroups(): Promise<DocumentTabGroup[]> {
+  if (!isTauriRuntime()) {
+    const stored = window.localStorage.getItem(browserDocumentTabGroupsKey);
+    return normalizeDocumentTabGroups(stored ? JSON.parse(stored) as { groups?: DocumentTabGroup[] } : null);
+  }
+
+  const output = await invoke<{ groups: DocumentTabGroup[] }>("get_document_tab_groups");
+  return normalizeDocumentTabGroups(output);
+}
+
+export async function saveDocumentTabGroups(groups: DocumentTabGroup[]): Promise<DocumentTabGroup[]> {
+  const normalized = normalizeDocumentTabGroups({ groups });
+  if (!isTauriRuntime()) {
+    window.localStorage.setItem(browserDocumentTabGroupsKey, JSON.stringify({ groups: normalized }));
+    return normalized;
+  }
+
+  const output = await invoke<{ groups: DocumentTabGroup[] }>("save_document_tab_groups", { groups: { groups: normalized } });
+  return normalizeDocumentTabGroups(output);
+}
+
 export async function testStorageConnection(settings: OssSettings): Promise<StorageConnectionTestOutput> {
   const normalized = mergeOssSettings(settings);
   if (!isTauriRuntime()) {
@@ -1268,6 +1291,38 @@ function browserStorageId(settings: OssSettings): string {
     return settings.webdav.storageId.trim() || "webdav";
   }
   return settings.bucket.trim() || "browser";
+}
+
+function normalizeDocumentTabGroups(input: { groups?: DocumentTabGroup[] } | null | undefined): DocumentTabGroup[] {
+  return Array.isArray(input?.groups)
+    ? input.groups
+      .map(normalizeDocumentTabGroup)
+      .filter((group): group is DocumentTabGroup => Boolean(group))
+    : [];
+}
+
+function normalizeDocumentTabGroup(group: DocumentTabGroup): DocumentTabGroup | null {
+  const id = group.id?.trim();
+  const name = group.name?.trim();
+  const items = Array.isArray(group.items)
+    ? group.items
+      .map((item) => ({
+        workspaceRoot: item.workspaceRoot?.trim(),
+        path: item.path?.trim().replace(/^\/+/, ""),
+        mode: item.mode === "read" || item.mode === "edit" ? item.mode : undefined,
+      }))
+      .filter((item) => item.workspaceRoot && item.path && !item.path.includes(".."))
+    : [];
+  if (!id || !name || items.length === 0) {
+    return null;
+  }
+  return {
+    id,
+    name,
+    items,
+    createdAt: group.createdAt || new Date().toISOString(),
+    updatedAt: group.updatedAt || new Date().toISOString(),
+  };
 }
 
 function trimSlashes(value: string): string {

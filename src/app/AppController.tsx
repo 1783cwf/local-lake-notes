@@ -79,6 +79,7 @@ import {
   prepareResourcePreview,
   readResourceBytes,
   getAiSettings,
+  getDocumentTabGroups,
   getOssSettings,
   getTypographySettings,
   getRecentWorkspace,
@@ -98,6 +99,7 @@ import {
   renameSpreadsheetDocument,
   renameWorkspace,
   saveAiSettings,
+  saveDocumentTabGroups,
   saveOssSettings,
   saveTypographySettings,
   saveBinaryExport,
@@ -146,6 +148,7 @@ import type {
   BackupKeyStatus,
   BackupRecord,
   DatabaseLocationSettings,
+  DocumentTabGroup,
   FileDownloadInput,
   GlobalTypographySettings,
   OssSettings,
@@ -215,6 +218,7 @@ export function AppController() {
   const [knownWorkspaces, setKnownWorkspaces] = useState<KnownWorkspace[]>([]);
   const [currentDocument, setCurrentDocument] = useState<CurrentDocumentState | null>(null);
   const [openTabs, setOpenTabs] = useState<OpenDocumentTab[]>([]);
+  const [tabGroups, setTabGroups] = useState<DocumentTabGroup[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>(emptySaveStatus);
   const [manualSaveRequest, setManualSaveRequest] = useState(0);
@@ -297,11 +301,12 @@ export function AppController() {
 
   const boot = async () => {
     try {
-      const [recentWorkspace, knownWorkspaceList, settings, typography, aiModelSettings, keyStatus, resourceStatus, database] = await Promise.all([
+      const [recentWorkspace, knownWorkspaceList, settings, typography, tabGroupList, aiModelSettings, keyStatus, resourceStatus, database] = await Promise.all([
         getRecentWorkspace(),
         listKnownWorkspaces(),
         getOssSettings(),
         getTypographySettings(),
+        getDocumentTabGroups(),
         getAiSettings(),
         getBackupKeyStatus(),
         getResourceKeyStatus(),
@@ -311,6 +316,7 @@ export function AppController() {
       setKnownWorkspaces(knownWorkspaceList);
       setOssSettings(settings);
       setTypographySettings(typography);
+      setTabGroups(tabGroupList);
       setAiSettings(aiModelSettings);
       setBackupKeyStatus(keyStatus);
       setResourceKeyStatus(resourceStatus);
@@ -561,6 +567,77 @@ export function AppController() {
   const reorderOpenTabs = useCallback((orderedTabIds: string[]) => {
     setOpenTabs((tabs) => reorderTabsByIds(tabs, orderedTabIds));
   }, []);
+
+  const saveCurrentTabGroup = useCallback(async (name: string) => {
+    const items = openTabs
+      .filter((tab) => tab.locked && tab.workspaceRoot)
+      .map((tab) => ({
+        workspaceRoot: tab.workspaceRoot!,
+        path: tab.path,
+        mode: tab.mode,
+      }));
+    if (items.length === 0) {
+      setAppError("请先锁定要保存到标签组的标签");
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const nextGroups = [
+      ...tabGroups,
+      {
+        id: `tab-group-${Date.now().toString(36)}`,
+        name: name.trim(),
+        items,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+    const saved = await saveDocumentTabGroups(nextGroups);
+    setTabGroups(saved);
+    setAppError(null);
+  }, [openTabs, tabGroups]);
+
+  const deleteTabGroup = useCallback(async (groupId: string) => {
+    const saved = await saveDocumentTabGroups(tabGroups.filter((group) => group.id !== groupId));
+    setTabGroups(saved);
+  }, [tabGroups]);
+
+  const openTabGroup = useCallback(async (groupId: string) => {
+    const group = tabGroups.find((candidate) => candidate.id === groupId);
+    if (!group) {
+      return;
+    }
+    if (!await saveBeforeLeavingCurrentTab("当前文档保存失败，请先处理后再打开标签组")) {
+      return;
+    }
+
+    try {
+      const visibleWorkspaceRoot = workspace?.root ?? null;
+      const loadedTabs: OpenDocumentTab[] = [];
+      for (const item of group.items) {
+        const payload = await loadWorkspacePayload(item.workspaceRoot, visibleWorkspaceRoot);
+        const document = payload.documents.find((entry) => entry.path === item.path);
+        if (!document) {
+          continue;
+        }
+        loadedTabs.push({
+          ...createOpenDocumentTab(document, document.kind === "lake" ? item.mode ?? "edit" : undefined, item.workspaceRoot),
+          locked: true,
+        });
+      }
+      if (loadedTabs.length === 0) {
+        setAppError("标签组里的文档都找不到了");
+        return;
+      }
+
+      const nextTabs = mergeOpenTabsWithLockedGroup(openTabs, loadedTabs);
+      setOpenTabs(nextTabs);
+      await activateDocumentTab(loadedTabs[0].id, nextTabs);
+      setAppError(null);
+    } catch (error) {
+      setAppError(toMessage(error));
+    }
+  }, [activateDocumentTab, openTabs, saveBeforeLeavingCurrentTab, tabGroups, workspace?.root]);
 
   const closeTab = useCallback(async (tabId: string) => {
     const closingIndex = openTabs.findIndex((tab) => tab.id === tabId);
@@ -1726,6 +1803,11 @@ export function AppController() {
         onSwitchWorkspace={switchWorkspace}
         onForgetWorkspace={forgetWorkspace}
         onCreateDocument={() => createDocument("")}
+        tabGroups={tabGroups}
+        lockedTabCount={openTabs.filter((tab) => tab.locked).length}
+        onSaveCurrentTabGroup={saveCurrentTabGroup}
+        onOpenTabGroup={openTabGroup}
+        onDeleteTabGroup={deleteTabGroup}
         onOpenSettings={() => setSettingsOpen(true)}
       />
       <DocumentSidebar
@@ -2252,6 +2334,14 @@ function reorderTabsByIds(tabs: OpenDocumentTab[], orderedTabIds: string[]): Ope
     ...orderedTabs,
     ...tabs.filter((tab) => !orderedIdSet.has(tab.id)),
   ];
+}
+
+function mergeOpenTabsWithLockedGroup(currentTabs: OpenDocumentTab[], groupTabs: OpenDocumentTab[]): OpenDocumentTab[] {
+  const tabById = new Map(currentTabs.map((tab) => [tab.id, tab]));
+  for (const groupTab of groupTabs) {
+    tabById.set(groupTab.id, { ...(tabById.get(groupTab.id) ?? groupTab), ...groupTab, locked: true });
+  }
+  return Array.from(tabById.values());
 }
 
 async function workspaceSpreadsheetExcelEntries(workspace: WorkspacePayload): Promise<WorkspaceZipEntryInput[]> {

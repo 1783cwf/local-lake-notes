@@ -41,7 +41,12 @@ import {
   updateMultidimensionalRecordBody,
 } from "./multidimensionalTableDocument";
 import { FieldTypeIcon, MultidimensionalTableFieldConfigPanel } from "./MultidimensionalTableFieldConfigPanel";
-import { attachmentValues, MultidimensionalTableValueInput, updateMultidimensionalRecordValue } from "./MultidimensionalTableValueInput";
+import {
+  attachmentValues,
+  MultidimensionalTableValueInput,
+  updateMultidimensionalRecordFieldHeight,
+  updateMultidimensionalRecordValue,
+} from "./MultidimensionalTableValueInput";
 import { deleteFieldOption, renameFieldOption, updateRecordValueWithNewOption } from "./MultidimensionalTableGrid";
 import { MultidimensionalTableRichTextEditor } from "./MultidimensionalTableRichTextEditor";
 
@@ -475,6 +480,10 @@ function RecordDetailPanel({
                 ariaLabel={`记录${field.name}`}
                 onUploadFile={onUploadFile}
                 onDownloadFile={onDownloadFile}
+                longTextHeight={record.fieldLayouts?.[field.id]?.height}
+                onLongTextHeightChange={(height) => {
+                  onChange(updateMultidimensionalRecordFieldHeight(document, record.id, field.id, height));
+                }}
                 onChange={(value) => onChange(updateMultidimensionalRecordValue(document, record.id, field.id, value))}
                 onCreateOption={(option, nextValue) => {
                   onChange(updateRecordValueWithNewOption(document, record.id, field.id, option, nextValue));

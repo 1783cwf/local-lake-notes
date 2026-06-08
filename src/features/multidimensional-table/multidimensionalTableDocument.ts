@@ -73,9 +73,14 @@ export interface MultidimensionalTableField {
 export interface MultidimensionalTableRecord {
   id: string;
   values: Record<string, MultidimensionalTableFieldValue>;
+  fieldLayouts?: Record<string, MultidimensionalTableFieldLayout>;
   body?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface MultidimensionalTableFieldLayout {
+  height?: number;
 }
 
 export interface MultidimensionalTableView {
@@ -566,7 +571,12 @@ export function deleteMultidimensionalField(
     fields: document.fields.filter((currentField) => currentField.id !== fieldId),
     records: document.records.map((record) => {
       const { [fieldId]: _removedValue, ...values } = record.values;
-      return { ...record, values };
+      const { [fieldId]: _removedLayout, ...fieldLayouts } = record.fieldLayouts ?? {};
+      return {
+        ...record,
+        values,
+        fieldLayouts: Object.keys(fieldLayouts).length > 0 ? fieldLayouts : undefined,
+      };
     }),
     views: document.views.map((view) => ({
       ...view,
@@ -688,10 +698,41 @@ function normalizeRecords(
           .filter(([fieldId, value]) => fieldById.has(fieldId) && isFieldValue(value))
           .map(([fieldId, value]) => [fieldId, normalizeFieldValueForType(value, fieldById.get(fieldId)!.type)]),
       ),
+      fieldLayouts: normalizeRecordFieldLayouts(record.fieldLayouts, fieldById),
       body: typeof record.body === "string" ? record.body : "",
       createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
       updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : new Date().toISOString(),
     }));
+}
+
+function normalizeRecordFieldLayouts(
+  fieldLayouts: unknown,
+  fieldById: Map<string, MultidimensionalTableField>,
+): Record<string, MultidimensionalTableFieldLayout> | undefined {
+  if (!isRecord(fieldLayouts)) {
+    return undefined;
+  }
+  const entries: Array<[string, MultidimensionalTableFieldLayout]> = [];
+  for (const [fieldId, layout] of Object.entries(fieldLayouts)) {
+    if (fieldById.get(fieldId)?.type !== "longText" || !isRecord(layout)) {
+      continue;
+    }
+    const normalized = normalizeFieldLayout(layout);
+    if (normalized.height !== undefined) {
+      entries.push([fieldId, normalized]);
+    }
+  }
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function normalizeFieldLayout(layout: Record<string, unknown>): MultidimensionalTableFieldLayout {
+  const height = normalizeFieldLayoutHeight(layout.height);
+  return height === undefined ? {} : { height };
+}
+
+function normalizeFieldLayoutHeight(value: unknown): number | undefined {
+  const height = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(height) && height >= 64 && height <= 720 ? Math.round(height) : undefined;
 }
 
 function normalizeViews(

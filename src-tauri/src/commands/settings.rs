@@ -3,12 +3,14 @@ use tauri::AppHandle;
 use crate::error::{AppError, AppResult};
 use crate::models::{
     default_typography_font_family, default_typography_font_size, DatabaseLocationSettings,
-    GlobalTypographySettings, OssSettings, SaveDatabaseLocationInput, StorageConnectionTestOutput,
-    StorageProviderKind,
+    DocumentTabGroup, DocumentTabGroupItem, DocumentTabGroups, GlobalTypographySettings,
+    OssSettings, SaveDatabaseLocationInput, StorageConnectionTestOutput, StorageProviderKind,
 };
 use crate::storage::app_database::{
-    database_location_settings, load_oss_settings as load_database_oss_settings,
+    database_location_settings, load_document_tab_groups as load_database_document_tab_groups,
+    load_oss_settings as load_database_oss_settings,
     load_typography_settings as load_database_typography_settings, save_database_location,
+    save_document_tab_groups as save_database_document_tab_groups,
     save_oss_settings as save_database_oss_settings,
     save_typography_settings as save_database_typography_settings,
 };
@@ -39,6 +41,21 @@ pub fn save_typography_settings(
 ) -> AppResult<GlobalTypographySettings> {
     let normalized = normalize_typography_settings(settings)?;
     save_database_typography_settings(&app, &normalized)?;
+    Ok(normalized)
+}
+
+#[tauri::command]
+pub fn get_document_tab_groups(app: AppHandle) -> AppResult<DocumentTabGroups> {
+    Ok(normalize_document_tab_groups(load_database_document_tab_groups(&app)?))
+}
+
+#[tauri::command]
+pub fn save_document_tab_groups(
+    app: AppHandle,
+    groups: DocumentTabGroups,
+) -> AppResult<DocumentTabGroups> {
+    let normalized = normalize_document_tab_groups(groups);
+    save_database_document_tab_groups(&app, &normalized)?;
     Ok(normalized)
 }
 
@@ -222,4 +239,55 @@ pub fn default_typography_settings() -> GlobalTypographySettings {
         font_family: default_typography_font_family(),
         default_font_size: default_typography_font_size(),
     }
+}
+
+fn normalize_document_tab_groups(groups: DocumentTabGroups) -> DocumentTabGroups {
+    DocumentTabGroups {
+        groups: groups
+            .groups
+            .into_iter()
+            .filter_map(normalize_document_tab_group)
+            .collect(),
+    }
+}
+
+fn normalize_document_tab_group(group: DocumentTabGroup) -> Option<DocumentTabGroup> {
+    let name = group.name.trim().to_string();
+    let id = group.id.trim().to_string();
+    let created_at = group.created_at.trim().to_string();
+    let updated_at = group.updated_at.trim().to_string();
+    let items = group
+        .items
+        .into_iter()
+        .filter_map(normalize_document_tab_group_item)
+        .collect::<Vec<_>>();
+    if id.is_empty() || name.is_empty() || items.is_empty() {
+        return None;
+    }
+
+    Some(DocumentTabGroup {
+        id,
+        name,
+        items,
+        created_at,
+        updated_at,
+    })
+}
+
+fn normalize_document_tab_group_item(item: DocumentTabGroupItem) -> Option<DocumentTabGroupItem> {
+    let workspace_root = item.workspace_root.trim().to_string();
+    let path = item.path.trim().trim_start_matches('/').to_string();
+    if workspace_root.is_empty() || path.is_empty() || path.contains("..") {
+        return None;
+    }
+    let mode = match item.mode.as_deref() {
+        Some("read") => Some("read".to_string()),
+        Some("edit") => Some("edit".to_string()),
+        _ => None,
+    };
+    Some(DocumentTabGroupItem {
+        workspace_root,
+        path,
+        mode,
+    })
 }

@@ -1,8 +1,15 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { MultidimensionalTableValueInput } from "./MultidimensionalTableValueInput";
-import type { MultidimensionalTableField } from "./multidimensionalTableDocument";
+import {
+  MultidimensionalTableValueInput,
+  updateMultidimensionalRecordFieldHeight,
+} from "./MultidimensionalTableValueInput";
+import {
+  createDefaultMultidimensionalTableDocument,
+  createEmptyMultidimensionalTableRecord,
+  type MultidimensionalTableField,
+} from "./multidimensionalTableDocument";
 
 test("日期格式只显示日历选择", async () => {
   const user = userEvent.setup();
@@ -68,6 +75,39 @@ test("纯时间格式只显示时分选择并写回 HH:mm", async () => {
   await user.click(screen.getByRole("button", { name: "确定" }));
 
   expect(onChange).toHaveBeenLastCalledWith("09:05");
+});
+
+test("长文本输入会恢复已保存高度", () => {
+  render(
+    <MultidimensionalTableValueInput
+      field={{ id: "description", name: "主要内容", type: "longText" }}
+      value="测试内容"
+      onChange={vi.fn()}
+      ariaLabel="主要内容"
+      longTextHeight={280}
+    />,
+  );
+
+  expect(screen.getByLabelText("主要内容")).toHaveStyle({ height: "280px" });
+});
+
+test("长文本高度按记录字段写入布局元数据", () => {
+  const document = createDefaultMultidimensionalTableDocument();
+  const longTextDocument = {
+    ...document,
+    fields: document.fields.map((field) => field.id === "description"
+      ? { ...field, type: "longText" as const }
+      : field),
+  };
+  const firstRecord = createEmptyMultidimensionalTableRecord(longTextDocument.fields, { title: "记录1" });
+  const secondRecord = createEmptyMultidimensionalTableRecord(longTextDocument.fields, { title: "记录2" });
+  const updated = updateMultidimensionalRecordFieldHeight({
+    ...longTextDocument,
+    records: [firstRecord, secondRecord],
+  }, secondRecord.id, "description", 333.6);
+
+  expect(updated.records[0].fieldLayouts).toBeUndefined();
+  expect(updated.records[1].fieldLayouts?.description?.height).toBe(334);
 });
 
 function timeField(timeFormat: MultidimensionalTableField["timeFormat"]): MultidimensionalTableField {

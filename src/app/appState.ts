@@ -50,6 +50,20 @@ export interface OpenDocumentTab {
   mode?: DocumentOpenMode;
 }
 
+export interface DocumentTabGroupItem {
+  workspaceRoot: string;
+  path: string;
+  mode?: DocumentOpenMode;
+}
+
+export interface DocumentTabGroup {
+  id: string;
+  name: string;
+  items: DocumentTabGroupItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface UploadImageInput {
   bytes: number[];
   filename: string;
