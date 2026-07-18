@@ -10,6 +10,15 @@ export interface SaveStatus {
 
 export type DocumentOpenMode = "edit" | "read";
 
+export interface TypographySettings {
+  fontFamily: string;
+  defaultFontSize: number;
+}
+
+export type GlobalTypographySettings = TypographySettings;
+
+export type DocumentTypographySettings = Partial<TypographySettings>;
+
 export type CurrentDocumentState =
   | {
     kind: "lake";
@@ -17,6 +26,7 @@ export type CurrentDocumentState =
     content: string;
     workspaceRoot?: string;
     mode?: DocumentOpenMode;
+    documentTypography?: DocumentTypographySettings;
   }
   | {
     kind: "spreadsheet";
@@ -38,6 +48,20 @@ export interface OpenDocumentTab {
   document?: WorkspaceDocument;
   locked: boolean;
   mode?: DocumentOpenMode;
+}
+
+export interface DocumentTabGroupItem {
+  workspaceRoot: string;
+  path: string;
+  mode?: DocumentOpenMode;
+}
+
+export interface DocumentTabGroup {
+  id: string;
+  name: string;
+  items: DocumentTabGroupItem[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface UploadImageInput {
@@ -77,6 +101,8 @@ export interface WebDavStorageSettings {
   storageId: string;
 }
 
+export type ImageOptimizationMode = "original" | "balanced" | "compact";
+
 export interface OssSettings {
   activeProvider: StorageProviderKind;
   endpoint: string;
@@ -94,6 +120,7 @@ export interface OssSettings {
   maxSignedUrlTtlSeconds: number;
   allowSignedUrlExport: boolean;
   resourcePreviewConcurrency: number;
+  imageOptimization: ImageOptimizationMode;
   local: LocalStorageSettings;
   webdav: WebDavStorageSettings;
 }

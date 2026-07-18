@@ -1,8 +1,15 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { ClipboardPaste, Filter, Kanban, ListFilter, MoreHorizontal, Pencil, Plus, Search, Settings2, Table2, Trash2, X } from "lucide-react";
 
-import type { AiTablePatch, FileDownloadInput, SaveStatus, UploadImageInput, UploadImageOutput } from "../../app/appState";
+import type {
+  AiTablePatch,
+  FileDownloadInput,
+  SaveStatus,
+  TypographySettings,
+  UploadImageInput,
+  UploadImageOutput,
+} from "../../app/appState";
 import { applyAiTablePatch } from "../ai/multidimensionalTableAi";
 import type { WorkspaceDocument } from "../workspace/workspaceStore";
 import { documentTitleFromPath } from "../workspace/workspaceStore";
@@ -41,6 +48,7 @@ interface MultidimensionalTableEditorProps {
   onDownloadFile?: (input: FileDownloadInput) => Promise<void>;
   onPrepareResourcePreview?: (resourceRef: string) => Promise<string>;
   resourcePreviewConcurrency?: number;
+  typography?: TypographySettings;
   onSaveStatusChange: (status: SaveStatus) => void;
   onRegisterSaveNow?: (saveNow: (() => Promise<void>) | null) => void;
   onRegisterReadTable?: (readTable: (() => MultidimensionalTableDocument) | null) => void;
@@ -59,6 +67,7 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
   onDownloadFile,
   onPrepareResourcePreview,
   resourcePreviewConcurrency,
+  typography,
   onSaveStatusChange,
   onRegisterSaveNow,
   onRegisterReadTable,
@@ -397,6 +406,18 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
         : view),
     });
   };
+  const setBoardShowCardTitle = (showCardTitle: boolean) => {
+    const nextBoardView = activeBoardView;
+    if (!nextBoardView) {
+      return;
+    }
+    commitChange({
+      ...tableDocument,
+      views: tableDocument.views.map((view) => view.id === nextBoardView.id
+        ? { ...view, showCardTitle }
+        : view),
+    });
+  };
   const setBoardHideEmptyGroups = (hideEmptyGroups: boolean) => {
     const nextBoardView = activeBoardView;
     if (!nextBoardView) {
@@ -411,7 +432,7 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
   };
 
   return (
-    <section className="multitable-editor-root">
+    <section className="multitable-editor-root" style={typographyStyle(typography)}>
       <header className="multitable-shell-header">
         <div ref={viewbarSurfaceRef} className="multitable-viewbar">
           <button type="button" className="multitable-database-tab" aria-label={`${documentTitle} 点击切换视图`}>
@@ -556,8 +577,10 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
               visibleFieldIds={activeBoardView?.cardFieldConfigExplicit && activeBoardView.cardFieldIds
                 ? activeBoardView.cardFieldIds
                 : defaultBoardCardFieldIds(tableDocument.fields, boardGroupField)}
+              showCardTitle={activeBoardView?.showCardTitle !== false}
               hideEmptyGroups={Boolean(activeBoardView?.hideEmptyGroups)}
               onToggleField={toggleBoardConfigField}
+              onShowCardTitleChange={setBoardShowCardTitle}
               onHideEmptyGroupsChange={setBoardHideEmptyGroups}
             />
           ) : null}
@@ -622,6 +645,7 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
           onDownloadFile={onDownloadFile}
           onPrepareResourcePreview={onPrepareResourcePreview}
           resourcePreviewConcurrency={resourcePreviewConcurrency}
+          typography={typography}
         />
       )}
     </section>
@@ -629,6 +653,16 @@ export const MultidimensionalTableEditor = forwardRef<MultidimensionalTableEdito
 });
 
 MultidimensionalTableEditor.displayName = "MultidimensionalTableEditor";
+
+function typographyStyle(typography: TypographySettings | undefined): CSSProperties | undefined {
+  if (!typography) {
+    return undefined;
+  }
+  return {
+    "--app-document-font-family": typography.fontFamily,
+    "--app-document-font-size": `${typography.defaultFontSize}px`,
+  } as CSSProperties;
+}
 
 function ViewTab({
   view,
@@ -743,14 +777,18 @@ function ViewTab({
 function BoardConfigPanel({
   fields,
   visibleFieldIds,
+  showCardTitle,
   hideEmptyGroups,
   onToggleField,
+  onShowCardTitleChange,
   onHideEmptyGroupsChange,
 }: {
   fields: MultidimensionalTableField[];
   visibleFieldIds: string[];
+  showCardTitle: boolean;
   hideEmptyGroups: boolean;
   onToggleField: (fieldId: string) => void;
+  onShowCardTitleChange: (showCardTitle: boolean) => void;
   onHideEmptyGroupsChange: (hideEmptyGroups: boolean) => void;
 }) {
   const configurableFields = fields;
@@ -776,6 +814,17 @@ function BoardConfigPanel({
           </label>
         ))}
       </div>
+      <label className="multitable-board-config-panel__option">
+        <input
+          type="checkbox"
+          checked={showCardTitle}
+          onChange={(event) => onShowCardTitleChange(event.target.checked)}
+        />
+        <span>
+          显示标题
+          <small>开启后卡片顶部显示标题字段，字段列表中不重复展示同一字段</small>
+        </span>
+      </label>
       <label className="multitable-board-config-panel__option">
         <input
           type="checkbox"
@@ -1530,6 +1579,9 @@ function fieldTypeText(field: MultidimensionalTableField): string {
   }
   if (field.type === "url") {
     return "URL";
+  }
+  if (field.type === "longText") {
+    return "多行文本";
   }
   return "文本";
 }

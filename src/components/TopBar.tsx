@@ -19,11 +19,24 @@ import {
   type SortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type MutableRefObject } from "react";
-import { Bot, ChevronDown, Cloud, Download, Eye, FileSpreadsheet, FileText, Grid2X2, Loader2, Pencil, Pin, Save, Share2, X } from "lucide-react";
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject } from "react";
+import { Bot, ChevronDown, Cloud, Download, Eye, FileSpreadsheet, FileText, Grid2X2, Loader2, Pencil, Pin, Save, Share2, Type, X } from "lucide-react";
 
-import type { DocumentOpenMode, OpenDocumentTab, SaveStatus } from "../app/appState";
+import type {
+  DocumentOpenMode,
+  DocumentTypographySettings,
+  GlobalTypographySettings,
+  OpenDocumentTab,
+  SaveStatus,
+} from "../app/appState";
 import type { DocumentExportFormat, ExportResourceStrategy } from "../features/lake-editor/lakeExport";
+import {
+  defaultTypographySettings,
+  normalizeDefaultFontSize,
+  normalizeFontFamily,
+  resolveTypographySettings,
+  supportedDefaultFontSizes,
+} from "../features/settings/typographySettingsStore";
 import type { WorkspaceDocument } from "../features/workspace/workspaceStore";
 import { documentTitleFromPath } from "../features/workspace/workspaceStore";
 import { IconButton } from "./IconButton";
@@ -47,10 +60,14 @@ interface TopBarProps {
   onManualSave: () => void;
   onOpenAiAssistant?: () => void;
   onSetDocumentMode?: (mode: DocumentOpenMode) => void | Promise<void>;
+  globalTypography?: GlobalTypographySettings;
+  documentTypography?: DocumentTypographySettings;
+  onSaveDocumentTypography?: (settings: DocumentTypographySettings) => void | Promise<void>;
   onActivateTab?: (tabId: string) => void | Promise<void>;
   onReorderTabs?: (orderedTabIds: string[]) => void;
   onToggleTabLocked?: (tabId: string) => void;
   onCloseTab?: (tabId: string) => void | Promise<void>;
+  onCloseOtherTabs?: (tabId: string) => void | Promise<void>;
   onRenameDocument?: (title: string) => void | Promise<void>;
   onExportDocument?: (format: DocumentExportFormat, resourceStrategy: ExportResourceStrategy, signedUrlTtlSeconds: number) => void;
   onImportSpreadsheetExcel?: () => void;
@@ -71,10 +88,14 @@ export function TopBar({
   onManualSave,
   onOpenAiAssistant,
   onSetDocumentMode,
+  globalTypography = defaultTypographySettings,
+  documentTypography,
+  onSaveDocumentTypography,
   onActivateTab,
   onReorderTabs,
   onToggleTabLocked,
   onCloseTab,
+  onCloseOtherTabs,
   onRenameDocument,
   onExportDocument,
   onImportSpreadsheetExcel,
@@ -89,6 +110,10 @@ export function TopBar({
   const [editingTitle, setEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(title);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [typographyMenuOpen, setTypographyMenuOpen] = useState(false);
+  const [typographyFontFamilyDraft, setTypographyFontFamilyDraft] = useState("");
+  const [typographyFontSizeDraft, setTypographyFontSizeDraft] = useState("");
+  const [typographyError, setTypographyError] = useState<string | null>(null);
   const [tabMenu, setTabMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
   const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ tabId: string; placement: TabDropPlacement } | null>(null);
@@ -97,7 +122,11 @@ export function TopBar({
   const activeTabRef = useRef<HTMLDivElement | null>(null);
   const ttlOptions = Array.from(new Set([ttlSeconds, 3600, 24 * 3600, 7 * 24 * 3600])).sort((left, right) => left - right);
   const menuTab = tabMenu ? openTabs.find((tab) => tab.id === tabMenu.tabId) : null;
+  const hasClosableOtherTabs = menuTab
+    ? openTabs.some((tab) => tab.id !== menuTab.id && !tab.locked)
+    : false;
   const lakeReadMode = document?.kind === "lake" && documentMode === "read";
+  const effectiveTypography = resolveTypographySettings(documentTypography, globalTypography);
   const tabIds = openTabs.map((tab) => tab.id);
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -134,6 +163,11 @@ export function TopBar({
   useEffect(() => {
     setTtlSeconds(defaultSignedUrlTtlSeconds);
   }, [defaultSignedUrlTtlSeconds]);
+  useEffect(() => {
+    setTypographyFontFamilyDraft(documentTypography?.fontFamily ?? "");
+    setTypographyFontSizeDraft(documentTypography?.defaultFontSize ? String(documentTypography.defaultFontSize) : "");
+    setTypographyError(null);
+  }, [document?.path, documentTypography?.defaultFontSize, documentTypography?.fontFamily]);
 
   const submitTitle = () => {
     const nextTitle = draftTitle.trim();
@@ -145,6 +179,26 @@ export function TopBar({
   const exportDocument = (format: DocumentExportFormat) => {
     setExportMenuOpen(false);
     onExportDocument?.(format, resourceStrategy, ttlSeconds);
+  };
+  const submitDocumentTypography = (event: FormEvent) => {
+    event.preventDefault();
+    const nextFontFamily = typographyFontFamilyDraft.trim();
+    const nextFontSize = typographyFontSizeDraft ? Number(typographyFontSizeDraft) : undefined;
+    if (nextFontFamily && !normalizeFontFamily(nextFontFamily)) {
+      setTypographyError("请填写有效字体");
+      return;
+    }
+    if (nextFontSize && !normalizeDefaultFontSize(nextFontSize)) {
+      setTypographyError("请选择支持的字号");
+      return;
+    }
+
+    setTypographyMenuOpen(false);
+    setTypographyError(null);
+    void onSaveDocumentTypography?.({
+      ...(nextFontFamily ? { fontFamily: nextFontFamily } : {}),
+      ...(nextFontSize ? { defaultFontSize: nextFontSize } : {}),
+    });
   };
   const finishTabDrag = () => {
     setDraggingTabId(null);
@@ -280,9 +334,20 @@ export function TopBar({
                   setTabMenu(null);
                 }}
               >
-                关闭标签
+                关闭当前标签
               </button>
             ) : null}
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!hasClosableOtherTabs}
+              onClick={() => {
+                void onCloseOtherTabs?.(menuTab.id);
+                setTabMenu(null);
+              }}
+            >
+              关闭其他标签
+            </button>
           </div>
         ) : null}
         <span className={`save-status save-status--${saveStatus.state}`}>
@@ -309,6 +374,74 @@ export function TopBar({
           >
             {lakeReadMode ? <Pencil size={18} /> : <Eye size={18} />}
           </IconButton>
+        ) : null}
+        {document?.kind === "lake" && !lakeReadMode ? (
+          <div
+            className="export-menu document-typography-menu"
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                setTypographyMenuOpen(false);
+              }
+            }}
+          >
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="文档字体"
+              aria-haspopup="dialog"
+              aria-expanded={typographyMenuOpen}
+              title="文档字体"
+              onClick={() => {
+                setExportMenuOpen(false);
+                setTypographyMenuOpen((open) => !open);
+              }}
+            >
+              <Type size={18} />
+            </button>
+            {typographyMenuOpen ? (
+              <form
+                className="export-menu__content document-typography-menu__content"
+                role="dialog"
+                aria-label="文档字体设置"
+                onSubmit={submitDocumentTypography}
+              >
+                <label>
+                  字体名称
+                  <input
+                    aria-label="字体名称"
+                    value={typographyFontFamilyDraft}
+                    placeholder={`继承：${effectiveTypography.fontFamily}`}
+                    onChange={(event) => setTypographyFontFamilyDraft(event.target.value)}
+                  />
+                </label>
+                <label>
+                  文档字号
+                  <select
+                    aria-label="文档字号"
+                    value={typographyFontSizeDraft}
+                    onChange={(event) => setTypographyFontSizeDraft(event.target.value)}
+                  >
+                    <option value="">继承全局（{globalTypography.defaultFontSize}px）</option>
+                    {supportedDefaultFontSizes.map((size) => (
+                      <option key={size} value={size}>{size}px</option>
+                    ))}
+                  </select>
+                </label>
+                <p className="document-typography-menu__hint">
+                  当前显示：{effectiveTypography.defaultFontSize}px
+                </p>
+                {typographyError ? <p className="document-typography-menu__error">{typographyError}</p> : null}
+                <div className="document-typography-menu__actions">
+                  <button type="button" className="secondary-button" onClick={() => setTypographyMenuOpen(false)}>
+                    取消
+                  </button>
+                  <button type="submit" className="primary-button" aria-label="保存文档字体">
+                    保存
+                  </button>
+                </div>
+              </form>
+            ) : null}
+          </div>
         ) : null}
         <IconButton label="保存" onClick={onManualSave} disabled={!document || lakeReadMode}>
           <Save size={18} />

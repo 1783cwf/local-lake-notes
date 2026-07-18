@@ -1,3 +1,5 @@
+import { screen } from "@testing-library/react";
+
 import {
   createLakeEditor,
   createLakeViewer,
@@ -160,6 +162,42 @@ test("创建阅读器时使用语雀 Viewer 并绑定展示态基础能力", () 
   );
   expect(root.querySelector(".ne-doc-major-viewer")).toBeInstanceOf(HTMLDivElement);
   expect(window.Doc.createOpenEditor).not.toHaveBeenCalled();
+  destroyLakeEditor(created);
+});
+
+test("编辑器图片支持打开查看器并放大缩小", async () => {
+  const editor: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => ""),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+  const root = document.createElement("div");
+  document.body.append(root);
+
+  const created = createLakeEditor(root, {
+    onContentChange: vi.fn(),
+    uploadImage: vi.fn(),
+    uploadFile: vi.fn(),
+    downloadFile: vi.fn(),
+  });
+  root.querySelector(".lake-editor-mount")!.innerHTML = '<div class="ne-engine"><img src="data:image/png;base64,QQ==" alt="示例图"></div>';
+  await waitForMutationObserver();
+
+  root.querySelector("img")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  expect(screen.getByRole("dialog", { name: "图片查看" })).toBeInTheDocument();
+  expect(screen.getByText("100%")).toBeInTheDocument();
+
+  screen.getByRole("button", { name: "放大图片" }).click();
+  expect(screen.getByText("125%")).toBeInTheDocument();
+  screen.getByRole("button", { name: "缩小图片" }).click();
+  expect(screen.getByText("100%")).toBeInTheDocument();
+  screen.getByRole("button", { name: "关闭图片查看" }).click();
+  expect(screen.queryByRole("dialog", { name: "图片查看" })).not.toBeInTheDocument();
+
   destroyLakeEditor(created);
 });
 
@@ -391,6 +429,61 @@ test("代码块复制会保留 CodeMirror 行格式和缩进", async () => {
   await Promise.resolve();
 
   expect(writeText).toHaveBeenCalledWith("spec:\n  selector:\n    app: demo\n\n  replicas: 2");
+  destroyLakeEditor(created);
+});
+
+test("代码块复制优先读取 Lake 原始数据避免长代码块只复制可见行", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  const completeCode = [
+    "apiVersion: apps/v1",
+    "kind: Deployment",
+    "metadata:",
+    "  name: demo",
+    "  namespace: default",
+  ].join("\n");
+  const value = `data:${encodeURIComponent(JSON.stringify({
+    id: "code-1",
+    mode: "yaml",
+    code: completeCode,
+  }))}`;
+  const editor: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => `<card type="inline" name="codeblock" value="${value}"></card>`),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+  const root = document.createElement("div");
+  document.body.append(root);
+
+  const created = createLakeEditor(root, {
+    onContentChange: vi.fn(),
+    uploadImage: vi.fn(),
+    uploadFile: vi.fn(),
+    downloadFile: vi.fn(),
+  });
+  root.querySelector(".lake-editor-mount")!.innerHTML = `
+    <div class="ne-codeblock" id="code-1" data-codeblock-mode="yaml">
+      <div class="ne-codeblock-inner">
+        <div class="cm-content">
+          <div class="cm-line">apiVersion: apps/v1</div>
+          <div class="cm-line">kind: Deployment</div>
+        </div>
+      </div>
+    </div>
+  `;
+  await waitForMutationObserver();
+
+  root.querySelector("[data-lake-codeblock-action='copy']")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await Promise.resolve();
+
+  expect(writeText).toHaveBeenCalledWith(completeCode);
   destroyLakeEditor(created);
 });
 

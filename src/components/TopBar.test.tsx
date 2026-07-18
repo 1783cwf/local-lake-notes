@@ -148,6 +148,39 @@ test("Lake 文档阅读模式下可以切回编辑且禁用保存和 AI 文档�
   expect(onSetDocumentMode).toHaveBeenCalledWith("edit");
 });
 
+test("Lake 编辑模式可以保存文档级字体设置", async () => {
+  const user = userEvent.setup();
+  const onSaveDocumentTypography = vi.fn();
+
+  render(
+    <TopBar
+      document={{
+        id: "测试文件1.lake",
+        path: "测试文件1.lake",
+        name: "测试文件1",
+        parentPath: "",
+        size: 1,
+        kind: "lake",
+      }}
+      documentMode="edit"
+      globalTypography={{ fontFamily: "system-ui", defaultFontSize: 19 }}
+      saveStatus={{ state: "clean" }}
+      onManualSave={vi.fn()}
+      onSaveDocumentTypography={onSaveDocumentTypography}
+    />,
+  );
+
+  await user.click(screen.getByRole("button", { name: "文档字体" }));
+  await user.type(screen.getByLabelText("字体名称"), "Songti SC");
+  await user.selectOptions(screen.getByLabelText("文档字号"), "22");
+  await user.click(screen.getByRole("button", { name: "保存文档字体" }));
+
+  expect(onSaveDocumentTypography).toHaveBeenCalledWith({
+    fontFamily: "Songti SC",
+    defaultFontSize: 22,
+  });
+});
+
 test("多维表格只显示保存和分享，不显示文档或 Excel 导出菜单", () => {
   render(
     <TopBar
@@ -357,4 +390,50 @@ test("未锁定活动标签可以点击关闭按钮", async () => {
   await user.click(screen.getByRole("button", { name: "关闭 a" }));
 
   expect(onCloseTab).toHaveBeenCalledWith("a.lake");
+});
+
+test("标签右键菜单支持关闭当前标签和关闭其他标签", async () => {
+  const user = userEvent.setup();
+  const onCloseTab = vi.fn();
+  const onCloseOtherTabs = vi.fn();
+
+  render(
+    <TopBar
+      document={{
+        id: "b.lake",
+        path: "b.lake",
+        name: "b",
+        parentPath: "",
+        size: 1,
+        kind: "lake",
+      }}
+      openTabs={[
+        {
+          id: "a.lake",
+          path: "a.lake",
+          locked: false,
+          document: { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+        },
+        {
+          id: "b.lake",
+          path: "b.lake",
+          locked: false,
+          document: { id: "b.lake", path: "b.lake", name: "b", parentPath: "", size: 1, kind: "lake" },
+        },
+      ]}
+      activeTabId="b.lake"
+      saveStatus={{ state: "clean" }}
+      onManualSave={vi.fn()}
+      onCloseTab={onCloseTab}
+      onCloseOtherTabs={onCloseOtherTabs}
+    />,
+  );
+
+  await user.pointer({ keys: "[MouseRight]", target: screen.getByRole("tab", { name: "b" }) });
+  await user.click(screen.getByRole("menuitem", { name: "关闭当前标签" }));
+  expect(onCloseTab).toHaveBeenCalledWith("b.lake");
+
+  await user.pointer({ keys: "[MouseRight]", target: screen.getByRole("tab", { name: "b" }) });
+  await user.click(screen.getByRole("menuitem", { name: "关闭其他标签" }));
+  expect(onCloseOtherTabs).toHaveBeenCalledWith("b.lake");
 });

@@ -1,13 +1,16 @@
 use tempfile::tempdir;
 use yuque_lake_notes_lib::models::{
-    AiModelProfile, AiProtocol, AiSettings, OssSettings, StorageProviderKind,
+    AiModelProfile, AiProtocol, AiSettings, DocumentTabGroup, DocumentTabGroupItem,
+    DocumentTabGroups, ImageOptimizationMode, OssSettings, StorageProviderKind,
 };
 use yuque_lake_notes_lib::storage::app_database::{
     clear_recent_workspace_root_at, clone_database_to_directory_at, forget_known_workspace_at,
     list_known_workspaces_at, load_ai_profile_secrets_at, load_ai_settings_at,
-    load_oss_settings_at, load_recent_workspace_root_at, prune_workspace_order_path_at,
+    load_document_tab_groups_at, load_oss_settings_at, load_recent_workspace_root_at,
+    prune_workspace_order_path_at,
     read_workspace_order_at, rewrite_workspace_order_items, rewrite_workspace_order_path_at,
-    save_ai_profile_secrets_at, save_ai_settings_at, save_oss_settings_at,
+    save_ai_profile_secrets_at, save_ai_settings_at, save_document_tab_groups_at,
+    save_oss_settings_at,
     set_recent_workspace_root_at, set_workspace_order_at,
 };
 
@@ -29,6 +32,7 @@ fn valid_settings() -> OssSettings {
         max_signed_url_ttl_seconds: 7 * 24 * 60 * 60,
         allow_signed_url_export: true,
         resource_preview_concurrency: 6,
+        image_optimization: ImageOptimizationMode::Balanced,
         local: Default::default(),
         webdav: Default::default(),
     }
@@ -89,6 +93,36 @@ fn stores_ai_profile_secrets_in_sqlite_setting() {
     save_ai_profile_secrets_at(&database, &secrets).unwrap();
 
     assert_eq!(load_ai_profile_secrets_at(&database).unwrap(), secrets);
+}
+
+#[test]
+fn stores_document_tab_groups_in_sqlite() {
+    let dir = tempdir().unwrap();
+    let database = dir.path().join("app.sqlite3");
+    let groups = DocumentTabGroups {
+        groups: vec![DocumentTabGroup {
+            id: "group-1".to_string(),
+            name: "工作标签组".to_string(),
+            items: vec![
+                DocumentTabGroupItem {
+                    workspace_root: "/tmp/work".to_string(),
+                    path: "a.lake".to_string(),
+                    mode: Some("edit".to_string()),
+                },
+                DocumentTabGroupItem {
+                    workspace_root: "/tmp/life".to_string(),
+                    path: "b.lake".to_string(),
+                    mode: Some("read".to_string()),
+                },
+            ],
+            created_at: "2026-06-08T00:00:00.000Z".to_string(),
+            updated_at: "2026-06-08T00:00:00.000Z".to_string(),
+        }],
+    };
+
+    save_document_tab_groups_at(&database, &groups).unwrap();
+
+    assert_eq!(load_document_tab_groups_at(&database).unwrap(), groups);
 }
 
 #[test]

@@ -5,11 +5,18 @@ import {
   LogLevel,
   Univer,
   CommandType,
+  type DependencyOverride,
   type IWorkbookData,
 } from "@univerjs/core";
 import { FUniver } from "@univerjs/core/facade";
 import { defaultTheme } from "@univerjs/themes";
-import { UniverSheetsCorePreset, type FWorkbook } from "@univerjs/preset-sheets-core";
+import {
+  IClipboardInterfaceService as UniverClipboardInterfaceService,
+  UniverSheetsCorePreset,
+  UniverUIPlugin,
+  type FWorkbook,
+  type IClipboardInterfaceService,
+} from "@univerjs/preset-sheets-core";
 import zhCN from "@univerjs/preset-sheets-core/locales/zh-CN";
 import "@univerjs/preset-sheets-core/lib/index.css";
 
@@ -50,6 +57,10 @@ interface PendingSpreadsheetPointer {
   screenX: number;
   screenY: number;
 }
+
+type UniverSheetsCorePresetResult = ReturnType<typeof UniverSheetsCorePreset>;
+type UniverPluginEntry = UniverSheetsCorePresetResult["plugins"][number];
+type UniverPluginConfig = Record<string, unknown> & { override?: DependencyOverride };
 
 export interface SpreadsheetEditorHandle {
   importExcel: (file: File) => Promise<string>;
@@ -257,7 +268,7 @@ function createUniverRuntime(
     },
     logLevel: LogLevel.ERROR,
   });
-  const preset = UniverSheetsCorePreset({
+  const preset = withSpreadsheetClipboardFallback(UniverSheetsCorePreset({
     container: host,
     toolbar: true,
     formulaBar: true,
@@ -269,7 +280,7 @@ function createUniverRuntime(
     },
     // Univer 的工具栏挂载在 UI header 区域；关闭 header 会导致顶部工具栏不渲染。
     header: true,
-  });
+  }));
   univer.registerPlugins(preset.plugins.map((plugin) => Array.isArray(plugin) ? plugin : [plugin]) as never);
   const univerAPI = FUniver.newAPI(univer);
   const workbook = univerAPI.createWorkbook(workbookData);
@@ -292,6 +303,128 @@ function createUniverRuntime(
       disposePointerReleaseGuard();
     },
   };
+}
+
+function withSpreadsheetClipboardFallback(preset: UniverSheetsCorePresetResult): UniverSheetsCorePresetResult {
+  return {
+    ...preset,
+    plugins: preset.plugins.map((plugin): UniverPluginEntry => {
+      if (!Array.isArray(plugin) || plugin[0] !== UniverUIPlugin) {
+        return plugin;
+      }
+
+      const config = isRecord(plugin[1]) ? plugin[1] as UniverPluginConfig : {};
+      return [
+        plugin[0],
+        {
+          ...config,
+          override: mergeClipboardOverride(config.override),
+        },
+      ] as UniverPluginEntry;
+    }),
+  };
+}
+
+function mergeClipboardOverride(override: DependencyOverride | undefined): DependencyOverride {
+  const nextOverride = override?.filter(([identifier]) => identifier !== UniverClipboardInterfaceService) ?? [];
+  return [
+    ...nextOverride,
+    [UniverClipboardInterfaceService, {
+      useClass: SpreadsheetClipboardService,
+      lazy: true,
+    }],
+  ];
+}
+
+export class SpreadsheetClipboardService implements IClipboardInterfaceService {
+  get supportClipboard(): boolean {
+    return Boolean(navigator.clipboard?.readText);
+  }
+
+  async write(text: string, html: string): Promise<void> {
+    if (await writeNativeSpreadsheetClipboard(text, html)) {
+      return;
+    }
+    copySpreadsheetTextBySelection(text);
+  }
+
+  async writeText(text: string): Promise<void> {
+    if (await writeNativeSpreadsheetText(text)) {
+      return;
+    }
+    copySpreadsheetTextBySelection(text);
+  }
+
+  async read(): Promise<ClipboardItem[]> {
+    try {
+      return await navigator.clipboard?.read?.() ?? [];
+    } catch {
+      return [];
+    }
+  }
+
+  async readText(): Promise<string> {
+    try {
+      return await navigator.clipboard?.readText?.() ?? "";
+    } catch {
+      return "";
+    }
+  }
+}
+
+async function writeNativeSpreadsheetClipboard(text: string, html: string): Promise<boolean> {
+  if (navigator.clipboard?.write && typeof ClipboardItem === "function") {
+    try {
+      await navigator.clipboard.write([new ClipboardItem({
+        "text/plain": new Blob([text], { type: "text/plain" }),
+        "text/html": new Blob([html], { type: "text/html" }),
+      })]);
+      return true;
+    } catch {
+      // WebView 偶发拒绝完整 Clipboard API 时继续尝试纯文本和 execCommand 兜底。
+    }
+  }
+
+  return writeNativeSpreadsheetText(text);
+}
+
+async function writeNativeSpreadsheetText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // 继续走兼容路径。
+  }
+  return false;
+}
+
+function copySpreadsheetTextBySelection(text: string): void {
+  const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.top = "-9999px";
+  textarea.style.opacity = "0";
+  document.body.append(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+
+  try {
+    document.execCommand("copy");
+  } catch {
+    // 复制失败时保持 Univer 内部 copy cache 可用，不再弹出误导性的权限提示。
+  } finally {
+    textarea.remove();
+    activeElement?.focus();
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function isPersistedSpreadsheetMutation(event: { id?: string; type?: CommandType }): boolean {

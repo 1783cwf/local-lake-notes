@@ -2,12 +2,17 @@ use tauri::AppHandle;
 
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    DatabaseLocationSettings, OssSettings, SaveDatabaseLocationInput, StorageConnectionTestOutput,
-    StorageProviderKind,
+    default_typography_font_family, default_typography_font_size, DatabaseLocationSettings,
+    DocumentTabGroup, DocumentTabGroupItem, DocumentTabGroups, GlobalTypographySettings,
+    OssSettings, SaveDatabaseLocationInput, StorageConnectionTestOutput, StorageProviderKind,
 };
 use crate::storage::app_database::{
-    database_location_settings, load_oss_settings as load_database_oss_settings,
-    save_database_location, save_oss_settings as save_database_oss_settings,
+    database_location_settings, load_document_tab_groups as load_database_document_tab_groups,
+    load_oss_settings as load_database_oss_settings,
+    load_typography_settings as load_database_typography_settings, save_database_location,
+    save_document_tab_groups as save_database_document_tab_groups,
+    save_oss_settings as save_database_oss_settings,
+    save_typography_settings as save_database_typography_settings,
 };
 use crate::storage::{local_store, s3, webdav};
 
@@ -21,6 +26,37 @@ pub fn save_oss_settings(app: AppHandle, settings: OssSettings) -> AppResult<Oss
     validate_oss_settings(&settings)?;
     save_database_oss_settings(&app, &settings)?;
     Ok(settings)
+}
+
+#[tauri::command]
+pub fn get_typography_settings(app: AppHandle) -> AppResult<GlobalTypographySettings> {
+    let settings = load_database_typography_settings(&app)?;
+    Ok(normalize_typography_settings(settings).unwrap_or_else(|_| default_typography_settings()))
+}
+
+#[tauri::command]
+pub fn save_typography_settings(
+    app: AppHandle,
+    settings: GlobalTypographySettings,
+) -> AppResult<GlobalTypographySettings> {
+    let normalized = normalize_typography_settings(settings)?;
+    save_database_typography_settings(&app, &normalized)?;
+    Ok(normalized)
+}
+
+#[tauri::command]
+pub fn get_document_tab_groups(app: AppHandle) -> AppResult<DocumentTabGroups> {
+    Ok(normalize_document_tab_groups(load_database_document_tab_groups(&app)?))
+}
+
+#[tauri::command]
+pub fn save_document_tab_groups(
+    app: AppHandle,
+    groups: DocumentTabGroups,
+) -> AppResult<DocumentTabGroups> {
+    let normalized = normalize_document_tab_groups(groups);
+    save_database_document_tab_groups(&app, &normalized)?;
+    Ok(normalized)
 }
 
 #[tauri::command]
@@ -58,6 +94,33 @@ pub fn save_database_location_settings(
 
 pub fn load_oss_settings(app: &AppHandle) -> AppResult<Option<OssSettings>> {
     load_database_oss_settings(app)
+}
+
+pub fn normalize_typography_settings(
+    settings: GlobalTypographySettings,
+) -> AppResult<GlobalTypographySettings> {
+    let font_family = normalize_font_family(&settings.font_family)
+        .unwrap_or_else(default_typography_font_family);
+    if !supported_default_font_size(settings.default_font_size) {
+        return Err(AppError::InvalidTypographySettings(
+            "默认字号必须是 12、13、14、15、16、19、22 或 24".to_string(),
+        ));
+    }
+
+    Ok(GlobalTypographySettings {
+        font_family,
+        default_font_size: settings.default_font_size,
+    })
+}
+
+pub fn create_global_typography_settings(
+    font_family: &str,
+    default_font_size: u8,
+) -> AppResult<GlobalTypographySettings> {
+    normalize_typography_settings(GlobalTypographySettings {
+        font_family: font_family.to_string(),
+        default_font_size,
+    })
 }
 
 pub fn validate_oss_settings(settings: &OssSettings) -> AppResult<()> {
@@ -127,4 +190,104 @@ pub fn validate_oss_settings(settings: &OssSettings) -> AppResult<()> {
     }
 
     Ok(())
+}
+
+pub fn supported_default_font_size(value: u8) -> bool {
+    matches!(value, 12 | 13 | 14 | 15 | 16 | 19 | 22 | 24)
+}
+
+pub fn normalize_font_family(value: &str) -> Option<String> {
+    let parts = value
+        .split(',')
+        .filter_map(normalize_font_family_part)
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(", "))
+    }
+}
+
+fn normalize_font_family_part(value: &str) -> Option<String> {
+    let trimmed = value
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim();
+    if trimmed.is_empty()
+        || trimmed
+            .chars()
+            .any(|ch| matches!(ch, ';' | ':' | '{' | '}' | '(' | ')' | '\n' | '\r' | '\\'))
+    {
+        return None;
+    }
+    if !trimmed
+        .chars()
+        .all(|ch| ch.is_alphanumeric() || ch.is_whitespace() || matches!(ch, '-' | '_' | '.'))
+    {
+        return None;
+    }
+    if trimmed.chars().any(char::is_whitespace) {
+        Some(format!("\"{}\"", trimmed.replace('"', "")))
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+pub fn default_typography_settings() -> GlobalTypographySettings {
+    GlobalTypographySettings {
+        font_family: default_typography_font_family(),
+        default_font_size: default_typography_font_size(),
+    }
+}
+
+fn normalize_document_tab_groups(groups: DocumentTabGroups) -> DocumentTabGroups {
+    DocumentTabGroups {
+        groups: groups
+            .groups
+            .into_iter()
+            .filter_map(normalize_document_tab_group)
+            .collect(),
+    }
+}
+
+fn normalize_document_tab_group(group: DocumentTabGroup) -> Option<DocumentTabGroup> {
+    let name = group.name.trim().to_string();
+    let id = group.id.trim().to_string();
+    let created_at = group.created_at.trim().to_string();
+    let updated_at = group.updated_at.trim().to_string();
+    let items = group
+        .items
+        .into_iter()
+        .filter_map(normalize_document_tab_group_item)
+        .collect::<Vec<_>>();
+    if id.is_empty() || name.is_empty() || items.is_empty() {
+        return None;
+    }
+
+    Some(DocumentTabGroup {
+        id,
+        name,
+        items,
+        created_at,
+        updated_at,
+    })
+}
+
+fn normalize_document_tab_group_item(item: DocumentTabGroupItem) -> Option<DocumentTabGroupItem> {
+    let workspace_root = item.workspace_root.trim().to_string();
+    let path = item.path.trim().trim_start_matches('/').to_string();
+    if workspace_root.is_empty() || path.is_empty() || path.contains("..") {
+        return None;
+    }
+    let mode = match item.mode.as_deref() {
+        Some("read") => Some("read".to_string()),
+        Some("edit") => Some("edit".to_string()),
+        _ => None,
+    };
+    Some(DocumentTabGroupItem {
+        workspace_root,
+        path,
+        mode,
+    })
 }

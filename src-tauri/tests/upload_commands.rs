@@ -1,5 +1,5 @@
 use tempfile::tempdir;
-use yuque_lake_notes_lib::models::{OssSettings, StorageProviderKind};
+use yuque_lake_notes_lib::models::{ImageOptimizationMode, OssSettings, StorageProviderKind};
 use yuque_lake_notes_lib::storage::local_store;
 use yuque_lake_notes_lib::storage::s3::{
     build_file_object_key, build_image_object_key, build_public_url,
@@ -50,6 +50,7 @@ fn builds_provider_aware_local_resource_reference() {
         max_signed_url_ttl_seconds: 7 * 24 * 60 * 60,
         allow_signed_url_export: true,
         resource_preview_concurrency: 6,
+        image_optimization: ImageOptimizationMode::Balanced,
         local: yuque_lake_notes_lib::models::LocalStorageSettings {
             root_directory: "/tmp/local-storage".to_string(),
             storage_id: "local".to_string(),

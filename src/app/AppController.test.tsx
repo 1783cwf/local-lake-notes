@@ -10,10 +10,11 @@ import type {
   MoveWorkspaceItemInput,
   WorkspacePayload,
 } from "../features/workspace/workspaceStore";
-import type { OssSettings } from "./appState";
+import type { DocumentTabGroup, GlobalTypographySettings, OssSettings } from "./appState";
 import { AppController } from "./AppController";
 
-const createLakeDocument = vi.fn<(title: string, parentPath?: string) => Promise<CreateDocumentPayload>>();
+const defaultTestTypography: GlobalTypographySettings = { fontFamily: "system-ui", defaultFontSize: 19 };
+const createLakeDocument = vi.fn<(title: string, parentPath?: string, typography?: GlobalTypographySettings) => Promise<CreateDocumentPayload>>();
 const createSpreadsheetDocument = vi.fn<(title: string, parentPath?: string) => Promise<CreateDocumentPayload>>();
 const createMultidimensionalTableDocument = vi.fn<(title: string, parentPath?: string) => Promise<CreateDocumentPayload>>();
 const createWorkspaceRoot = vi.fn<(parentPath: string, name: string) => Promise<WorkspacePayload>>();
@@ -44,6 +45,10 @@ const getDatabaseLocation = vi.fn(async () => ({
   custom: false,
 }));
 const getOssSettings = vi.fn<() => Promise<OssSettings | null>>(async () => null);
+const getTypographySettings = vi.fn<() => Promise<GlobalTypographySettings>>(async () => defaultTestTypography);
+const saveTypographySettings = vi.fn(async (settings: GlobalTypographySettings) => settings);
+const getDocumentTabGroups = vi.fn<() => Promise<DocumentTabGroup[]>>(async () => []);
+const saveDocumentTabGroups = vi.fn<(groups: DocumentTabGroup[]) => Promise<DocumentTabGroup[]>>(async (groups) => groups);
 const getBackupKeyStatus = vi.fn(async () => ({ configured: false, needsKey: false }));
 const getAiSettings = vi.fn(async () => ({ profiles: [] }));
 const listAiModels = vi.fn<(input: { profileId: string }) => Promise<{ profileId: string; models: [] }>>(
@@ -169,6 +174,7 @@ const s3SignedUrlOssSettings: OssSettings = {
   maxSignedUrlTtlSeconds: 7 * 24 * 60 * 60,
   allowSignedUrlExport: true,
   resourcePreviewConcurrency: 6,
+  imageOptimization: "balanced",
   local: {
     rootDirectory: "",
     storageId: "local",
@@ -287,6 +293,11 @@ vi.mock("../components/AppRail", () => ({
     onSwitchWorkspace,
     onForgetWorkspace,
     onCreateDocument,
+    tabGroups = [],
+    lockedTabCount = 0,
+    onSaveCurrentTabGroup,
+    onOpenTabGroup,
+    onDeleteTabGroup,
     onOpenSettings,
   }: {
     knownWorkspaces?: KnownWorkspace[];
@@ -296,12 +307,18 @@ vi.mock("../components/AppRail", () => ({
     onSwitchWorkspace?: (root: string) => void;
     onForgetWorkspace?: (root: string) => void;
     onCreateDocument: () => void;
+    tabGroups?: Array<{ id: string; name: string }>;
+    lockedTabCount?: number;
+    onSaveCurrentTabGroup?: (name: string) => void;
+    onOpenTabGroup?: (groupId: string) => void;
+    onDeleteTabGroup?: (groupId: string) => void;
     onOpenSettings: () => void;
   }) => (
     <nav aria-label="应用导航">
       <button type="button" onClick={onChooseWorkspace}>选择目录</button>
       <button type="button" onClick={onCreateWorkspace}>新建知识库</button>
       <button type="button" onClick={onCreateDocument}>新建文档</button>
+      <button type="button" onClick={() => onSaveCurrentTabGroup?.("工作标签组")} disabled={lockedTabCount === 0}>保存标签组</button>
       <button type="button" onClick={onOpenSettings}>设置</button>
       <div data-testid="active-workspace-root">{activeWorkspaceRoot ?? ""}</div>
       {knownWorkspaces.map((workspace) => (
@@ -311,6 +328,16 @@ vi.mock("../components/AppRail", () => ({
           </button>
           <button type="button" onClick={() => onForgetWorkspace?.(workspace.root)}>
             移除 {workspace.name}
+          </button>
+        </div>
+      ))}
+      {tabGroups.map((group) => (
+        <div key={group.id}>
+          <button type="button" onClick={() => onOpenTabGroup?.(group.id)}>
+            打开标签组 {group.name}
+          </button>
+          <button type="button" onClick={() => onDeleteTabGroup?.(group.id)}>
+            删除标签组 {group.name}
           </button>
         </div>
       ))}
@@ -469,7 +496,7 @@ vi.mock("../lib/tauri", () => ({
   chooseWorkspaceDirectory: vi.fn(async () => "/tmp/kb"),
   createLakeDirectory: (parentPath: string, name: string) => createLakeDirectory(parentPath, name),
   createBackup: (input: { forceFull: boolean }) => createBackup(input),
-  createLakeDocument: (title: string, parentPath?: string) => createLakeDocument(title, parentPath),
+  createLakeDocument: (title: string, parentPath?: string, typography?: GlobalTypographySettings) => createLakeDocument(title, parentPath, typography),
   createMultidimensionalTableDocument: (title: string, parentPath?: string) => createMultidimensionalTableDocument(title, parentPath),
   createSpreadsheetDocument: (title: string, parentPath?: string) => createSpreadsheetDocument(title, parentPath),
   createWorkspaceRoot: (parentPath: string, name: string) => createWorkspaceRoot(parentPath, name),
@@ -485,6 +512,8 @@ vi.mock("../lib/tauri", () => ({
   getDatabaseLocation: () => getDatabaseLocation(),
   getAiSettings: () => getAiSettings(),
   getOssSettings: () => getOssSettings(),
+  getTypographySettings: () => getTypographySettings(),
+  getDocumentTabGroups: () => getDocumentTabGroups(),
   getBackupKeyStatus: () => getBackupKeyStatus(),
   getResourceKeyStatus: () => getResourceKeyStatus(),
   verifyBackupKeyStatus: () => verifyBackupKeyStatus(),
@@ -506,6 +535,8 @@ vi.mock("../lib/tauri", () => ({
   renameWorkspace: vi.fn(),
   saveAiSettings: (input: { settings: { profiles: unknown[] } }) => saveAiSettings(input),
   saveOssSettings: vi.fn(),
+  saveTypographySettings: (settings: GlobalTypographySettings) => saveTypographySettings(settings),
+  saveDocumentTabGroups: (groups: DocumentTabGroup[]) => saveDocumentTabGroups(groups),
   saveBinaryExport: (defaultPath: string, bytes: Uint8Array, filters: Array<{ name: string; extensions: string[] }>) => saveBinaryExport(defaultPath, bytes, filters),
   savePdfExport: (defaultPath: string, html: string, filters: Array<{ name: string; extensions: string[] }>) => savePdfExport(defaultPath, html, filters),
   saveTextExport: (defaultPath: string, content: string, filters: Array<{ name: string; extensions: string[] }>) => saveTextExport(defaultPath, content, filters),
@@ -638,6 +669,14 @@ beforeEach(() => {
   getResourceKeyStatus.mockResolvedValue({ configured: false, needsKey: false, knownFingerprints: [] });
   getOssSettings.mockReset();
   getOssSettings.mockResolvedValue(null);
+  getTypographySettings.mockReset();
+  getTypographySettings.mockResolvedValue(defaultTestTypography);
+  saveTypographySettings.mockReset();
+  saveTypographySettings.mockImplementation(async (settings) => settings);
+  getDocumentTabGroups.mockReset();
+  getDocumentTabGroups.mockResolvedValue([]);
+  saveDocumentTabGroups.mockReset();
+  saveDocumentTabGroups.mockImplementation(async (groups) => groups);
   verifyBackupKeyStatus.mockReset();
   verifyBackupKeyStatus.mockResolvedValue({ configured: false, needsKey: false });
   verifyResourceKeyStatus.mockReset();
@@ -897,6 +936,80 @@ test("锁定当前标签后打开新文档会新增第二个标签", async () =>
   });
 });
 
+test("可以把当前锁定标签保存为标签组", async () => {
+  const user = userEvent.setup();
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [
+      { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+    ],
+    order: ["document:a.lake"],
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "a" }));
+  await user.pointer({ keys: "[MouseRight]", target: await screen.findByRole("tab", { name: "a" }) });
+  await user.click(screen.getByRole("menuitem", { name: "锁定标签" }));
+  await user.click(screen.getByRole("button", { name: "保存标签组" }));
+
+  await waitFor(() => {
+    expect(saveDocumentTabGroups).toHaveBeenCalledWith([
+      expect.objectContaining({
+        name: "工作标签组",
+        items: [{ workspaceRoot: "/tmp/kb", path: "a.lake", mode: "edit" }],
+      }),
+    ]);
+  });
+});
+
+test("打开标签组会跨知识库打开并锁定全部文档", async () => {
+  const user = userEvent.setup();
+  const workWorkspace: WorkspacePayload = {
+    root: "/tmp/work",
+    directories: [],
+    documents: [{ id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" }],
+    order: ["document:a.lake"],
+  };
+  const lifeWorkspace: WorkspacePayload = {
+    root: "/tmp/life",
+    directories: [],
+    documents: [{ id: "b.lake", path: "b.lake", name: "b", parentPath: "", size: 1, kind: "lake" }],
+    order: ["document:b.lake"],
+  };
+  getRecentWorkspace.mockResolvedValue(workWorkspace);
+  getDocumentTabGroups.mockResolvedValue([{
+    id: "group-1",
+    name: "工作标签组",
+    items: [
+      { workspaceRoot: "/tmp/work", path: "a.lake", mode: "edit" },
+      { workspaceRoot: "/tmp/life", path: "b.lake", mode: "read" },
+    ],
+    createdAt: "2026-06-08T00:00:00.000Z",
+    updatedAt: "2026-06-08T00:00:00.000Z",
+  }]);
+  setWorkspaceRoot.mockImplementation(async (root) => {
+    if (root === "/tmp/work") {
+      return workWorkspace;
+    }
+    if (root === "/tmp/life") {
+      return lifeWorkspace;
+    }
+    throw new Error(`未知知识库 ${root}`);
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("button", { name: "打开标签组 工作标签组" }));
+
+  await waitFor(() => {
+    expect(screen.getByRole("tab", { name: "a，已锁定" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "b，已锁定" })).toBeInTheDocument();
+    expect(screen.getByTestId("active-workspace-root")).toHaveTextContent("/tmp/work");
+  });
+});
+
 test("再次打开已经存在的标签只激活已有标签", async () => {
   const user = userEvent.setup();
   getRecentWorkspace.mockResolvedValue({
@@ -1056,6 +1169,43 @@ test("单篇 Markdown 只有图片资源时直接导出单文件", async () => {
   });
 });
 
+test("单篇 HTML 只有图片资源时导出内嵌 Base64 的单文件", async () => {
+  const user = userEvent.setup();
+  const imageRef = "yuque-resource://yuque/images/a.png?kind=image&name=%E6%88%AA%E5%9B%BE.png&type=image%2Fpng";
+  const editor = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn((type: string) => (
+      type === "text/html" ? `<p><img src="${imageRef}" alt="截图.png"></p>` : "<p>图片</p>"
+    )),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" }],
+    order: ["document:a.lake"],
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "a" }));
+  await user.click(screen.getByRole("button", { name: "导出文档" }));
+  await user.click(screen.getByRole("menuitem", { name: "HTML" }));
+
+  await waitFor(() => {
+    expect(saveTextExport).toHaveBeenCalledWith(
+      "a.html",
+      expect.stringContaining("src=\"data:image/png;base64,AQID\""),
+      [{ name: "HTML", extensions: ["html"] }],
+    );
+    expect(saveBinaryExport).not.toHaveBeenCalled();
+  });
+});
+
 test("短时签名链接导出无本地资源时保持单个 HTML 文件", async () => {
   const user = userEvent.setup();
   const editor = {
@@ -1115,6 +1265,81 @@ test("关闭活动未锁定标签后切换到相邻标签", async () => {
     expect(screen.getAllByRole("tab")).toHaveLength(1);
     expect(screen.getByRole("tab", { name: "a，已锁定" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("current-path")).toHaveTextContent("a.lake");
+  });
+});
+
+test("关闭其他标签时保留目标标签和锁定标签", async () => {
+  const user = userEvent.setup();
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [
+      { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+      { id: "b.lake", path: "b.lake", name: "b", parentPath: "", size: 1, kind: "lake" },
+      { id: "c.lake", path: "c.lake", name: "c", parentPath: "", size: 1, kind: "lake" },
+    ],
+    order: ["document:a.lake", "document:b.lake", "document:c.lake"],
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "a" }));
+  await user.pointer({ keys: "[MouseRight]", target: await screen.findByRole("tab", { name: "a" }) });
+  await user.click(screen.getByRole("menuitem", { name: "锁定标签" }));
+  await user.click(screen.getByRole("treeitem", { name: "b" }));
+  await user.pointer({ keys: "[MouseRight]", target: screen.getByRole("tab", { name: "b" }) });
+  await user.click(screen.getByRole("menuitem", { name: "锁定标签" }));
+  await user.click(screen.getByRole("treeitem", { name: "c" }));
+
+  await user.pointer({ keys: "[MouseRight]", target: screen.getByRole("tab", { name: "b，已锁定" }) });
+  await user.click(screen.getByRole("menuitem", { name: "关闭其他标签" }));
+
+  await waitFor(() => {
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+    expect(screen.getByRole("tab", { name: "a，已锁定" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "b，已锁定" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("current-path")).toHaveTextContent("b.lake");
+  });
+});
+
+test("关闭其他标签时保存失败会保留全部标签", async () => {
+  const user = userEvent.setup();
+  const editor = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => "<p>dirty</p>"),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [
+      { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+      { id: "b.lake", path: "b.lake", name: "b", parentPath: "", size: 1, kind: "lake" },
+    ],
+    order: ["document:a.lake", "document:b.lake"],
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "a" }));
+  await user.pointer({ keys: "[MouseRight]", target: screen.getByRole("tab", { name: "a" }) });
+  await user.click(screen.getByRole("menuitem", { name: "锁定标签" }));
+  await user.click(screen.getByRole("treeitem", { name: "b" }));
+  writeLakeDocument.mockRejectedValue(new Error("写入失败"));
+  await user.click(screen.getByRole("button", { name: "保存" }));
+  await screen.findByText("写入失败");
+
+  await user.pointer({ keys: "[MouseRight]", target: screen.getByRole("tab", { name: "a，已锁定" }) });
+  await user.click(screen.getByRole("menuitem", { name: "关闭其他标签" }));
+
+  await waitFor(() => {
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+    expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("当前文档保存失败，请先处理后再关闭其他标签")).toBeInTheDocument();
   });
 });
 
@@ -1358,7 +1583,7 @@ test("连续创建嵌套目录后可以在子目录中新建并打开 Lake 文�
   await user.click(await screen.findByRole("button", { name: "在 测试目录2 下新建文档" }));
 
   await waitFor(() => {
-    expect(createLakeDocument).toHaveBeenCalledWith("未命名文档", "测试目录1/测试目录2");
+    expect(createLakeDocument).toHaveBeenCalledWith("未命名文档", "测试目录1/测试目录2", defaultTestTypography);
     expect(readLakeDocument).toHaveBeenCalledWith("测试目录1/测试目录2/未命名文档.lake");
     expect(screen.getByTestId("current-path")).toHaveTextContent("测试目录1/测试目录2/未命名文档.lake");
     expect(screen.getByRole("heading", { name: "未命名文档" })).toBeInTheDocument();
@@ -1872,10 +2097,12 @@ test("AI 长文拆分确认后创建当前文档子文档", async () => {
   await user.click(screen.getByRole("button", { name: "确认创建" }));
 
   await waitFor(() => {
-    expect(createLakeDocument).toHaveBeenNthCalledWith(1, "第一部分", "a");
-    expect(createLakeDocument).toHaveBeenNthCalledWith(2, "第二部分", "a");
-    expect(writeLakeDocument).toHaveBeenCalledWith("a/第一部分.lake", "# 第一部分");
-    expect(writeLakeDocument).toHaveBeenCalledWith("a/第二部分.lake", "# 第二部分");
+    expect(createLakeDocument).toHaveBeenNthCalledWith(1, "第一部分", "a", defaultTestTypography);
+    expect(createLakeDocument).toHaveBeenNthCalledWith(2, "第二部分", "a", defaultTestTypography);
+    expect(writeLakeDocument).toHaveBeenCalledWith("a/第一部分.lake", expect.stringContaining("yuque-lake-notes:typography"));
+    expect(writeLakeDocument).toHaveBeenCalledWith("a/第一部分.lake", expect.stringContaining("# 第一部分"));
+    expect(writeLakeDocument).toHaveBeenCalledWith("a/第二部分.lake", expect.stringContaining("yuque-lake-notes:typography"));
+    expect(writeLakeDocument).toHaveBeenCalledWith("a/第二部分.lake", expect.stringContaining("# 第二部分"));
   });
 });
 

@@ -1,15 +1,17 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { CommandType, LocaleType, Univer, type IWorkbookData } from "@univerjs/core";
-import { UniverSheetsCorePreset } from "@univerjs/preset-sheets-core";
+import { IClipboardInterfaceService, UniverSheetsCorePreset, UniverUIPlugin } from "@univerjs/preset-sheets-core";
 
 import { createEmptySpreadsheetWorkbookData } from "./spreadsheetDocument";
-import { SpreadsheetEditor } from "./SpreadsheetEditor";
+import { SpreadsheetClipboardService, SpreadsheetEditor } from "./SpreadsheetEditor";
 import { serializeSpreadsheetSnapshot } from "./spreadsheetSnapshot";
 
 const univerMocks = vi.hoisted(() => {
   const registerPlugin = vi.fn();
   const registerPlugins = vi.fn();
   const disposeUniver = vi.fn();
+  const clipboardServiceIdentifier = Symbol("univer.clipboard-interface-service");
+  class MockUniverUIPlugin {}
   const createUniver = vi.fn().mockImplementation(function () {
     return {
       registerPlugin,
@@ -18,10 +20,11 @@ const univerMocks = vi.hoisted(() => {
     };
   });
 
-  return { createUniver, registerPlugin, registerPlugins, disposeUniver };
+  return { clipboardServiceIdentifier, createUniver, MockUniverUIPlugin, registerPlugin, registerPlugins, disposeUniver };
 });
 const createWorkbook = vi.fn();
 let commandExecutedListener: ((event: { id: string; type: CommandType; params: unknown }) => void) | null = null;
+const originalNavigatorClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
 
 vi.mock("@univerjs/core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@univerjs/core")>();
@@ -46,11 +49,17 @@ vi.mock("@univerjs/core/facade", () => ({
   },
 }));
 
-vi.mock("@univerjs/preset-sheets-core", () => ({
-  UniverSheetsCorePreset: vi.fn(() => ({
-    plugins: [],
-  })),
-}));
+vi.mock("@univerjs/preset-sheets-core", () => {
+  return {
+    IClipboardInterfaceService: univerMocks.clipboardServiceIdentifier,
+    UniverUIPlugin: univerMocks.MockUniverUIPlugin,
+    UniverSheetsCorePreset: vi.fn(() => ({
+      plugins: [
+        [univerMocks.MockUniverUIPlugin, {}],
+      ],
+    })),
+  };
+});
 
 beforeEach(() => {
   univerMocks.createUniver.mockClear();
@@ -67,6 +76,12 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
+  if (originalNavigatorClipboardDescriptor) {
+    Object.defineProperty(navigator, "clipboard", originalNavigatorClipboardDescriptor);
+  } else {
+    Reflect.deleteProperty(navigator, "clipboard");
+  }
 });
 
 test("打开 spreadsheet 文档时初始化 Univer workbook", async () => {
@@ -139,6 +154,57 @@ test("初始化 Univer 时启用表格顶部工具栏区域", async () => {
     toolbar: true,
     formulaBar: true,
   }));
+});
+
+test("初始化 Univer 时替换默认剪贴板服务避免 WebView 权限失败提示", async () => {
+  render(
+    <SpreadsheetEditor
+      document={spreadsheetDocument}
+      content={serializeSpreadsheetSnapshot(createEmptySpreadsheetWorkbookData("剪贴板表格"))}
+      manualSaveRequest={0}
+      onSave={vi.fn()}
+      onSaveStatusChange={vi.fn()}
+    />,
+  );
+
+  await waitFor(() => expect(univerMocks.registerPlugins).toHaveBeenCalled());
+  const registeredPlugins = univerMocks.registerPlugins.mock.calls[0][0] as Array<[unknown, Record<string, unknown>]>;
+  const uiPlugin = registeredPlugins.find(([plugin]) => plugin === UniverUIPlugin);
+  expect(uiPlugin?.[1]).toEqual(expect.objectContaining({
+    override: expect.arrayContaining([
+      [IClipboardInterfaceService, expect.objectContaining({
+        useClass: SpreadsheetClipboardService,
+        lazy: true,
+      })],
+    ]),
+  }));
+});
+
+test("表格剪贴板写入被 WebView 拒绝时回退到 execCommand 复制", async () => {
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: {
+      write: vi.fn().mockRejectedValue(new DOMException("denied", "NotAllowedError")),
+      writeText: vi.fn().mockRejectedValue(new DOMException("denied", "NotAllowedError")),
+      readText: vi.fn(),
+    },
+  });
+  Object.defineProperty(window, "ClipboardItem", {
+    configurable: true,
+    value: class {
+      constructor(readonly items: Record<string, Blob>) {}
+    },
+  });
+  Object.defineProperty(document, "execCommand", {
+    configurable: true,
+    value: vi.fn(() => true),
+  });
+
+  await new SpreadsheetClipboardService().write("A\tB", "<table><tr><td>A</td><td>B</td></tr></table>");
+
+  expect(navigator.clipboard.write).toHaveBeenCalled();
+  expect(navigator.clipboard.writeText).toHaveBeenCalledWith("A\tB");
+  expect(document.execCommand).toHaveBeenCalledWith("copy");
 });
 
 test("收到数据变更命令后延迟保存 Univer workbook 快照", async () => {

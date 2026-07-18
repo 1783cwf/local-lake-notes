@@ -35,7 +35,11 @@ import {
   updateMultidimensionalFieldOptions,
 } from "./multidimensionalTableDocument";
 import { FieldTypeIcon, MultidimensionalTableFieldConfigPanel } from "./MultidimensionalTableFieldConfigPanel";
-import { MultidimensionalTableValueInput, updateMultidimensionalRecordValue } from "./MultidimensionalTableValueInput";
+import {
+  MultidimensionalTableValueInput,
+  updateMultidimensionalRecordFieldHeight,
+  updateMultidimensionalRecordValue,
+} from "./MultidimensionalTableValueInput";
 
 interface MultidimensionalTableGridProps {
   document: MultidimensionalTableDocument;
@@ -113,6 +117,10 @@ export function MultidimensionalTableGrid({
                   value={record.values[field.id]}
                   onUploadFile={onUploadFile}
                   onDownloadFile={onDownloadFile}
+                  longTextHeight={record.fieldLayouts?.[field.id]?.height}
+                  onLongTextHeightChange={(height) => {
+                    onChange(updateMultidimensionalRecordFieldHeight(document, record.id, field.id, height));
+                  }}
                   onChange={(value) => {
                     onChange(updateMultidimensionalRecordValue(document, record.id, field.id, value));
                   }}

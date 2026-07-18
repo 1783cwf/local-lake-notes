@@ -108,9 +108,16 @@ test("字段删除会同步清理记录值和看板视图引用", () => {
     title: "测试记录1",
     date: "2026-05-07T12:30",
   });
+  const recordWithLayout = {
+    ...record,
+    fieldLayouts: {
+      date: { height: 180 },
+      description: { height: 240 },
+    },
+  };
   const deleted = deleteMultidimensionalField({
     ...source,
-    records: [record],
+    records: [recordWithLayout],
     views: source.views.map((view) => view.type === "board"
       ? { ...view, sortFieldId: "date", sortDirection: "desc" }
       : view),
@@ -118,6 +125,8 @@ test("字段删除会同步清理记录值和看板视图引用", () => {
 
   expect(deleted.fields.some((field) => field.id === "date")).toBe(false);
   expect(deleted.records[0].values).not.toHaveProperty("date");
+  expect(deleted.records[0].fieldLayouts).not.toHaveProperty("date");
+  expect(deleted.records[0].fieldLayouts?.description?.height).toBe(240);
   const boardView = deleted.views.find((view) => view.type === "board");
   expect(boardView?.cardFieldIds).not.toContain("date");
   expect(boardView?.sortFieldId).toBeUndefined();
@@ -154,6 +163,52 @@ test("看板隐藏空分组配置会解析并保存", () => {
   const boardView = parsed.views.find((view) => view.type === "board");
   expect(boardView?.hideEmptyGroups).toBe(true);
   expect(serializeMultidimensionalTableDocument(parsed)).toContain("\"hideEmptyGroups\": true");
+});
+
+test("看板显示标题配置会解析并保存", () => {
+  const source = createDefaultMultidimensionalTableDocument();
+  const parsed = parseMultidimensionalTableDocument(JSON.stringify({
+    ...source,
+    views: source.views.map((view) => view.type === "board"
+      ? { ...view, showCardTitle: false }
+      : view),
+  }));
+
+  const boardView = parsed.views.find((view) => view.type === "board");
+  expect(boardView?.showCardTitle).toBe(false);
+  expect(serializeMultidimensionalTableDocument(parsed)).toContain("\"showCardTitle\": false");
+});
+
+test("长文本字段高度按记录和字段解析保存", () => {
+  const source = createDefaultMultidimensionalTableDocument();
+  const parsed = parseMultidimensionalTableDocument(JSON.stringify({
+    ...source,
+    fields: source.fields.map((field) => field.id === "description"
+      ? { ...field, type: "longText" }
+      : field),
+    records: [
+      {
+        ...createEmptyMultidimensionalTableRecord(source.fields, { title: "记录1", description: "内容1" }),
+        fieldLayouts: {
+          description: { height: 260.4 },
+          title: { height: 320 },
+          date: { height: 20 },
+        },
+      },
+      {
+        ...createEmptyMultidimensionalTableRecord(source.fields, { title: "记录2", description: "内容2" }),
+        fieldLayouts: {
+          description: { height: 420 },
+        },
+      },
+    ],
+  }));
+
+  expect(parsed.records[0].fieldLayouts?.description?.height).toBe(260);
+  expect(parsed.records[0].fieldLayouts).not.toHaveProperty("title");
+  expect(parsed.records[0].fieldLayouts).not.toHaveProperty("date");
+  expect(parsed.records[1].fieldLayouts?.description?.height).toBe(420);
+  expect(serializeMultidimensionalTableDocument(parsed)).toContain("\"fieldLayouts\"");
 });
 
 test("字段排序只调整字段顺序并保留记录值", () => {

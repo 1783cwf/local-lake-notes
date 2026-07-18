@@ -9,6 +9,7 @@ function renderPanel(overrides: Partial<Parameters<typeof OssSettingsPanel>[0]> 
     <OssSettingsPanel
       open
       settings={null}
+      typographySettings={{ fontFamily: "system-ui", defaultFontSize: 19 }}
       aiSettings={{ profiles: [] }}
       databaseLocation={{
         directory: "/tmp/local-lake-db",
@@ -17,6 +18,7 @@ function renderPanel(overrides: Partial<Parameters<typeof OssSettingsPanel>[0]> 
       }}
       onClose={vi.fn()}
       onSave={vi.fn()}
+      onSaveTypographySettings={vi.fn(async (settings) => settings)}
       onSaveAiSettings={vi.fn(async (input) => input.settings)}
       onListAiModels={vi.fn(async () => [])}
       onAddAiModel={vi.fn(async () => ({ profiles: [] }))}
@@ -103,6 +105,26 @@ test("可以切换到备份恢复并设置密钥", async () => {
   await user.click(screen.getByRole("button", { name: "设置密钥" }));
 
   expect(onSetBackupKey).toHaveBeenCalledWith("test-secret-key", false);
+  expect(onSave).not.toHaveBeenCalled();
+});
+
+test("可以保存全局字体设置且不触发文件存储保存", async () => {
+  const user = userEvent.setup();
+  const onSave = vi.fn();
+  const onSaveTypographySettings = vi.fn(async (settings) => settings);
+
+  renderPanel({ onSave, onSaveTypographySettings });
+
+  await user.click(screen.getByRole("button", { name: "外观" }));
+  await user.clear(screen.getByLabelText("全局字体"));
+  await user.type(screen.getByLabelText("全局字体"), "Songti SC, serif");
+  await user.selectOptions(screen.getByLabelText("默认字号"), "22");
+  await user.click(screen.getByRole("button", { name: "保存外观设置" }));
+
+  expect(onSaveTypographySettings).toHaveBeenCalledWith({
+    fontFamily: "Songti SC, serif",
+    defaultFontSize: 22,
+  });
   expect(onSave).not.toHaveBeenCalled();
 });
 
@@ -330,18 +352,21 @@ test("AI 已配置模型会明确展示当前使用模型并支持删除", async
   }));
 });
 
-test("S3 和 WebDAV 页签内都可以配置资源并发访问请求数", async () => {
+test("S3 和 WebDAV 页签内都可以配置资源预览策略", async () => {
   const user = userEvent.setup();
 
   renderPanel();
 
   expect(screen.getByLabelText("资源并发访问请求数")).toHaveValue(6);
+  expect(screen.getByLabelText("图片体积优化")).toHaveValue("original");
 
   await user.clear(screen.getByLabelText("资源并发访问请求数"));
   await user.type(screen.getByLabelText("资源并发访问请求数"), "8");
+  await user.selectOptions(screen.getByLabelText("图片体积优化"), "compact");
   await user.click(screen.getByRole("button", { name: "WebDAV" }));
 
   expect(screen.getByLabelText("资源并发访问请求数")).toHaveValue(8);
+  expect(screen.getByLabelText("图片体积优化")).toHaveValue("compact");
 });
 
 test("连接测试使用当前正在编辑的存储配置", async () => {
@@ -372,6 +397,7 @@ test("连接测试使用当前正在编辑的存储配置", async () => {
       maxSignedUrlTtlSeconds: 604800,
       allowSignedUrlExport: true,
       resourcePreviewConcurrency: 6,
+      imageOptimization: "balanced",
       local: { rootDirectory: "", storageId: "local" },
       webdav: {
         endpoint: "https://dav.example/webdav",
@@ -438,6 +464,7 @@ test("资源迁移先执行 dry-run 清点", async () => {
       maxSignedUrlTtlSeconds: 604800,
       allowSignedUrlExport: true,
       resourcePreviewConcurrency: 6,
+      imageOptimization: "balanced",
       local: { rootDirectory: "/tmp/file-storage", storageId: "local" },
       webdav: { endpoint: "", username: "", password: "", rootPath: "", storageId: "webdav" },
     },
@@ -510,6 +537,7 @@ test("执行资源迁移时展示进行中和成功提示", async () => {
       maxSignedUrlTtlSeconds: 604800,
       allowSignedUrlExport: true,
       resourcePreviewConcurrency: 6,
+      imageOptimization: "balanced",
       local: { rootDirectory: "/tmp/file-storage", storageId: "local" },
       webdav: { endpoint: "", username: "", password: "", rootPath: "", storageId: "webdav" },
     },

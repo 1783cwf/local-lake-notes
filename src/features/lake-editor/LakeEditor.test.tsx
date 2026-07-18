@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 
 import { LakeEditor } from "./LakeEditor";
 import type { LakeEditorInstance } from "./editorTypes";
+import { encodeLakeCardValue } from "./resourceReference";
 
 const documentEntry = {
   id: "a.lake",
@@ -66,6 +67,100 @@ test("打开文档时把 text/lake 内容设置进语雀编辑器", async () => 
   await waitFor(() => {
     expect(editor.setDocument).toHaveBeenCalledWith("text/lake", "<p>内容</p>");
   });
+});
+
+test("打开带文档字体元数据的文档时只把正文传给语雀编辑器", async () => {
+  const editor: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => "<p>正文</p>"),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+
+  render(
+    <LakeEditor
+      document={documentEntry}
+      content={"<!--yuque-lake-notes:typography {\"fontFamily\":\"Songti SC\",\"defaultFontSize\":22}-->\n<p>正文</p>"}
+      manualSaveRequest={0}
+      exportRequest={null}
+      onSave={vi.fn()}
+      onExportContent={vi.fn()}
+      onUploadImage={vi.fn()}
+      onUploadFile={vi.fn()}
+      onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={vi.fn(async (resourceRef) => resourceRef)}
+      onSaveStatusChange={vi.fn()}
+    />,
+  );
+
+  await waitFor(() => {
+    expect(editor.setDocument).toHaveBeenCalledWith("text/lake", "<p>正文</p>");
+  });
+  expect(window.Doc.createOpenEditor).toHaveBeenCalledWith(
+    expect.any(HTMLDivElement),
+    expect.objectContaining({
+      defaultFontsize: 22,
+    }),
+  );
+});
+
+test("保存时把文档字体元数据写回 Lake 原始内容", async () => {
+  const onSave = vi.fn().mockResolvedValue(undefined);
+  const editor: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => "<p>更新正文</p>"),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+
+  const { rerender } = render(
+    <LakeEditor
+      document={documentEntry}
+      content={"<!--yuque-lake-notes:typography {\"fontFamily\":\"Songti SC\",\"defaultFontSize\":22}-->\n<p>正文</p>"}
+      manualSaveRequest={0}
+      exportRequest={null}
+      onSave={onSave}
+      onExportContent={vi.fn()}
+      onUploadImage={vi.fn()}
+      onUploadFile={vi.fn()}
+      onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={vi.fn(async (resourceRef) => resourceRef)}
+      onSaveStatusChange={vi.fn()}
+    />,
+  );
+
+  rerender(
+    <LakeEditor
+      document={documentEntry}
+      content={"<!--yuque-lake-notes:typography {\"fontFamily\":\"Songti SC\",\"defaultFontSize\":22}-->\n<p>正文</p>"}
+      manualSaveRequest={1}
+      exportRequest={null}
+      onSave={onSave}
+      onExportContent={vi.fn()}
+      onUploadImage={vi.fn()}
+      onUploadFile={vi.fn()}
+      onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={vi.fn(async (resourceRef) => resourceRef)}
+      onSaveStatusChange={vi.fn()}
+    />,
+  );
+
+  await waitFor(() => {
+    expect(onSave).toHaveBeenCalledWith(
+      "a.lake",
+      expect.stringContaining("yuque-lake-notes:typography"),
+    );
+  });
+  expect(onSave).toHaveBeenCalledWith(
+    "a.lake",
+    expect.stringContaining("<p>更新正文</p>"),
+  );
 });
 
 test("阅读模式使用语雀 Viewer 且不注册保存和替换能力", async () => {
@@ -192,15 +287,53 @@ test("打开含资源文档时先显示占位内容再异步替换预览", async
   });
 });
 
+test("打开文档时不会预读取附件卡片内容", async () => {
+  const resourceRef = "yuque-resource://webdav/files/a.zip?provider=webdav&kind=file";
+  const onPrepareResourcePreview = vi.fn(async () => "asset://preview/a.zip");
+  const editor: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => ""),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+
+  render(
+    <LakeEditor
+      document={documentEntry}
+      content={`<card name="file" value="${encodeLakeCardValue({ src: resourceRef, name: "a.zip" })}"></card>`}
+      manualSaveRequest={0}
+      exportRequest={null}
+      onSave={vi.fn()}
+      onExportContent={vi.fn()}
+      onUploadImage={vi.fn()}
+      onUploadFile={vi.fn()}
+      onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={onPrepareResourcePreview}
+      onSaveStatusChange={vi.fn()}
+    />,
+  );
+
+  await waitFor(() => {
+    expect(editor.setDocument).toHaveBeenCalled();
+  });
+  expect(onPrepareResourcePreview).not.toHaveBeenCalled();
+});
+
 test("打开多图片文档时按配置并发准备资源预览", async () => {
   const refs = Array.from({ length: 9 }, (_, index) => (
     `yuque-resource://webdav/images/${index}.png?provider=webdav&kind=image`
   ));
   let activeRequests = 0;
   let maxActiveRequests = 0;
+  let editorContent = "";
   const editor: LakeEditorInstance = {
-    setDocument: vi.fn(),
-    getDocument: vi.fn(() => refs.map((resourceRef) => `<img src="${resourceRef}">`).join("")),
+    setDocument: vi.fn((_, nextContent) => {
+      editorContent = nextContent;
+    }),
+    getDocument: vi.fn(() => editorContent),
     on: vi.fn(),
     destroy: vi.fn(),
   };
@@ -235,7 +368,11 @@ test("打开多图片文档时按配置并发准备资源预览", async () => {
   await waitFor(() => {
     expect(onPrepareResourcePreview).toHaveBeenCalledTimes(refs.length);
   });
+  await waitFor(() => {
+    expect(editorContent.match(/preview=1/g)).toHaveLength(refs.length);
+  });
   expect(maxActiveRequests).toBe(6);
+  expect(editor.setDocument).toHaveBeenCalledTimes(2);
 });
 
 test("同一路径文档元数据刷新时不重建语雀编辑器实例", async () => {
@@ -540,9 +677,23 @@ test("创建 Lake 实例失败时显示错误状态", () => {
 
 test("收到 HTML 导出请求时读取语雀 HTML 内容", async () => {
   const onExportContent = vi.fn();
+  const codeblockValue = encodeLakeCardValue({
+    mode: "yaml",
+    name: "部署脚本",
+    theme: "github",
+    code: "kind: Deployment",
+  });
   const editor: LakeEditorInstance = {
     setDocument: vi.fn(),
-    getDocument: vi.fn((type) => type === "text/html" ? "<p><img src=\"file:///tmp/a.png\"></p>" : "<p>Lake 内容</p>"),
+    getDocument: vi.fn((type) => {
+      if (type === "text/html") {
+        return "<p><img src=\"file:///tmp/a.png\"></p><pre class=\"ne-codeblock language-yaml\" data-language=\"yaml\"><code>kind: Deployment</code></pre>";
+      }
+      if (type === "text/lake") {
+        return `<card name="codeblock" value="${codeblockValue}"></card>`;
+      }
+      return "<p>Lake 内容</p>";
+    }),
     on: vi.fn(),
     destroy: vi.fn(),
   };
@@ -581,10 +732,11 @@ test("收到 HTML 导出请求时读取语雀 HTML 内容", async () => {
         resourceStrategy: "bundle",
         signedUrlTtlSeconds: 86400,
       },
-      "<p><img src=\"file:///tmp/a.png\"></p>",
+      expect.stringContaining("data-title=\"部署脚本\""),
     );
   });
   expect(editor.getDocument).toHaveBeenCalledWith("text/html");
+  expect(editor.getDocument).toHaveBeenCalledWith("text/lake");
 });
 
 test("收到 Markdown 导出请求时读取语雀原生 Markdown 内容", async () => {

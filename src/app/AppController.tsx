@@ -11,6 +11,10 @@ import { AiSpreadsheetAssistant, AiTableAssistant } from "../features/ai/AiTable
 import { previewAiDocumentPatch, type AiDocumentPatchPreview } from "../features/ai/documentPatch";
 import { applyAiSpreadsheetPatch } from "../features/ai/spreadsheetAi";
 import { prepareAiMarkdownForLakeImport } from "../features/lake-editor/lakeAiImport";
+import {
+  composeLakeDocumentWithTypography,
+  splitLakeDocumentTypography,
+} from "../features/lake-editor/lakeDocumentTypography";
 import { LakeEditor } from "../features/lake-editor/LakeEditor";
 import type { LakeSelectionCapability } from "../features/lake-editor/lakeSelectionAdapter";
 import type { MultidimensionalTableEditorHandle } from "../features/multidimensional-table/MultidimensionalTableEditor";
@@ -75,7 +79,9 @@ import {
   prepareResourcePreview,
   readResourceBytes,
   getAiSettings,
+  getDocumentTabGroups,
   getOssSettings,
+  getTypographySettings,
   getRecentWorkspace,
   listKnownWorkspaces,
   forgetWorkspaceRoot,
@@ -93,7 +99,9 @@ import {
   renameSpreadsheetDocument,
   renameWorkspace,
   saveAiSettings,
+  saveDocumentTabGroups,
   saveOssSettings,
+  saveTypographySettings,
   saveBinaryExport,
   saveDatabaseLocation,
   savePdfExport,
@@ -140,8 +148,11 @@ import type {
   BackupKeyStatus,
   BackupRecord,
   DatabaseLocationSettings,
+  DocumentTabGroup,
   FileDownloadInput,
+  GlobalTypographySettings,
   OssSettings,
+  DocumentTypographySettings,
   OpenDocumentTab,
   ResourceKeyStatus,
   RestoreBackupOutput,
@@ -151,6 +162,7 @@ import type {
   UploadImageOutput,
 } from "./appState";
 import { emptySaveStatus } from "./appState";
+import { defaultTypographySettings } from "../features/settings/typographySettingsStore";
 
 const SpreadsheetEditor = lazy(() => (
   import("../features/spreadsheet/SpreadsheetEditor").then((module) => ({ default: module.SpreadsheetEditor }))
@@ -206,6 +218,7 @@ export function AppController() {
   const [knownWorkspaces, setKnownWorkspaces] = useState<KnownWorkspace[]>([]);
   const [currentDocument, setCurrentDocument] = useState<CurrentDocumentState | null>(null);
   const [openTabs, setOpenTabs] = useState<OpenDocumentTab[]>([]);
+  const [tabGroups, setTabGroups] = useState<DocumentTabGroup[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>(emptySaveStatus);
   const [manualSaveRequest, setManualSaveRequest] = useState(0);
@@ -229,6 +242,7 @@ export function AppController() {
     canReplaceSelection: false,
   });
   const [ossSettings, setOssSettings] = useState<OssSettings | null>(null);
+  const [typographySettings, setTypographySettings] = useState<GlobalTypographySettings>(defaultTypographySettings);
   const [aiSettings, setAiSettings] = useState<AiSettings>({ profiles: [] });
   const [databaseLocation, setDatabaseLocation] = useState<DatabaseLocationSettings | null>(null);
   const [backupKeyStatus, setBackupKeyStatus] = useState<BackupKeyStatus>({ configured: false, needsKey: false });
@@ -287,10 +301,12 @@ export function AppController() {
 
   const boot = async () => {
     try {
-      const [recentWorkspace, knownWorkspaceList, settings, aiModelSettings, keyStatus, resourceStatus, database] = await Promise.all([
+      const [recentWorkspace, knownWorkspaceList, settings, typography, tabGroupList, aiModelSettings, keyStatus, resourceStatus, database] = await Promise.all([
         getRecentWorkspace(),
         listKnownWorkspaces(),
         getOssSettings(),
+        getTypographySettings(),
+        getDocumentTabGroups(),
         getAiSettings(),
         getBackupKeyStatus(),
         getResourceKeyStatus(),
@@ -299,6 +315,8 @@ export function AppController() {
       setWorkspace(recentWorkspace);
       setKnownWorkspaces(knownWorkspaceList);
       setOssSettings(settings);
+      setTypographySettings(typography);
+      setTabGroups(tabGroupList);
       setAiSettings(aiModelSettings);
       setBackupKeyStatus(keyStatus);
       setResourceKeyStatus(resourceStatus);
@@ -550,6 +568,77 @@ export function AppController() {
     setOpenTabs((tabs) => reorderTabsByIds(tabs, orderedTabIds));
   }, []);
 
+  const saveCurrentTabGroup = useCallback(async (name: string) => {
+    const items = openTabs
+      .filter((tab) => tab.locked && tab.workspaceRoot)
+      .map((tab) => ({
+        workspaceRoot: tab.workspaceRoot!,
+        path: tab.path,
+        mode: tab.mode,
+      }));
+    if (items.length === 0) {
+      setAppError("请先锁定要保存到标签组的标签");
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const nextGroups = [
+      ...tabGroups,
+      {
+        id: `tab-group-${Date.now().toString(36)}`,
+        name: name.trim(),
+        items,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+    const saved = await saveDocumentTabGroups(nextGroups);
+    setTabGroups(saved);
+    setAppError(null);
+  }, [openTabs, tabGroups]);
+
+  const deleteTabGroup = useCallback(async (groupId: string) => {
+    const saved = await saveDocumentTabGroups(tabGroups.filter((group) => group.id !== groupId));
+    setTabGroups(saved);
+  }, [tabGroups]);
+
+  const openTabGroup = useCallback(async (groupId: string) => {
+    const group = tabGroups.find((candidate) => candidate.id === groupId);
+    if (!group) {
+      return;
+    }
+    if (!await saveBeforeLeavingCurrentTab("当前文档保存失败，请先处理后再打开标签组")) {
+      return;
+    }
+
+    try {
+      const visibleWorkspaceRoot = workspace?.root ?? null;
+      const loadedTabs: OpenDocumentTab[] = [];
+      for (const item of group.items) {
+        const payload = await loadWorkspacePayload(item.workspaceRoot, visibleWorkspaceRoot);
+        const document = payload.documents.find((entry) => entry.path === item.path);
+        if (!document) {
+          continue;
+        }
+        loadedTabs.push({
+          ...createOpenDocumentTab(document, document.kind === "lake" ? item.mode ?? "edit" : undefined, item.workspaceRoot),
+          locked: true,
+        });
+      }
+      if (loadedTabs.length === 0) {
+        setAppError("标签组里的文档都找不到了");
+        return;
+      }
+
+      const nextTabs = mergeOpenTabsWithLockedGroup(openTabs, loadedTabs);
+      setOpenTabs(nextTabs);
+      await activateDocumentTab(loadedTabs[0].id, nextTabs);
+      setAppError(null);
+    } catch (error) {
+      setAppError(toMessage(error));
+    }
+  }, [activateDocumentTab, openTabs, saveBeforeLeavingCurrentTab, tabGroups, workspace?.root]);
+
   const closeTab = useCallback(async (tabId: string) => {
     const closingIndex = openTabs.findIndex((tab) => tab.id === tabId);
     if (closingIndex < 0) {
@@ -582,6 +671,35 @@ export function AppController() {
         setCurrentDocument(null);
         setSaveStatus(emptySaveStatus);
         setAppError(null);
+      }
+    } catch (error) {
+      setAppError(toMessage(error));
+    }
+  }, [activateDocumentTab, activeTabId, openTabs, saveBeforeLeavingCurrentTab]);
+
+  const closeOtherTabs = useCallback(async (tabId: string) => {
+    const targetTab = openTabs.find((tab) => tab.id === tabId);
+    if (!targetTab) {
+      return;
+    }
+
+    const closingTabs = openTabs.filter((tab) => tab.id !== tabId && !tab.locked);
+    if (closingTabs.length === 0) {
+      return;
+    }
+
+    const activeTabWillClose = closingTabs.some((tab) => tab.id === activeTabId);
+    if (activeTabWillClose && !await saveBeforeLeavingCurrentTab("当前文档保存失败，请先处理后再关闭其他标签")) {
+      return;
+    }
+
+    try {
+      const closingTabIds = new Set(closingTabs.map((tab) => tab.id));
+      const nextTabs = openTabs.filter((tab) => !closingTabIds.has(tab.id));
+      deleteTabScrollSnapshotsForTabs(tabScrollSnapshotsRef.current, openTabs, nextTabs);
+      setOpenTabs(nextTabs);
+      if (activeTabWillClose) {
+        await activateDocumentTab(targetTab.id, nextTabs);
       }
     } catch (error) {
       setAppError(toMessage(error));
@@ -697,7 +815,7 @@ export function AppController() {
 
     try {
       const title = "未命名文档";
-      const payload = await createLakeDocument(title, parentPath);
+      const payload = await createLakeDocument(title, parentPath, typographySettings);
       setWorkspace({
         root: payload.root,
         directories: payload.directories,
@@ -1155,6 +1273,41 @@ export function AppController() {
     setOssSettings(saved);
   }, []);
 
+  const saveGlobalTypographySettings = useCallback(async (settings: GlobalTypographySettings): Promise<GlobalTypographySettings> => {
+    const saved = await saveTypographySettings(settings);
+    setTypographySettings(saved);
+    return saved;
+  }, []);
+
+  const saveCurrentDocumentTypography = useCallback(async (settings: DocumentTypographySettings) => {
+    if (!currentDocument || currentDocument.kind !== "lake") {
+      return;
+    }
+
+    const latestContent = readCurrentLakeContentRef.current?.() ?? currentDocument.content;
+    const parsed = splitLakeDocumentTypography(latestContent);
+    const nextContent = composeLakeDocumentWithTypography(parsed.body, settings);
+    await saveDocument(currentDocument.entry.path, nextContent);
+    setCurrentDocument((current) => (
+      current?.kind === "lake" && isSameCurrentDocument(current, currentDocument)
+        ? { ...current, content: nextContent, documentTypography: settings }
+        : current
+    ));
+    setSaveStatus({ state: "saved", savedAt: new Date().toISOString() });
+  }, [currentDocument, saveDocument]);
+
+  const updateCurrentDocumentTypographyFromContent = useCallback((settings: DocumentTypographySettings) => {
+    setCurrentDocument((current) => {
+      if (current?.kind !== "lake") {
+        return current;
+      }
+      if (JSON.stringify(current.documentTypography ?? {}) === JSON.stringify(settings)) {
+        return current;
+      }
+      return { ...current, documentTypography: settings };
+    });
+  }, []);
+
   const saveModelSettings = useCallback(async (input: SaveAiSettingsInput): Promise<AiSettings> => {
     const saved = await saveAiSettings(input);
     setAiSettings(saved);
@@ -1329,7 +1482,7 @@ export function AppController() {
       let latestWorkspace: WorkspacePayload | null = workspace;
       let firstCreatedDocument: WorkspaceDocument | null = null;
       for (const part of aiSplitResult.parts) {
-        const payload = await createLakeDocument(part.title, parentPath);
+        const payload = await createLakeDocument(part.title, parentPath, typographySettings);
         latestWorkspace = {
           root: payload.root,
           directories: payload.directories,
@@ -1337,7 +1490,7 @@ export function AppController() {
           order: payload.order,
         };
         firstCreatedDocument ??= payload.createdDocument;
-        await writeLakeDocument(payload.createdDocument.path, part.content);
+        await writeLakeDocument(payload.createdDocument.path, composeLakeDocumentWithTypography(part.content, typographySettings));
       }
       if (latestWorkspace) {
         setWorkspace(latestWorkspace);
@@ -1352,7 +1505,7 @@ export function AppController() {
     } finally {
       setAiRunning(false);
     }
-  }, [aiSplitResult, currentDocument, openDocumentInTabs, workspace]);
+  }, [aiSplitResult, currentDocument, openDocumentInTabs, typographySettings, workspace]);
 
   const runCurrentTableAiAction = useCallback(async (
     actionType: AiTableActionType,
@@ -1679,6 +1832,11 @@ export function AppController() {
         onSwitchWorkspace={switchWorkspace}
         onForgetWorkspace={forgetWorkspace}
         onCreateDocument={() => createDocument("")}
+        tabGroups={tabGroups}
+        lockedTabCount={openTabs.filter((tab) => tab.locked).length}
+        onSaveCurrentTabGroup={saveCurrentTabGroup}
+        onOpenTabGroup={openTabGroup}
+        onDeleteTabGroup={deleteTabGroup}
         onOpenSettings={() => setSettingsOpen(true)}
       />
       <DocumentSidebar
@@ -1720,10 +1878,14 @@ export function AppController() {
           onSetDocumentMode={(mode) => {
             void setCurrentLakeDocumentMode(mode);
           }}
+          globalTypography={typographySettings}
+          documentTypography={currentDocument?.kind === "lake" ? currentDocument.documentTypography : undefined}
+          onSaveDocumentTypography={saveCurrentDocumentTypography}
           onActivateTab={activateTab}
           onReorderTabs={reorderOpenTabs}
           onToggleTabLocked={toggleTabLocked}
           onCloseTab={closeTab}
+          onCloseOtherTabs={closeOtherTabs}
           onExportDocument={exportDocument}
           exportBusy={activeAppOperation?.kind === "document-export"}
           onImportSpreadsheetExcel={importSpreadsheetExcel}
@@ -1774,6 +1936,7 @@ export function AppController() {
               onDownloadFile={downloadEditorFile}
               onPrepareResourcePreview={prepareEditorResourcePreview}
               resourcePreviewConcurrency={ossSettings?.resourcePreviewConcurrency}
+              typography={typographySettings}
               onSaveStatusChange={setSaveStatus}
               onRegisterSaveNow={registerEditorSaveNow}
               onRegisterReadTable={registerTableReadDocument}
@@ -1796,6 +1959,9 @@ export function AppController() {
             onDownloadFile={downloadEditorFile}
             onPrepareResourcePreview={prepareEditorResourcePreview}
             resourcePreviewConcurrency={ossSettings?.resourcePreviewConcurrency}
+            globalTypography={typographySettings}
+            documentTypography={currentDocument?.kind === "lake" ? currentDocument.documentTypography : undefined}
+            onDocumentTypographyChange={updateCurrentDocumentTypographyFromContent}
             onSaveStatusChange={setSaveStatus}
             onRegisterSaveNow={registerEditorSaveNow}
             onRegisterReadContent={registerLakeReadContent}
@@ -1878,10 +2044,12 @@ export function AppController() {
       <OssSettingsPanel
         open={settingsOpen}
         settings={ossSettings}
+        typographySettings={typographySettings}
         aiSettings={aiSettings}
         databaseLocation={databaseLocation}
         onClose={() => setSettingsOpen(false)}
         onSave={saveSettings}
+        onSaveTypographySettings={saveGlobalTypographySettings}
         onSaveAiSettings={saveModelSettings}
         onListAiModels={fetchAiModels}
         onAddAiModel={addModelToProfile}
@@ -2056,11 +2224,13 @@ async function readDocumentState(
       workspaceRoot: workspaceRoot ?? undefined,
     };
   }
+  const content = await withWorkspaceRoot(workspaceRoot, visibleWorkspaceRoot, () => readLakeDocument(document.path));
   return {
     kind: "lake",
     entry: asLakeDocument(document),
-    content: await withWorkspaceRoot(workspaceRoot, visibleWorkspaceRoot, () => readLakeDocument(document.path)),
+    content,
     workspaceRoot: workspaceRoot ?? undefined,
+    documentTypography: splitLakeDocumentTypography(content).documentTypography,
     mode,
   };
 }
@@ -2194,6 +2364,14 @@ function reorderTabsByIds(tabs: OpenDocumentTab[], orderedTabIds: string[]): Ope
     ...orderedTabs,
     ...tabs.filter((tab) => !orderedIdSet.has(tab.id)),
   ];
+}
+
+function mergeOpenTabsWithLockedGroup(currentTabs: OpenDocumentTab[], groupTabs: OpenDocumentTab[]): OpenDocumentTab[] {
+  const tabById = new Map(currentTabs.map((tab) => [tab.id, tab]));
+  for (const groupTab of groupTabs) {
+    tabById.set(groupTab.id, { ...(tabById.get(groupTab.id) ?? groupTab), ...groupTab, locked: true });
+  }
+  return Array.from(tabById.values());
 }
 
 async function workspaceSpreadsheetExcelEntries(workspace: WorkspacePayload): Promise<WorkspaceZipEntryInput[]> {

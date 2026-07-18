@@ -16,7 +16,16 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type MutableRefObject,
+  type RefObject,
+} from "react";
 
 import type { FileDownloadInput, UploadImageInput, UploadImageOutput } from "../../app/appState";
 import { resourceReferenceFromUpload } from "../lake-editor/resourceReference";
@@ -42,6 +51,8 @@ interface MultidimensionalTableValueInputProps {
   onDownloadFile?: (input: FileDownloadInput) => Promise<void>;
   ariaLabel?: string;
   compact?: boolean;
+  longTextHeight?: number;
+  onLongTextHeightChange?: (height: number) => void;
 }
 
 export function MultidimensionalTableValueInput({
@@ -55,8 +66,21 @@ export function MultidimensionalTableValueInput({
   onDownloadFile,
   ariaLabel = field.name,
   compact = false,
+  longTextHeight,
+  onLongTextHeightChange,
 }: MultidimensionalTableValueInputProps) {
   const className = compact ? "multitable-field-input multitable-field-input--compact" : "multitable-field-input";
+  const longTextRef = useRef<HTMLTextAreaElement | null>(null);
+  const resizeInteractionRef = useRef(false);
+  const pendingHeightRef = useRef<number | null>(null);
+  useLongTextResizePersistence({
+    enabled: field.type === "longText" && !compact,
+    textareaRef: longTextRef,
+    resizeInteractionRef,
+    pendingHeightRef,
+    savedHeight: longTextHeight,
+    onHeightChange: onLongTextHeightChange,
+  });
 
   if (field.type === "singleSelect") {
     return (
@@ -95,10 +119,15 @@ export function MultidimensionalTableValueInput({
   if (field.type === "longText") {
     return (
       <textarea
+        ref={longTextRef}
         className={className}
         value={typeof value === "string" ? value : ""}
         aria-label={ariaLabel}
         rows={compact ? 1 : 2}
+        style={longTextHeight && !compact ? { height: `${longTextHeight}px` } as CSSProperties : undefined}
+        onPointerDown={() => {
+          resizeInteractionRef.current = true;
+        }}
         onChange={(event) => onChange(event.target.value)}
       />
     );
@@ -166,6 +195,52 @@ export function MultidimensionalTableValueInput({
       onChange={(event) => onChange(event.target.value)}
     />
   );
+}
+
+function useLongTextResizePersistence({
+  enabled,
+  textareaRef,
+  resizeInteractionRef,
+  pendingHeightRef,
+  savedHeight,
+  onHeightChange,
+}: {
+  enabled: boolean;
+  textareaRef: RefObject<HTMLTextAreaElement | null>;
+  resizeInteractionRef: MutableRefObject<boolean>;
+  pendingHeightRef: MutableRefObject<number | null>;
+  savedHeight: number | undefined;
+  onHeightChange: ((height: number) => void) | undefined;
+}) {
+  useEffect(() => {
+    if (!enabled || !onHeightChange || !textareaRef.current || typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+
+    let timer: number | undefined;
+    const textarea = textareaRef.current;
+    const observer = new ResizeObserver(() => {
+      const nextHeight = normalizeLongTextHeight(textarea.offsetHeight);
+      if (!resizeInteractionRef.current || nextHeight === savedHeight || nextHeight === pendingHeightRef.current) {
+        return;
+      }
+      pendingHeightRef.current = nextHeight;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        onHeightChange(nextHeight);
+      }, 220);
+    });
+    observer.observe(textarea);
+
+    return () => {
+      window.clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, [enabled, onHeightChange, pendingHeightRef, resizeInteractionRef, savedHeight, textareaRef]);
+}
+
+function normalizeLongTextHeight(value: number): number {
+  return Math.min(720, Math.max(64, Math.round(value)));
 }
 
 type TimePickerMode = "date" | "datetime" | "time";
@@ -932,6 +1007,34 @@ export function updateMultidimensionalRecordValue(
       ? {
         ...record,
         values: { ...record.values, [fieldId]: value },
+        updatedAt,
+      }
+      : record),
+  };
+}
+
+export function updateMultidimensionalRecordFieldHeight(
+  document: MultidimensionalTableDocument,
+  recordId: string,
+  fieldId: string,
+  height: number,
+): MultidimensionalTableDocument {
+  const field = document.fields.find((currentField) => currentField.id === fieldId);
+  if (field?.type !== "longText") {
+    return document;
+  }
+
+  const updatedAt = new Date().toISOString();
+  const nextHeight = normalizeLongTextHeight(height);
+  return {
+    ...document,
+    records: document.records.map((record) => record.id === recordId
+      ? {
+        ...record,
+        fieldLayouts: {
+          ...(record.fieldLayouts ?? {}),
+          [fieldId]: { ...(record.fieldLayouts?.[fieldId] ?? {}), height: nextHeight },
+        },
         updatedAt,
       }
       : record),

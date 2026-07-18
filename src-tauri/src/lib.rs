@@ -32,7 +32,9 @@ use commands::resources::{
     create_temporary_resource_url, download_resource, prepare_resource_preview, read_resource_bytes,
 };
 use commands::settings::{
-    get_database_location, get_oss_settings, save_database_location_settings, save_oss_settings,
+    get_database_location, get_document_tab_groups, get_oss_settings, get_typography_settings,
+    save_database_location_settings, save_document_tab_groups, save_oss_settings,
+    save_typography_settings,
     test_storage_connection,
 };
 use commands::upload::{upload_file, upload_image};
@@ -143,6 +145,10 @@ pub fn run() {
             create_temporary_resource_url,
             get_oss_settings,
             save_oss_settings,
+            get_typography_settings,
+            save_typography_settings,
+            get_document_tab_groups,
+            save_document_tab_groups,
             test_storage_connection,
             get_database_location,
             save_database_location_settings,

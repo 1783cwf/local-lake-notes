@@ -93,9 +93,65 @@ pub struct OssSettings {
     #[serde(default = "default_resource_preview_concurrency")]
     pub resource_preview_concurrency: u8,
     #[serde(default)]
+    pub image_optimization: ImageOptimizationMode,
+    #[serde(default)]
     pub local: LocalStorageSettings,
     #[serde(default)]
     pub webdav: WebDavStorageSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ImageOptimizationMode {
+    #[default]
+    Original,
+    Balanced,
+    Compact,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GlobalTypographySettings {
+    #[serde(default = "default_typography_font_family")]
+    pub font_family: String,
+    #[serde(default = "default_typography_font_size")]
+    pub default_font_size: u8,
+}
+
+impl Default for GlobalTypographySettings {
+    fn default() -> Self {
+        Self {
+            font_family: default_typography_font_family(),
+            default_font_size: default_typography_font_size(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentTabGroups {
+    #[serde(default)]
+    pub groups: Vec<DocumentTabGroup>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentTabGroup {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub items: Vec<DocumentTabGroupItem>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentTabGroupItem {
+    pub workspace_root: String,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -847,6 +903,14 @@ fn default_allow_signed_url_export() -> bool {
 
 pub fn default_resource_preview_concurrency() -> u8 {
     6
+}
+
+pub fn default_typography_font_family() -> String {
+    "system-ui".to_string()
+}
+
+pub fn default_typography_font_size() -> u8 {
+    19
 }
 
 fn default_true() -> bool {
