@@ -1,6 +1,6 @@
 [package]
 name = "local-lake-notes"
-version = "1.7.3"
+version = "1.7.4"
 description = "Lake-first local notes app powered by Lake editor"
 authors = ["weifeng"]
 edition = "2021"
