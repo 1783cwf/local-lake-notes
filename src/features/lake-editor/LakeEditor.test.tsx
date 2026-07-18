@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 
 import { LakeEditor } from "./LakeEditor";
 import type { LakeEditorInstance } from "./editorTypes";
+import { encodeLakeCardValue } from "./resourceReference";
 
 const documentEntry = {
   id: "a.lake",
@@ -286,15 +287,53 @@ test("打开含资源文档时先显示占位内容再异步替换预览", async
   });
 });
 
+test("打开文档时不会预读取附件卡片内容", async () => {
+  const resourceRef = "yuque-resource://webdav/files/a.zip?provider=webdav&kind=file";
+  const onPrepareResourcePreview = vi.fn(async () => "asset://preview/a.zip");
+  const editor: LakeEditorInstance = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => ""),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+
+  render(
+    <LakeEditor
+      document={documentEntry}
+      content={`<card name="file" value="${encodeLakeCardValue({ src: resourceRef, name: "a.zip" })}"></card>`}
+      manualSaveRequest={0}
+      exportRequest={null}
+      onSave={vi.fn()}
+      onExportContent={vi.fn()}
+      onUploadImage={vi.fn()}
+      onUploadFile={vi.fn()}
+      onDownloadFile={vi.fn()}
+      onPrepareResourcePreview={onPrepareResourcePreview}
+      onSaveStatusChange={vi.fn()}
+    />,
+  );
+
+  await waitFor(() => {
+    expect(editor.setDocument).toHaveBeenCalled();
+  });
+  expect(onPrepareResourcePreview).not.toHaveBeenCalled();
+});
+
 test("打开多图片文档时按配置并发准备资源预览", async () => {
   const refs = Array.from({ length: 9 }, (_, index) => (
     `yuque-resource://webdav/images/${index}.png?provider=webdav&kind=image`
   ));
   let activeRequests = 0;
   let maxActiveRequests = 0;
+  let editorContent = "";
   const editor: LakeEditorInstance = {
-    setDocument: vi.fn(),
-    getDocument: vi.fn(() => refs.map((resourceRef) => `<img src="${resourceRef}">`).join("")),
+    setDocument: vi.fn((_, nextContent) => {
+      editorContent = nextContent;
+    }),
+    getDocument: vi.fn(() => editorContent),
     on: vi.fn(),
     destroy: vi.fn(),
   };
@@ -329,7 +368,11 @@ test("打开多图片文档时按配置并发准备资源预览", async () => {
   await waitFor(() => {
     expect(onPrepareResourcePreview).toHaveBeenCalledTimes(refs.length);
   });
+  await waitFor(() => {
+    expect(editorContent.match(/preview=1/g)).toHaveLength(refs.length);
+  });
   expect(maxActiveRequests).toBe(6);
+  expect(editor.setDocument).toHaveBeenCalledTimes(2);
 });
 
 test("同一路径文档元数据刷新时不重建语雀编辑器实例", async () => {
@@ -634,9 +677,23 @@ test("创建 Lake 实例失败时显示错误状态", () => {
 
 test("收到 HTML 导出请求时读取语雀 HTML 内容", async () => {
   const onExportContent = vi.fn();
+  const codeblockValue = encodeLakeCardValue({
+    mode: "yaml",
+    name: "部署脚本",
+    theme: "github",
+    code: "kind: Deployment",
+  });
   const editor: LakeEditorInstance = {
     setDocument: vi.fn(),
-    getDocument: vi.fn((type) => type === "text/html" ? "<p><img src=\"file:///tmp/a.png\"></p>" : "<p>Lake 内容</p>"),
+    getDocument: vi.fn((type) => {
+      if (type === "text/html") {
+        return "<p><img src=\"file:///tmp/a.png\"></p><pre class=\"ne-codeblock language-yaml\" data-language=\"yaml\"><code>kind: Deployment</code></pre>";
+      }
+      if (type === "text/lake") {
+        return `<card name="codeblock" value="${codeblockValue}"></card>`;
+      }
+      return "<p>Lake 内容</p>";
+    }),
     on: vi.fn(),
     destroy: vi.fn(),
   };
@@ -675,10 +732,11 @@ test("收到 HTML 导出请求时读取语雀 HTML 内容", async () => {
         resourceStrategy: "bundle",
         signedUrlTtlSeconds: 86400,
       },
-      "<p><img src=\"file:///tmp/a.png\"></p>",
+      expect.stringContaining("data-title=\"部署脚本\""),
     );
   });
   expect(editor.getDocument).toHaveBeenCalledWith("text/html");
+  expect(editor.getDocument).toHaveBeenCalledWith("text/lake");
 });
 
 test("收到 Markdown 导出请求时读取语雀原生 Markdown 内容", async () => {

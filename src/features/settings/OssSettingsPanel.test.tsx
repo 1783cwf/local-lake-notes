@@ -352,18 +352,21 @@ test("AI 已配置模型会明确展示当前使用模型并支持删除", async
   }));
 });
 
-test("S3 和 WebDAV 页签内都可以配置资源并发访问请求数", async () => {
+test("S3 和 WebDAV 页签内都可以配置资源预览策略", async () => {
   const user = userEvent.setup();
 
   renderPanel();
 
   expect(screen.getByLabelText("资源并发访问请求数")).toHaveValue(6);
+  expect(screen.getByLabelText("图片体积优化")).toHaveValue("original");
 
   await user.clear(screen.getByLabelText("资源并发访问请求数"));
   await user.type(screen.getByLabelText("资源并发访问请求数"), "8");
+  await user.selectOptions(screen.getByLabelText("图片体积优化"), "compact");
   await user.click(screen.getByRole("button", { name: "WebDAV" }));
 
   expect(screen.getByLabelText("资源并发访问请求数")).toHaveValue(8);
+  expect(screen.getByLabelText("图片体积优化")).toHaveValue("compact");
 });
 
 test("连接测试使用当前正在编辑的存储配置", async () => {
@@ -394,6 +397,7 @@ test("连接测试使用当前正在编辑的存储配置", async () => {
       maxSignedUrlTtlSeconds: 604800,
       allowSignedUrlExport: true,
       resourcePreviewConcurrency: 6,
+      imageOptimization: "balanced",
       local: { rootDirectory: "", storageId: "local" },
       webdav: {
         endpoint: "https://dav.example/webdav",
@@ -460,6 +464,7 @@ test("资源迁移先执行 dry-run 清点", async () => {
       maxSignedUrlTtlSeconds: 604800,
       allowSignedUrlExport: true,
       resourcePreviewConcurrency: 6,
+      imageOptimization: "balanced",
       local: { rootDirectory: "/tmp/file-storage", storageId: "local" },
       webdav: { endpoint: "", username: "", password: "", rootPath: "", storageId: "webdav" },
     },
@@ -532,6 +537,7 @@ test("执行资源迁移时展示进行中和成功提示", async () => {
       maxSignedUrlTtlSeconds: 604800,
       allowSignedUrlExport: true,
       resourcePreviewConcurrency: 6,
+      imageOptimization: "balanced",
       local: { rootDirectory: "/tmp/file-storage", storageId: "local" },
       webdav: { endpoint: "", username: "", password: "", rootPath: "", storageId: "webdav" },
     },

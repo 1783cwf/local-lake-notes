@@ -4,6 +4,7 @@ pub mod backup_archive;
 pub mod backup_key;
 pub mod backup_manifest;
 pub mod backup_store;
+pub mod image_optimization;
 pub mod local_store;
 pub mod object_store;
 pub mod resource_crypto;

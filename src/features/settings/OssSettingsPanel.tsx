@@ -480,7 +480,9 @@ export function OssSettingsPanel({
 
             <StoragePolicyFields
               resourcePreviewConcurrency={draft.resourcePreviewConcurrency}
-              onChange={(value) => update("resourcePreviewConcurrency", value)}
+              imageOptimization={draft.imageOptimization}
+              onConcurrencyChange={(value) => update("resourcePreviewConcurrency", value)}
+              onImageOptimizationChange={(value) => update("imageOptimization", value)}
             />
 
             <ResourceMigrationCard
@@ -672,10 +674,14 @@ function ActiveStorageStatus({
 
 function StoragePolicyFields({
   resourcePreviewConcurrency,
-  onChange,
+  imageOptimization,
+  onConcurrencyChange,
+  onImageOptimizationChange,
 }: {
   resourcePreviewConcurrency: number;
-  onChange: (value: number) => void;
+  imageOptimization: OssSettings["imageOptimization"];
+  onConcurrencyChange: (value: number) => void;
+  onImageOptimizationChange: (value: OssSettings["imageOptimization"]) => void;
 }) {
   return (
     <div className="settings-provider-fields storage-policy-fields">
@@ -686,11 +692,22 @@ function StoragePolicyFields({
           min={4}
           max={8}
           value={resourcePreviewConcurrency}
-          onChange={(event) => onChange(Number(event.target.value))}
+          onChange={(event) => onConcurrencyChange(Number(event.target.value))}
         />
       </label>
+      <label>
+        图片体积优化
+        <select
+          value={imageOptimization}
+          onChange={(event) => onImageOptimizationChange(event.target.value as OssSettings["imageOptimization"])}
+        >
+          <option value="original">原始图片（不缩放）</option>
+          <option value="balanced">清晰优先（最长边 2560）</option>
+          <option value="compact">体积优先（最长边 1920）</option>
+        </select>
+      </label>
       <p className="settings-card__muted">
-        打开含多张图片或附件的文档时，同时请求 4-8 个资源预览，文档内容会先显示。
+        打开文档时使用优化预览；新上传图片仅在结果更小时保存优化版，已有原图不会被改写。
       </p>
     </div>
   );

@@ -8,9 +8,10 @@ use uuid::Uuid;
 use crate::commands::settings::{load_oss_settings, validate_oss_settings};
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    ResourceDownloadInput, ResourcePreviewInput, ResourcePreviewOutput, SignedResourceUrlInput,
-    SignedResourceUrlOutput,
+    ImageOptimizationMode, ResourceDownloadInput, ResourcePreviewInput, ResourcePreviewOutput,
+    SignedResourceUrlInput, SignedResourceUrlOutput,
 };
+use crate::storage::image_optimization::optimize_image_bytes;
 use crate::storage::object_store::{
     get_object_bytes, presign_get_object_url, put_active_object, target_from_resource_ref,
     validate_resource_ref,
@@ -27,25 +28,33 @@ pub async fn prepare_resource_preview(
     let settings = load_valid_settings(&app)?;
     let resource = parse_resource_ref_detail(&input.resource_ref)?;
     validate_resource_ref(&settings, &resource)?;
+    let content_hint = resource
+        .content_type
+        .as_deref()
+        .unwrap_or(resource.key.as_str());
+    let local_path = resource_cache_path(&app, &resource.key, &settings.image_optimization)?;
+    if let Ok(cached_bytes) = fs::read(&local_path) {
+        return Ok(resource_preview_output(
+            input.resource_ref,
+            local_path,
+            content_hint,
+            &cached_bytes,
+        ));
+    }
+
     let bytes = read_resource_plain_bytes(&app, &settings, &resource).await?;
-    let local_path = resource_cache_path(&app, &resource.key)?;
+    let preview_bytes =
+        optimize_image_bytes(&bytes, content_hint, &settings.image_optimization).unwrap_or(bytes);
     if let Some(parent) = local_path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(&local_path, &bytes)?;
-    let preview_url = local_path.to_string_lossy().to_string();
-    Ok(ResourcePreviewOutput {
-        resource_ref: input.resource_ref,
-        preview_url,
-        local_path: local_path.to_string_lossy().to_string(),
-        data_url: build_image_data_url(
-            resource
-                .content_type
-                .as_deref()
-                .unwrap_or(resource.key.as_str()),
-            &bytes,
-        ),
-    })
+    fs::write(&local_path, &preview_bytes)?;
+    Ok(resource_preview_output(
+        input.resource_ref,
+        local_path,
+        content_hint,
+        &preview_bytes,
+    ))
 }
 
 #[tauri::command]
@@ -148,18 +157,46 @@ async fn read_resource_plain_bytes(
     decrypt_resource_bytes(&bytes, &secret)
 }
 
-fn resource_cache_path(app: &AppHandle, key: &str) -> AppResult<std::path::PathBuf> {
+fn resource_preview_output(
+    resource_ref: String,
+    local_path: std::path::PathBuf,
+    content_hint: &str,
+    bytes: &[u8],
+) -> ResourcePreviewOutput {
+    let preview_url = local_path.to_string_lossy().to_string();
+    ResourcePreviewOutput {
+        resource_ref,
+        preview_url: preview_url.clone(),
+        local_path: preview_url,
+        data_url: build_image_data_url(content_hint, bytes),
+    }
+}
+
+fn resource_cache_path(
+    app: &AppHandle,
+    key: &str,
+    mode: &ImageOptimizationMode,
+) -> AppResult<std::path::PathBuf> {
     let base_dir = app.path().app_cache_dir()?;
     let safe_key = key
         .split('/')
         .filter(|part| !part.trim().is_empty())
         .map(safe_segment)
         .collect::<Vec<_>>();
-    Ok(safe_key
-        .into_iter()
-        .fold(base_dir.join("resource-cache"), |path, part| {
-            path.join(part)
-        }))
+    Ok(safe_key.into_iter().fold(
+        base_dir
+            .join("resource-cache")
+            .join(image_optimization_cache_key(mode)),
+        |path, part| path.join(part),
+    ))
+}
+
+fn image_optimization_cache_key(mode: &ImageOptimizationMode) -> &'static str {
+    match mode {
+        ImageOptimizationMode::Original => "original",
+        ImageOptimizationMode::Balanced => "balanced-2560",
+        ImageOptimizationMode::Compact => "compact-1920",
+    }
 }
 
 fn safe_segment(value: &str) -> String {

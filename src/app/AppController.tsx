@@ -677,6 +677,35 @@ export function AppController() {
     }
   }, [activateDocumentTab, activeTabId, openTabs, saveBeforeLeavingCurrentTab]);
 
+  const closeOtherTabs = useCallback(async (tabId: string) => {
+    const targetTab = openTabs.find((tab) => tab.id === tabId);
+    if (!targetTab) {
+      return;
+    }
+
+    const closingTabs = openTabs.filter((tab) => tab.id !== tabId && !tab.locked);
+    if (closingTabs.length === 0) {
+      return;
+    }
+
+    const activeTabWillClose = closingTabs.some((tab) => tab.id === activeTabId);
+    if (activeTabWillClose && !await saveBeforeLeavingCurrentTab("当前文档保存失败，请先处理后再关闭其他标签")) {
+      return;
+    }
+
+    try {
+      const closingTabIds = new Set(closingTabs.map((tab) => tab.id));
+      const nextTabs = openTabs.filter((tab) => !closingTabIds.has(tab.id));
+      deleteTabScrollSnapshotsForTabs(tabScrollSnapshotsRef.current, openTabs, nextTabs);
+      setOpenTabs(nextTabs);
+      if (activeTabWillClose) {
+        await activateDocumentTab(targetTab.id, nextTabs);
+      }
+    } catch (error) {
+      setAppError(toMessage(error));
+    }
+  }, [activateDocumentTab, activeTabId, openTabs, saveBeforeLeavingCurrentTab]);
+
   const beginUploadOperation = useCallback((kind: "image-upload" | "file-upload", label: string) => {
     uploadOperationCountRef.current += 1;
     setActiveAppOperation({
@@ -1856,6 +1885,7 @@ export function AppController() {
           onReorderTabs={reorderOpenTabs}
           onToggleTabLocked={toggleTabLocked}
           onCloseTab={closeTab}
+          onCloseOtherTabs={closeOtherTabs}
           onExportDocument={exportDocument}
           exportBusy={activeAppOperation?.kind === "document-export"}
           onImportSpreadsheetExcel={importSpreadsheetExcel}

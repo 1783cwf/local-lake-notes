@@ -1150,8 +1150,14 @@ button {
   cursor: pointer;
 }
 
-.document-tab-menu button:hover,
-.document-tab-menu button:focus-visible {
+.document-tab-menu button:disabled {
+  color: #a7adb2;
+  background: transparent;
+  cursor: not-allowed;
+}
+
+.document-tab-menu button:not(:disabled):hover,
+.document-tab-menu button:not(:disabled):focus-visible {
   color: var(--green-dark);
   background: #eef7f2;
   outline: none;
@@ -4338,6 +4344,91 @@ button {
 
 .lake-editor-root .lake-codeblock-copy-button svg {
   flex: 0 0 auto;
+}
+
+.lake-editor-root .ne-engine img,
+.lake-editor-root .ne-viewer-body img,
+.lake-editor-root ne-card[data-card-name='image'] img {
+  cursor: zoom-in;
+}
+
+body.lake-image-viewer-open {
+  overflow: hidden;
+}
+
+.lake-image-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: grid;
+  grid-template-rows: 56px minmax(0, 1fr);
+  color: #ffffff;
+  background: rgb(14 18 22 / 92%);
+}
+
+.lake-image-viewer__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid rgb(255 255 255 / 14%);
+  background: rgb(19 24 29 / 88%);
+}
+
+.lake-image-viewer__button {
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  color: #ffffff;
+  background: transparent;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.lake-image-viewer__button:hover,
+.lake-image-viewer__button:focus-visible {
+  background: rgb(255 255 255 / 14%);
+  outline: 2px solid #8bbcff;
+  outline-offset: -2px;
+}
+
+.lake-image-viewer__button[title='恢复原始比例'] {
+  width: 48px;
+  font-size: 13px;
+}
+
+.lake-image-viewer__close {
+  margin-left: 12px;
+}
+
+.lake-image-viewer__scale {
+  width: 64px;
+  color: #e8edf1;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.lake-image-viewer__stage {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 32px;
+  text-align: center;
+}
+
+.lake-image-viewer__image {
+  display: block;
+  max-width: none;
+  height: auto;
+  margin: auto;
+  border-radius: 0;
+  box-shadow: 0 16px 50px rgb(0 0 0 / 35%);
 }
 
 .empty-editor-state {

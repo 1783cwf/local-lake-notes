@@ -13,7 +13,7 @@ import type {
 import type { WorkspaceDocument } from "../workspace/workspaceStore";
 import type { LakeEditorInstance } from "./editorTypes";
 import type { LakeAiImportContentType } from "./lakeAiImport";
-import type { LakeDocumentExportRequest } from "./lakeExport";
+import { restoreLakeCodeblockMetadata, type LakeDocumentExportRequest } from "./lakeExport";
 import { createLakeEditor, createLakeViewer, destroyLakeEditor, hasLakeEditorRuntime, hasLakeViewerRuntime } from "./lakeEditorAdapter";
 import { prepareAiMarkdownForLakeImport } from "./lakeAiImport";
 import {
@@ -70,6 +70,20 @@ interface LakeEditorProps {
   aiPreviewRequestId?: number;
   onAiPreviewApplied?: () => void;
 }
+
+interface PendingResourcePreview {
+  resourceRef: string;
+  previousPreviewUrl: string;
+  previewUrl: string;
+}
+
+interface ResourcePreviewBatchController {
+  enqueue: (resourceRef: string, previewUrl: string) => void;
+  flush: () => void;
+  dispose: () => void;
+}
+
+const resourcePreviewBatchDelayMs = 80;
 
 export function LakeEditor({
   document,
@@ -166,7 +180,14 @@ export function LakeEditor({
   }, []);
   const readExportContent = useCallback((request: LakeDocumentExportRequest) => {
     if (request.format === "html" || request.format === "pdf") {
-      return dehydrateLakeResources(editorRef.current?.getDocument("text/html") ?? content, resourcePreviewsRef.current);
+      const htmlContent = dehydrateLakeResources(
+        editorRef.current?.getDocument("text/html") ?? content,
+        resourcePreviewsRef.current,
+      );
+      return restoreLakeCodeblockMetadata(
+        htmlContent,
+        () => editorRef.current?.getDocument("text/lake") ?? content,
+      );
     }
     if (request.format === "markdown") {
       return dehydrateResourceText(editorRef.current?.getDocument("text/markdown") ?? content, resourcePreviewsRef.current);
@@ -310,51 +331,38 @@ export function LakeEditor({
       return;
     }
 
-    let cancelled = false;
     resourcePreviewsRef.current = [];
     lastAssistantSelectionRef.current = null;
     setLoadError(null);
-    const resourceRefs = isReadMode ? [] : Array.from(new Set(collectResourceReferences(parsedContent.body, { includeFileCards: true })));
+    const resourceRefs = isReadMode ? [] : Array.from(new Set(collectResourceReferences(parsedContent.body)));
     const placeholderPreviews = resourceRefs.map((resourceRef) => ({
       resourceRef,
       previewUrl: createLakeResourcePlaceholder(resourceRef),
     }));
     resourcePreviewsRef.current = placeholderPreviews;
-    const placeholderContent = hydrateLakeResourcesWithPreviews(parsedContent.body, placeholderPreviews, { includeFileCards: true });
+    const placeholderContent = hydrateLakeResourcesWithPreviews(parsedContent.body, placeholderPreviews);
     editor.setDocument("text/lake", placeholderContent);
     setStatus({ state: "clean" });
 
-    void runResourcePreviewQueue(
-      resourceRefs,
-      normalizeResourcePreviewConcurrency(resourcePreviewConcurrency),
-      async (resourceRef) => {
-        try {
-          const previewUrl = await onPrepareResourcePreview(resourceRef);
-          if (cancelled || editorRef.current !== editor) {
-            return;
-          }
-          const previousPreview = resourcePreviewsRef.current.find((preview) => (
-            preview.resourceRef === resourceRef
-          ))?.previewUrl;
-          rememberPreview(resourceRef, previewUrl);
-          const currentContent = editor.getDocument("text/lake");
-          const nextContent = previousPreview
-            ? rewriteLakeResourceUrls(currentContent, (value) => (value === previousPreview ? previewUrl : value), { includeFileCards: true })
-            : hydrateLakeResourcesWithPreviews(currentContent, resourcePreviewsRef.current, { includeFileCards: true });
-          editor.setDocument("text/lake", nextContent);
-        } catch {
-          if (cancelled || editorRef.current !== editor) {
-            return;
-          }
-          // 单张远端图片失败不能阻塞文档打开，保留占位图让用户知道该资源仍未加载。
-          setStatus({ state: "clean" });
-        }
-      },
-    );
+    const isEditorActive = () => editorRef.current === editor;
+    const previewBatch = createResourcePreviewBatchController({
+      editor,
+      getPreviews: () => resourcePreviewsRef.current,
+      rememberPreview,
+      isActive: isEditorActive,
+    });
 
-    return () => {
-      cancelled = true;
-    };
+    // 资源预览不阻塞占位内容首屏，完成的图片会按批次渐进回填。
+    void loadResourcePreviews({
+      resourceRefs,
+      concurrency: normalizeResourcePreviewConcurrency(resourcePreviewConcurrency),
+      preparePreview: onPrepareResourcePreview,
+      previewBatch,
+      isActive: isEditorActive,
+      onPreviewError: () => setStatus({ state: "clean" }),
+    });
+
+    return previewBatch.dispose;
   }, [documentPath, isReadMode, onPrepareResourcePreview, parsedContent.body, rememberPreview, resourcePreviewConcurrency, setStatus]);
 
   useEffect(() => {
@@ -424,6 +432,96 @@ export function LakeEditor({
       } as CSSProperties}
     />
   );
+}
+
+function createResourcePreviewBatchController({
+  editor,
+  getPreviews,
+  rememberPreview,
+  isActive,
+}: {
+  editor: LakeEditorInstance;
+  getPreviews: () => ResourcePreview[];
+  rememberPreview: (resourceRef: string, previewUrl: string) => void;
+  isActive: () => boolean;
+}): ResourcePreviewBatchController {
+  let disposed = false;
+  let flushTimer: ReturnType<typeof setTimeout> | null = null;
+  const pendingPreviews = new Map<string, PendingResourcePreview>();
+
+  const flush = () => {
+    if (flushTimer !== null) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+    if (disposed || !isActive() || pendingPreviews.size === 0) {
+      return;
+    }
+
+    const previewBatch = Array.from(pendingPreviews.values());
+    pendingPreviews.clear();
+    previewBatch.forEach(({ resourceRef, previewUrl }) => rememberPreview(resourceRef, previewUrl));
+    const replacements = new Map(previewBatch.map(({ previousPreviewUrl, previewUrl }) => (
+      [previousPreviewUrl, previewUrl]
+    )));
+    const currentContent = editor.getDocument("text/lake");
+    const nextContent = rewriteLakeResourceUrls(currentContent, (value) => replacements.get(value) ?? value);
+    if (nextContent !== currentContent) {
+      editor.setDocument("text/lake", nextContent);
+    }
+  };
+
+  return {
+    enqueue(resourceRef, previewUrl) {
+      if (disposed || !isActive()) {
+        return;
+      }
+      const previousPreviewUrl = getPreviews().find((preview) => preview.resourceRef === resourceRef)?.previewUrl;
+      if (!previousPreviewUrl) {
+        return;
+      }
+      pendingPreviews.set(resourceRef, { resourceRef, previousPreviewUrl, previewUrl });
+      if (flushTimer === null) {
+        flushTimer = setTimeout(flush, resourcePreviewBatchDelayMs);
+      }
+    },
+    flush,
+    dispose() {
+      disposed = true;
+      if (flushTimer !== null) {
+        clearTimeout(flushTimer);
+      }
+      pendingPreviews.clear();
+    },
+  };
+}
+
+async function loadResourcePreviews({
+  resourceRefs,
+  concurrency,
+  preparePreview,
+  previewBatch,
+  isActive,
+  onPreviewError,
+}: {
+  resourceRefs: string[];
+  concurrency: number;
+  preparePreview: (resourceRef: string) => Promise<string>;
+  previewBatch: ResourcePreviewBatchController;
+  isActive: () => boolean;
+  onPreviewError: () => void;
+}): Promise<void> {
+  await runResourcePreviewQueue(resourceRefs, concurrency, async (resourceRef) => {
+    try {
+      previewBatch.enqueue(resourceRef, await preparePreview(resourceRef));
+    } catch {
+      if (isActive()) {
+        // 单张远端图片失败不能阻塞文档打开，保留占位图让用户知道该资源仍未加载。
+        onPreviewError();
+      }
+    }
+  });
+  previewBatch.flush();
 }
 
 function rememberPreviewInList(previews: ResourcePreview[], resourceRef: string, previewUrl: string): ResourcePreview[] {

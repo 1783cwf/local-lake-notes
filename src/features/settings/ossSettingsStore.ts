@@ -18,6 +18,7 @@ export const defaultOssSettings: OssSettings = {
   maxSignedUrlTtlSeconds: 7 * 24 * 60 * 60,
   allowSignedUrlExport: true,
   resourcePreviewConcurrency: defaultResourcePreviewConcurrency,
+  imageOptimization: "original",
   local: {
     rootDirectory: "",
     storageId: "local",
@@ -49,6 +50,7 @@ export function mergeOssSettings(settings: OssSettings | null): OssSettings {
     ...merged,
     activeProvider: isStorageProviderKind(merged.activeProvider) ? merged.activeProvider : "s3",
     resourcePreviewConcurrency: normalizeResourcePreviewConcurrency(merged.resourcePreviewConcurrency),
+    imageOptimization: isImageOptimizationMode(merged.imageOptimization) ? merged.imageOptimization : "original",
   };
 }
 
@@ -106,4 +108,8 @@ export function validateOssSettings(settings: OssSettings): string | null {
 
 function isStorageProviderKind(value: unknown): value is OssSettings["activeProvider"] {
   return value === "s3" || value === "local" || value === "webdav";
+}
+
+function isImageOptimizationMode(value: unknown): value is OssSettings["imageOptimization"] {
+  return value === "original" || value === "balanced" || value === "compact";
 }

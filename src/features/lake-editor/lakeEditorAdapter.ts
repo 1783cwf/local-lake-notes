@@ -27,10 +27,18 @@ interface LakeFileCard {
   download: boolean;
 }
 
+interface LakeCodeblock {
+  id: string;
+  code: string;
+}
+
 const fileCardHostSelector = "ne-card[data-card-name='file'], ne-card[data-card-name='localdoc']";
 const fileCardBodySelector = ".ne-card-file, .ne-card-local-doc";
 const codeblockSelector = ".ne-codeblock, pre.ne-codeblock, pre[data-language], .ne-code-viewer";
 const codeblockCopySelector = ".ne-codeblock-copy, .ne-codeblock-copy-icon, [data-lake-codeblock-action='copy']";
+const imageViewerMinScale = 0.25;
+const imageViewerMaxScale = 4;
+const imageViewerScaleStep = 0.25;
 
 export function hasLakeEditorRuntime(): boolean {
   return Boolean(window.Doc?.createOpenEditor);
@@ -66,7 +74,8 @@ export function createLakeEditor(
 
   bindLakeInstanceCleanup(element, editor, [
     bindRenderedFileToolbar(element, editor, options.downloadFile),
-    bindRenderedCodeblockCopyButton(element),
+    bindRenderedCodeblockCopyButton(element, editor),
+    bindRenderedImageViewer(element),
   ]);
   editor.on("contentchange", options.onContentChange);
   return editor;
@@ -88,7 +97,8 @@ export function createLakeViewer(
 
   bindLakeInstanceCleanup(element, viewer, [
     bindRenderedFileToolbar(element, viewer, options.downloadFile),
-    bindRenderedCodeblockCopyButton(element),
+    bindRenderedCodeblockCopyButton(element, viewer),
+    bindRenderedImageViewer(element),
   ]);
   return viewer;
 }
@@ -299,12 +309,12 @@ function bindRenderedFileToolbar(
   };
 }
 
-function bindRenderedCodeblockCopyButton(element: HTMLElement): () => void {
+function bindRenderedCodeblockCopyButton(element: HTMLElement, editor: LakeEditorInstance): () => void {
   const observer = new MutationObserver(() => {
-    enhanceRenderedCodeblocks(element);
+    enhanceRenderedCodeblocks(element, editor);
   });
 
-  enhanceRenderedCodeblocks(element);
+  enhanceRenderedCodeblocks(element, editor);
   observer.observe(element, { childList: true, subtree: true });
 
   return () => {
@@ -313,24 +323,151 @@ function bindRenderedCodeblockCopyButton(element: HTMLElement): () => void {
   };
 }
 
-function enhanceRenderedCodeblocks(element: HTMLElement): void {
-  element.querySelectorAll(codeblockSelector).forEach((codeblock) => {
+function bindRenderedImageViewer(element: HTMLElement): () => void {
+  let closeViewer: (() => void) | null = null;
+  const onClick = (event: MouseEvent) => {
+    const target = event.target;
+    if (!(target instanceof HTMLImageElement) || !target.closest(".ne-engine, .ne-viewer-body, ne-card[data-card-name='image']")) {
+      return;
+    }
+
+    event.preventDefault();
+    closeViewer?.();
+    closeViewer = openImageViewer(target, () => {
+      closeViewer = null;
+    });
+  };
+
+  element.addEventListener("click", onClick);
+  return () => {
+    element.removeEventListener("click", onClick);
+    closeViewer?.();
+  };
+}
+
+function openImageViewer(sourceImage: HTMLImageElement, onClose: () => void): () => void {
+  const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const viewer = document.createElement("div");
+  viewer.className = "lake-image-viewer";
+  viewer.setAttribute("role", "dialog");
+  viewer.setAttribute("aria-modal", "true");
+  viewer.setAttribute("aria-label", "图片查看");
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "lake-image-viewer__toolbar";
+  toolbar.setAttribute("role", "toolbar");
+  toolbar.setAttribute("aria-label", "图片缩放");
+  const scaleLabel = document.createElement("span");
+  scaleLabel.className = "lake-image-viewer__scale";
+  scaleLabel.setAttribute("aria-live", "polite");
+
+  const stage = document.createElement("div");
+  stage.className = "lake-image-viewer__stage";
+  const image = document.createElement("img");
+  image.className = "lake-image-viewer__image";
+  image.alt = sourceImage.alt || "文档图片";
+  stage.append(image);
+
+  let scale = 1;
+  let baseWidth = Math.min(Math.max(sourceImage.naturalWidth, sourceImage.clientWidth, 640), Math.max(320, window.innerWidth - 96));
+  let zoomOut: HTMLButtonElement;
+  let zoomIn: HTMLButtonElement;
+  const renderScale = () => {
+    image.style.width = `${Math.round(baseWidth * scale)}px`;
+    scaleLabel.textContent = `${Math.round(scale * 100)}%`;
+    zoomOut.disabled = scale <= imageViewerMinScale;
+    zoomIn.disabled = scale >= imageViewerMaxScale;
+  };
+  const setScale = (nextScale: number) => {
+    scale = Math.min(imageViewerMaxScale, Math.max(imageViewerMinScale, nextScale));
+    renderScale();
+  };
+
+  let closed = false;
+  const close = () => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    document.removeEventListener("keydown", onKeyDown);
+    document.body.classList.remove("lake-image-viewer-open");
+    viewer.remove();
+    previousFocus?.focus();
+    onClose();
+  };
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "Escape") {
+      close();
+    } else if (event.key === "+" || event.key === "=") {
+      setScale(scale + imageViewerScaleStep);
+    } else if (event.key === "-") {
+      setScale(scale - imageViewerScaleStep);
+    }
+  };
+
+  zoomOut = createImageViewerButton("缩小图片", "−", () => setScale(scale - imageViewerScaleStep));
+  zoomIn = createImageViewerButton("放大图片", "+", () => setScale(scale + imageViewerScaleStep));
+  const reset = createImageViewerButton("恢复原始比例", "1:1", () => setScale(1));
+  const closeButton = createImageViewerButton("关闭图片查看", "×", close);
+  closeButton.classList.add("lake-image-viewer__close");
+  toolbar.append(zoomOut, scaleLabel, zoomIn, reset, closeButton);
+  viewer.append(toolbar, stage);
+
+  image.addEventListener("load", () => {
+    baseWidth = Math.min(Math.max(image.naturalWidth, 1), Math.max(320, window.innerWidth - 96));
+    renderScale();
+  }, { once: true });
+  stage.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    setScale(scale + (event.deltaY < 0 ? imageViewerScaleStep : -imageViewerScaleStep));
+  }, { passive: false });
+  viewer.addEventListener("click", (event) => {
+    if (event.target === viewer || event.target === stage) {
+      close();
+    }
+  });
+  document.addEventListener("keydown", onKeyDown);
+  document.body.classList.add("lake-image-viewer-open");
+  document.body.append(viewer);
+  image.src = sourceImage.currentSrc || sourceImage.src;
+  renderScale();
+  closeButton.focus();
+  return close;
+}
+
+function createImageViewerButton(label: string, text: string, onClick: () => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "lake-image-viewer__button";
+  button.setAttribute("aria-label", label);
+  button.title = label;
+  button.textContent = text;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function enhanceRenderedCodeblocks(element: HTMLElement, editor: LakeEditorInstance): void {
+  listRenderedCodeblocks(element).forEach((codeblock) => {
     if (!(codeblock instanceof HTMLElement) || codeblock.querySelector(codeblockCopySelector)) {
       return;
     }
 
-    const codeText = readRenderedCodeblockText(codeblock);
+    const codeText = readCodeblockText(element, editor, codeblock);
     if (!codeText) {
       return;
     }
 
-    const button = createCodeblockCopyButton(codeblock);
+    const button = createCodeblockCopyButton(element, editor, codeblock);
     const endNav = findOrCreateCodeblockEndNav(codeblock);
     endNav.append(button);
   });
 }
 
-function createCodeblockCopyButton(codeblock: HTMLElement): HTMLButtonElement {
+function createCodeblockCopyButton(
+  element: HTMLElement,
+  editor: LakeEditorInstance,
+  codeblock: HTMLElement,
+): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "ne-codeblock-copy lake-codeblock-copy-button";
@@ -341,13 +478,18 @@ function createCodeblockCopyButton(codeblock: HTMLElement): HTMLButtonElement {
   button.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    void copyRenderedCodeblock(codeblock, button);
+    void copyRenderedCodeblock(element, editor, codeblock, button);
   });
   return button;
 }
 
-async function copyRenderedCodeblock(codeblock: HTMLElement, button: HTMLButtonElement): Promise<void> {
-  const codeText = readRenderedCodeblockText(codeblock);
+async function copyRenderedCodeblock(
+  element: HTMLElement,
+  editor: LakeEditorInstance,
+  codeblock: HTMLElement,
+  button: HTMLButtonElement,
+): Promise<void> {
+  const codeText = readCodeblockText(element, editor, codeblock);
   if (!codeText) {
     return;
   }
@@ -435,6 +577,34 @@ function findOrCreateCodeblockEndNav(codeblock: HTMLElement): HTMLElement {
   return endNav;
 }
 
+function readCodeblockText(element: HTMLElement, editor: LakeEditorInstance, codeblock: HTMLElement): string {
+  // CodeMirror 长代码块会按视口懒渲染，DOM 里可能只有可见行；优先读 Lake 原始数据才能复制完整代码。
+  return readOriginalCodeblockText(element, editor, codeblock) ?? readRenderedCodeblockText(codeblock);
+}
+
+function readOriginalCodeblockText(
+  element: HTMLElement,
+  editor: LakeEditorInstance,
+  codeblock: HTMLElement,
+): string | null {
+  try {
+    const codeblocks = extractLakeCodeblocks(editor.getDocument("text/lake"));
+    const codeblockId = readRenderedCodeblockId(codeblock);
+    if (codeblockId) {
+      const matched = codeblocks.find((item) => item.id === codeblockId);
+      if (matched) {
+        return matched.code;
+      }
+    }
+
+    const renderedCodeblocks = listRenderedCodeblocks(element);
+    const codeblockIndex = renderedCodeblocks.indexOf(codeblock);
+    return codeblockIndex >= 0 ? codeblocks[codeblockIndex]?.code ?? null : null;
+  } catch {
+    return null;
+  }
+}
+
 function readRenderedCodeblockText(codeblock: HTMLElement): string {
   // CodeMirror 5/6 的 DOM 都按行渲染；必须逐行读取，避免 textContent 把换行和缩进压成一行。
   const codeMirrorLines = readCodeMirrorLines(codeblock);
@@ -466,6 +636,57 @@ function readCodeMirrorLines(codeblock: HTMLElement): string[] {
   return Array.from(codeblock.querySelectorAll(".CodeMirror-code pre.CodeMirror-line, .CodeMirror-code pre.CodeMirror-line-like, .CodeMirror-code pre, .CodeMirror-line"))
     .filter((line) => !line.closest(".codeblock-menu"))
     .map((line) => line.textContent ?? "");
+}
+
+function listRenderedCodeblocks(element: HTMLElement): HTMLElement[] {
+  return Array.from(element.querySelectorAll(codeblockSelector))
+    .filter((codeblock): codeblock is HTMLElement => codeblock instanceof HTMLElement);
+}
+
+function extractLakeCodeblocks(content: string): LakeCodeblock[] {
+  const template = document.createElement("template");
+  template.innerHTML = content;
+
+  return Array.from(template.content.querySelectorAll("card[name='codeblock'], pre.ne-codeblock, pre[data-language]"))
+    .map(extractLakeCodeblock)
+    .filter((codeblock): codeblock is LakeCodeblock => Boolean(codeblock));
+}
+
+function extractLakeCodeblock(node: Element): LakeCodeblock | null {
+  if (node.matches("card[name='codeblock']")) {
+    const payload = decodeLakeCardPayload(node.getAttribute("value"));
+    if (!payload) {
+      return null;
+    }
+
+    const code = payload.code;
+    if (typeof code !== "string") {
+      return null;
+    }
+
+    return {
+      id: readString(payload.id) ?? readString(node.getAttribute("id")) ?? "",
+      code,
+    };
+  }
+
+  if (node instanceof HTMLPreElement) {
+    return {
+      id: readString(node.getAttribute("id")) ?? "",
+      code: node.querySelector("code")?.textContent ?? node.textContent ?? "",
+    };
+  }
+
+  return null;
+}
+
+function readRenderedCodeblockId(codeblock: HTMLElement): string | null {
+  return (
+    readString(codeblock.getAttribute("data-lake-id")) ??
+    readString(codeblock.getAttribute("id")) ??
+    readString(codeblock.closest("[data-card-name='codeblock']")?.getAttribute("data-lake-id")) ??
+    readString(codeblock.closest("[data-card-name='codeblock']")?.getAttribute("id"))
+  );
 }
 
 function readRenderedCodeblockLanguage(codeblock: HTMLElement): string {
@@ -632,23 +853,28 @@ function extractCardData(cardData: unknown): LakeFileCard | null {
 }
 
 function decodeLakeCardValue(value: string | null): LakeFileCard | null {
+  const decoded = decodeLakeCardPayload(value) as Partial<LakeFileCard> | null;
+  const src = readString(decoded?.src);
+  const name = readString(decoded?.name) ?? "";
+  if (!src) {
+    return null;
+  }
+  return {
+    name,
+    src,
+    download: decoded?.download !== false,
+  };
+}
+
+function decodeLakeCardPayload(value: string | null): Record<string, unknown> | null {
   if (!value) {
     return null;
   }
 
   const payload = value.startsWith("data:") ? value.slice("data:".length) : value;
   try {
-    const decoded = JSON.parse(decodeURIComponent(payload)) as Partial<LakeFileCard>;
-    const src = readString(decoded.src);
-    const name = readString(decoded.name) ?? "";
-    if (!src) {
-      return null;
-    }
-    return {
-      name,
-      src,
-      download: decoded.download !== false,
-    };
+    const decoded = JSON.parse(decodeURIComponent(payload));
+    return decoded && typeof decoded === "object" && !Array.isArray(decoded) ? decoded : null;
   } catch {
     return null;
   }
