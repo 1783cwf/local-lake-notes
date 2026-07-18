@@ -391,3 +391,49 @@ test("未锁定活动标签可以点击关闭按钮", async () => {
 
   expect(onCloseTab).toHaveBeenCalledWith("a.lake");
 });
+
+test("标签右键菜单支持关闭当前标签和关闭其他标签", async () => {
+  const user = userEvent.setup();
+  const onCloseTab = vi.fn();
+  const onCloseOtherTabs = vi.fn();
+
+  render(
+    <TopBar
+      document={{
+        id: "b.lake",
+        path: "b.lake",
+        name: "b",
+        parentPath: "",
+        size: 1,
+        kind: "lake",
+      }}
+      openTabs={[
+        {
+          id: "a.lake",
+          path: "a.lake",
+          locked: false,
+          document: { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+        },
+        {
+          id: "b.lake",
+          path: "b.lake",
+          locked: false,
+          document: { id: "b.lake", path: "b.lake", name: "b", parentPath: "", size: 1, kind: "lake" },
+        },
+      ]}
+      activeTabId="b.lake"
+      saveStatus={{ state: "clean" }}
+      onManualSave={vi.fn()}
+      onCloseTab={onCloseTab}
+      onCloseOtherTabs={onCloseOtherTabs}
+    />,
+  );
+
+  await user.pointer({ keys: "[MouseRight]", target: screen.getByRole("tab", { name: "b" }) });
+  await user.click(screen.getByRole("menuitem", { name: "关闭当前标签" }));
+  expect(onCloseTab).toHaveBeenCalledWith("b.lake");
+
+  await user.pointer({ keys: "[MouseRight]", target: screen.getByRole("tab", { name: "b" }) });
+  await user.click(screen.getByRole("menuitem", { name: "关闭其他标签" }));
+  expect(onCloseOtherTabs).toHaveBeenCalledWith("b.lake");
+});

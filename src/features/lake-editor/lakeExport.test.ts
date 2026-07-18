@@ -8,8 +8,9 @@ import {
   lakeDocumentMarkdownToTextWithResources,
   lakeDocumentToMarkdown,
   lakeWorkspaceToMarkdownZip,
+  restoreLakeCodeblockMetadata,
 } from "./lakeExport";
-import { createResourceReference } from "./resourceReference";
+import { createResourceReference, encodeLakeCardValue } from "./resourceReference";
 
 afterEach(() => {
   window.Doc = undefined;
@@ -24,6 +25,22 @@ test("Lake 内容可以导出为 Markdown", () => {
   expect(markdown).toContain("# 标题");
   expect(markdown).toContain("## 小节");
   expect(markdown).toContain("**hello** [link](https://example.com)");
+});
+
+test("HTML 导出按代码内容恢复多个代码块名称", () => {
+  const lakeContent = [
+    `<card name="codeblock" value="${encodeLakeCardValue({ name: "脚本 A", mode: "bash", code: "echo A" })}"></card>`,
+    `<card name="codeblock" value="${encodeLakeCardValue({ name: "脚本 B", mode: "yaml", code: "kind: B" })}"></card>`,
+  ].join("");
+  const html = restoreLakeCodeblockMetadata(
+    "<pre class=\"ne-codeblock\" data-language=\"yaml\"><code>kind: B</code></pre>",
+    () => lakeContent,
+  );
+
+  expect(html).toContain("data-title=\"脚本 B\"");
+  expect(html).toContain("data-language=\"yaml\"");
+  expect(html).toContain("<code>kind: B</code>");
+  expect(html).not.toContain("脚本 A");
 });
 
 test("HTML 导出保留 Lake 内容和打印样式", async () => {
@@ -80,6 +97,10 @@ test("HTML 导出保留 Lake 内容和打印样式", async () => {
   expect(html).toContain("测试文件1.zip");
   expect(html).toContain("(35 kB)");
   expect(html).toContain("<p class=\"ne-p\">world</p>");
+  expect(html).toContain("class=\"lake-export-image-viewer\"");
+  expect(html).toContain("aria-label=\"缩小图片\"");
+  expect(html).toContain("aria-label=\"放大图片\"");
+  expect(html).toContain("initExportImageViewer");
 });
 
 test("短时签名 HTML 导出会重写图片和附件链接", async () => {
@@ -192,10 +213,44 @@ test("本地资源包 HTML 导出会生成 index 和资源文件", async () => {
   );
   const entries = readStoredZipEntries(zip);
 
-  expect(entries.map((entry) => entry.path)).toEqual(["index.html", "attachments/测试文件1.pdf"]);
-  expect(entries[0].content).toContain("data:image/png;base64,QQ==");
+  expect(entries.map((entry) => entry.path)).toEqual(["index.html", "assets/截图.png", "attachments/测试文件1.pdf"]);
+  expect(entries[0].content).toContain("assets/截图.png");
   expect(entries[0].content).toContain("attachments/测试文件1.pdf");
   expect(entries[1].content).toBe("A");
+  expect(entries[2].content).toBe("A");
+});
+
+test("本地资源包会编码链接保留特殊文件名并规避大小写冲突", async () => {
+  const firstImageRef = createResourceReference({
+    bucket: "yuque",
+    key: "images/first.png",
+    kind: "image",
+    name: "A#图.png",
+  });
+  const secondImageRef = createResourceReference({
+    bucket: "yuque",
+    key: "images/second.png",
+    kind: "image",
+    name: "a#图.png",
+  });
+  const zip = await lakeDocumentToHtmlBundle(
+    "标题",
+    `<p><img src="${firstImageRef}"><img src="${secondImageRef}"></p>`,
+    {
+      strategy: "bundle",
+      signedUrlTtlSeconds: 3600,
+      loadResource: async () => new Uint8Array([65]),
+    },
+  );
+  const entries = readStoredZipEntries(zip);
+
+  expect(entries.map((entry) => entry.path)).toEqual([
+    "index.html",
+    "assets/A#图.png",
+    "assets/a#图-2.png",
+  ]);
+  expect(entries[0].content).toContain("assets/A%23图.png");
+  expect(entries[0].content).toContain("assets/a%23图-2.png");
 });
 
 test("本地资源包 HTML 导出会把公共 URL 打进资源目录", async () => {

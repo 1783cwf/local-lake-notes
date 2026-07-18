@@ -1,7 +1,7 @@
 use tempfile::tempdir;
 use yuque_lake_notes_lib::models::{
     AiModelProfile, AiProtocol, AiSettings, DocumentTabGroup, DocumentTabGroupItem,
-    DocumentTabGroups, OssSettings, StorageProviderKind,
+    DocumentTabGroups, ImageOptimizationMode, OssSettings, StorageProviderKind,
 };
 use yuque_lake_notes_lib::storage::app_database::{
     clear_recent_workspace_root_at, clone_database_to_directory_at, forget_known_workspace_at,
@@ -32,6 +32,7 @@ fn valid_settings() -> OssSettings {
         max_signed_url_ttl_seconds: 7 * 24 * 60 * 60,
         allow_signed_url_export: true,
         resource_preview_concurrency: 6,
+        image_optimization: ImageOptimizationMode::Balanced,
         local: Default::default(),
         webdav: Default::default(),
     }

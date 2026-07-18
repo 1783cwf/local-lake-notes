@@ -2,7 +2,9 @@ use yuque_lake_notes_lib::commands::settings::{
     create_global_typography_settings, normalize_font_family, normalize_typography_settings,
     validate_oss_settings,
 };
-use yuque_lake_notes_lib::models::{GlobalTypographySettings, OssSettings, StorageProviderKind};
+use yuque_lake_notes_lib::models::{
+    GlobalTypographySettings, ImageOptimizationMode, OssSettings, StorageProviderKind,
+};
 
 fn valid_settings() -> OssSettings {
     OssSettings {
@@ -22,6 +24,7 @@ fn valid_settings() -> OssSettings {
         max_signed_url_ttl_seconds: 7 * 24 * 60 * 60,
         allow_signed_url_export: true,
         resource_preview_concurrency: 6,
+        image_optimization: ImageOptimizationMode::Balanced,
         local: Default::default(),
         webdav: Default::default(),
     }
@@ -76,6 +79,16 @@ fn validates_resource_preview_concurrency_range() {
     settings.resource_preview_concurrency = 9;
 
     assert!(validate_oss_settings(&settings).is_err());
+}
+
+#[test]
+fn legacy_settings_default_to_original_image_optimization() {
+    let mut value = serde_json::to_value(valid_settings()).unwrap();
+    value.as_object_mut().unwrap().remove("imageOptimization");
+
+    let settings: OssSettings = serde_json::from_value(value).unwrap();
+
+    assert_eq!(settings.image_optimization, ImageOptimizationMode::Original);
 }
 
 #[test]

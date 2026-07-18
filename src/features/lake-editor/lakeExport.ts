@@ -42,6 +42,13 @@ interface ExportHeading {
   text: string;
 }
 
+interface LakeCodeblockExportMetadata {
+  name?: string;
+  mode?: string;
+  theme?: string;
+  code?: string;
+}
+
 export interface LakeDocumentResourceExportOptions {
   strategy: ExportResourceStrategy;
   signedUrlTtlSeconds: number;
@@ -78,6 +85,79 @@ export function lakeContentToMarkdown(content: string): string {
   const template = document.createElement("template");
   template.innerHTML = content;
   return normalizeMarkdown(nodesToMarkdown(Array.from(template.content.childNodes)));
+}
+
+export function restoreLakeCodeblockMetadata(htmlContent: string, readLakeContent: () => string): string {
+  const htmlTemplate = document.createElement("template");
+  htmlTemplate.innerHTML = htmlContent;
+  const codeblocks = Array.from(htmlTemplate.content.querySelectorAll("pre.ne-codeblock, pre[data-language]"));
+  if (codeblocks.length === 0) {
+    return htmlContent;
+  }
+
+  const lakeTemplate = document.createElement("template");
+  lakeTemplate.innerHTML = readLakeContent();
+  const metadata = Array.from(lakeTemplate.content.querySelectorAll("card[name='codeblock']"))
+    .map((card) => readLakeCodeblockExportMetadata(card));
+  if (!metadata.some(Boolean)) {
+    return htmlContent;
+  }
+
+  const usedMetadataIndexes = new Set<number>();
+  codeblocks.forEach((codeblock, index) => {
+    const code = normalizeCodeblockContent(codeblock.textContent ?? "");
+    const directItem = metadata[index];
+    const metadataIndex = directItem &&
+      !usedMetadataIndexes.has(index) &&
+      (!directItem.code || normalizeCodeblockContent(directItem.code) === code)
+      ? index
+      : metadata.findIndex((item, candidateIndex) => (
+        !usedMetadataIndexes.has(candidateIndex) &&
+        item?.code !== undefined &&
+        normalizeCodeblockContent(item.code) === code
+      ));
+    const item = metadata[metadataIndex];
+    if (!item) {
+      return;
+    }
+    usedMetadataIndexes.add(metadataIndex);
+
+    // Lake 的 HTML writer 不输出稳定 ID；优先按顺序匹配，顺序不一致时用代码内容避免名称错位。
+    setCodeblockExportAttribute(codeblock, "data-title", item.name);
+    setCodeblockExportAttribute(codeblock, "data-language", item.mode);
+    setCodeblockExportAttribute(codeblock, "data-theme", item.theme);
+  });
+  return htmlTemplate.innerHTML;
+}
+
+function readLakeCodeblockExportMetadata(card: Element): LakeCodeblockExportMetadata | null {
+  const value = decodeLakeCardValue(card.getAttribute("value"));
+  if (!value) {
+    return null;
+  }
+  return {
+    name: readOptionalText(value.name),
+    mode: readOptionalText(value.mode),
+    theme: readOptionalText(value.theme),
+    code: typeof value.code === "string" ? value.code : undefined,
+  };
+}
+
+function normalizeCodeblockContent(value: string): string {
+  return value.replace(/\r\n?/g, "\n").trimEnd();
+}
+
+function setCodeblockExportAttribute(element: Element, attribute: string, value: string | undefined): void {
+  if (value) {
+    element.setAttribute(attribute, value);
+  }
+}
+
+function readOptionalText(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  return value.trim() || undefined;
 }
 
 export async function lakeDocumentMarkdownToTextWithResources(
@@ -247,6 +327,83 @@ export async function lakeDocumentToHtml(title: string, content: string): Promis
       img {
         max-width: 100%;
         border-radius: 6px;
+      }
+      .lake-export-content img {
+        cursor: zoom-in;
+      }
+      body.lake-export-image-viewer-open {
+        overflow: hidden;
+      }
+      .lake-export-image-viewer[hidden] {
+        display: none;
+      }
+      .lake-export-image-viewer {
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        display: grid;
+        grid-template-rows: 56px minmax(0, 1fr);
+        color: #ffffff;
+        background: rgb(14 18 22 / 92%);
+      }
+      .lake-export-image-viewer__toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        min-width: 0;
+        padding: 8px 16px;
+        border-bottom: 1px solid rgb(255 255 255 / 14%);
+        background: rgb(19 24 29 / 88%);
+      }
+      .lake-export-image-viewer__button {
+        display: inline-grid;
+        place-items: center;
+        width: 40px;
+        height: 40px;
+        padding: 0;
+        border: 0;
+        border-radius: 5px;
+        color: #ffffff;
+        background: transparent;
+        font: inherit;
+        font-size: 22px;
+        line-height: 1;
+        cursor: pointer;
+      }
+      .lake-export-image-viewer__button:hover,
+      .lake-export-image-viewer__button:focus-visible {
+        background: rgb(255 255 255 / 14%);
+        outline: 2px solid #8bbcff;
+        outline-offset: -2px;
+      }
+      .lake-export-image-viewer__button--reset {
+        width: 48px;
+        font-size: 13px;
+      }
+      .lake-export-image-viewer__button--close {
+        margin-left: 12px;
+      }
+      .lake-export-image-viewer__scale {
+        width: 64px;
+        color: #e8edf1;
+        font-variant-numeric: tabular-nums;
+        text-align: center;
+      }
+      .lake-export-image-viewer__stage {
+        min-width: 0;
+        min-height: 0;
+        overflow: auto;
+        padding: 32px;
+        text-align: center;
+      }
+      .lake-export-image-viewer__image {
+        display: block;
+        max-width: none;
+        height: auto;
+        margin: auto;
+        border-radius: 0;
+        box-shadow: 0 16px 50px rgb(0 0 0 / 35%);
       }
       table {
         width: 100%;
@@ -602,6 +759,9 @@ export async function lakeDocumentToHtml(title: string, content: string): Promis
         .lake-export-resizer {
           display: none;
         }
+        .lake-export-image-viewer {
+          display: none !important;
+        }
       }
       @media (max-width: 920px) {
         body {
@@ -656,8 +816,107 @@ export async function lakeDocumentToHtml(title: string, content: string): Promis
         </article>
       </main>
     </div>
+    <div class="lake-export-image-viewer" role="dialog" aria-modal="true" aria-label="图片查看" hidden>
+      <div class="lake-export-image-viewer__toolbar" role="toolbar" aria-label="图片缩放">
+        <button type="button" class="lake-export-image-viewer__button" data-image-action="zoom-out" aria-label="缩小图片" title="缩小图片">−</button>
+        <span class="lake-export-image-viewer__scale" aria-live="polite">100%</span>
+        <button type="button" class="lake-export-image-viewer__button" data-image-action="zoom-in" aria-label="放大图片" title="放大图片">+</button>
+        <button type="button" class="lake-export-image-viewer__button lake-export-image-viewer__button--reset" data-image-action="reset" aria-label="恢复原始比例" title="恢复原始比例">1:1</button>
+        <button type="button" class="lake-export-image-viewer__button lake-export-image-viewer__button--close" data-image-action="close" aria-label="关闭图片查看" title="关闭图片查看">×</button>
+      </div>
+      <div class="lake-export-image-viewer__stage">
+        <img class="lake-export-image-viewer__image" alt="" />
+      </div>
+    </div>
     <script>
       (() => {
+        const initExportImageViewer = () => {
+          const content = document.querySelector(".lake-export-content");
+          const viewer = document.querySelector(".lake-export-image-viewer");
+          const stage = viewer?.querySelector(".lake-export-image-viewer__stage");
+          const image = viewer?.querySelector(".lake-export-image-viewer__image");
+          const scaleLabel = viewer?.querySelector(".lake-export-image-viewer__scale");
+          const zoomOut = viewer?.querySelector("[data-image-action='zoom-out']");
+          const zoomIn = viewer?.querySelector("[data-image-action='zoom-in']");
+          const reset = viewer?.querySelector("[data-image-action='reset']");
+          const closeButton = viewer?.querySelector("[data-image-action='close']");
+          if (!content || !viewer || !stage || !(image instanceof HTMLImageElement) || !scaleLabel || !zoomOut || !zoomIn || !reset || !closeButton) {
+            return;
+          }
+
+          const minScale = 0.25;
+          const maxScale = 4;
+          const scaleStep = 0.25;
+          let scale = 1;
+          let baseWidth = 640;
+          let previousFocus = null;
+          const renderScale = () => {
+            image.style.width = Math.round(baseWidth * scale) + "px";
+            scaleLabel.textContent = Math.round(scale * 100) + "%";
+            zoomOut.disabled = scale <= minScale;
+            zoomIn.disabled = scale >= maxScale;
+          };
+          const setScale = (nextScale) => {
+            scale = Math.min(maxScale, Math.max(minScale, nextScale));
+            renderScale();
+          };
+          const close = () => {
+            viewer.hidden = true;
+            document.body.classList.remove("lake-export-image-viewer-open");
+            image.removeAttribute("src");
+            if (previousFocus instanceof HTMLElement) {
+              previousFocus.focus();
+            }
+          };
+          const open = (source) => {
+            previousFocus = document.activeElement;
+            scale = 1;
+            baseWidth = Math.min(Math.max(source.naturalWidth, source.clientWidth, 640), Math.max(320, window.innerWidth - 96));
+            image.alt = source.alt || "文档图片";
+            image.src = source.currentSrc || source.src;
+            viewer.hidden = false;
+            document.body.classList.add("lake-export-image-viewer-open");
+            renderScale();
+            closeButton.focus();
+          };
+
+          image.addEventListener("load", () => {
+            baseWidth = Math.min(Math.max(image.naturalWidth, 1), Math.max(320, window.innerWidth - 96));
+            renderScale();
+          });
+          content.addEventListener("click", (event) => {
+            if (event.target instanceof HTMLImageElement) {
+              event.preventDefault();
+              open(event.target);
+            }
+          });
+          zoomOut.addEventListener("click", () => setScale(scale - scaleStep));
+          zoomIn.addEventListener("click", () => setScale(scale + scaleStep));
+          reset.addEventListener("click", () => setScale(1));
+          closeButton.addEventListener("click", close);
+          stage.addEventListener("wheel", (event) => {
+            event.preventDefault();
+            setScale(scale + (event.deltaY < 0 ? scaleStep : -scaleStep));
+          }, { passive: false });
+          viewer.addEventListener("click", (event) => {
+            if (event.target === viewer || event.target === stage) {
+              close();
+            }
+          });
+          document.addEventListener("keydown", (event) => {
+            if (viewer.hidden) {
+              return;
+            }
+            if (event.key === "Escape") {
+              close();
+            } else if (event.key === "+" || event.key === "=") {
+              setScale(scale + scaleStep);
+            } else if (event.key === "-") {
+              setScale(scale - scaleStep);
+            }
+          });
+        };
+
         const initExportCollapses = () => {
           document.querySelectorAll("ne-collapse").forEach((collapse) => {
             if (!collapse.hasAttribute("ne-open")) {
@@ -699,6 +958,7 @@ export async function lakeDocumentToHtml(title: string, content: string): Promis
           });
         };
 
+        initExportImageViewer();
         initExportCollapses();
 
         const shell = document.querySelector(".lake-export-shell");
@@ -791,7 +1051,6 @@ export async function lakeDocumentToHtmlBundle(
   const result = await rewriteExportResourceReferences(content, options, {
     assetPrefix: "assets",
     attachmentPrefix: "attachments",
-    inlineImages: true,
   });
   return createZip([
     { path: "index.html", content: await lakeDocumentToHtml(title, result.content) },
@@ -1672,12 +1931,19 @@ function uniqueBundleResourcePath(prefix: string, filename: string, usedPaths: S
   const extension = extensionIndex > 0 ? safeName.slice(extensionIndex) : "";
   let candidate = `${safePrefix}/${safeName}`;
   let index = 2;
-  while (usedPaths.has(candidate)) {
+  while (usedPaths.has(bundleResourcePathCollisionKey(candidate))) {
     candidate = `${safePrefix}/${stem}-${index}${extension}`;
     index += 1;
   }
-  usedPaths.add(candidate);
+  usedPaths.add(bundleResourcePathCollisionKey(candidate));
   return candidate;
+}
+
+function bundleResourcePathCollisionKey(path: string): string {
+  return path
+    .split("/")
+    .map((part) => part.normalize("NFC").toLocaleLowerCase("en-US").replace(/[. ]+$/g, ""))
+    .join("/");
 }
 
 async function resourceToOptimizedImageDataUrl(
@@ -1893,7 +2159,7 @@ function relativeZipLink(path: string, basePath?: string): string {
   const normalizedPath = normalizeZipPath(path);
   const normalizedBase = normalizeZipPath(basePath ?? "");
   if (!normalizedBase) {
-    return normalizedPath;
+    return encodeZipLinkPath(normalizedPath);
   }
 
   const fromParts = normalizedBase.split("/").filter(Boolean);
@@ -1902,7 +2168,11 @@ function relativeZipLink(path: string, basePath?: string): string {
     fromParts.shift();
     toParts.shift();
   }
-  return [...fromParts.map(() => ".."), ...toParts].join("/") || basename(normalizedPath);
+  return encodeZipLinkPath([...fromParts.map(() => ".."), ...toParts].join("/") || basename(normalizedPath));
+}
+
+function encodeZipLinkPath(path: string): string {
+  return path.replace(/%/g, "%25").replace(/#/g, "%23");
 }
 
 function safeFileName(value: string): string {

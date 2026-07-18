@@ -67,6 +67,7 @@ interface TopBarProps {
   onReorderTabs?: (orderedTabIds: string[]) => void;
   onToggleTabLocked?: (tabId: string) => void;
   onCloseTab?: (tabId: string) => void | Promise<void>;
+  onCloseOtherTabs?: (tabId: string) => void | Promise<void>;
   onRenameDocument?: (title: string) => void | Promise<void>;
   onExportDocument?: (format: DocumentExportFormat, resourceStrategy: ExportResourceStrategy, signedUrlTtlSeconds: number) => void;
   onImportSpreadsheetExcel?: () => void;
@@ -94,6 +95,7 @@ export function TopBar({
   onReorderTabs,
   onToggleTabLocked,
   onCloseTab,
+  onCloseOtherTabs,
   onRenameDocument,
   onExportDocument,
   onImportSpreadsheetExcel,
@@ -120,6 +122,9 @@ export function TopBar({
   const activeTabRef = useRef<HTMLDivElement | null>(null);
   const ttlOptions = Array.from(new Set([ttlSeconds, 3600, 24 * 3600, 7 * 24 * 3600])).sort((left, right) => left - right);
   const menuTab = tabMenu ? openTabs.find((tab) => tab.id === tabMenu.tabId) : null;
+  const hasClosableOtherTabs = menuTab
+    ? openTabs.some((tab) => tab.id !== menuTab.id && !tab.locked)
+    : false;
   const lakeReadMode = document?.kind === "lake" && documentMode === "read";
   const effectiveTypography = resolveTypographySettings(documentTypography, globalTypography);
   const tabIds = openTabs.map((tab) => tab.id);
@@ -329,9 +334,20 @@ export function TopBar({
                   setTabMenu(null);
                 }}
               >
-                关闭标签
+                关闭当前标签
               </button>
             ) : null}
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!hasClosableOtherTabs}
+              onClick={() => {
+                void onCloseOtherTabs?.(menuTab.id);
+                setTabMenu(null);
+              }}
+            >
+              关闭其他标签
+            </button>
           </div>
         ) : null}
         <span className={`save-status save-status--${saveStatus.state}`}>

@@ -93,9 +93,20 @@ pub struct OssSettings {
     #[serde(default = "default_resource_preview_concurrency")]
     pub resource_preview_concurrency: u8,
     #[serde(default)]
+    pub image_optimization: ImageOptimizationMode,
+    #[serde(default)]
     pub local: LocalStorageSettings,
     #[serde(default)]
     pub webdav: WebDavStorageSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ImageOptimizationMode {
+    #[default]
+    Original,
+    Balanced,
+    Compact,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

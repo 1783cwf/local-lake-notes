@@ -174,6 +174,7 @@ const s3SignedUrlOssSettings: OssSettings = {
   maxSignedUrlTtlSeconds: 7 * 24 * 60 * 60,
   allowSignedUrlExport: true,
   resourcePreviewConcurrency: 6,
+  imageOptimization: "balanced",
   local: {
     rootDirectory: "",
     storageId: "local",
@@ -1168,6 +1169,43 @@ test("单篇 Markdown 只有图片资源时直接导出单文件", async () => {
   });
 });
 
+test("单篇 HTML 只有图片资源时导出内嵌 Base64 的单文件", async () => {
+  const user = userEvent.setup();
+  const imageRef = "yuque-resource://yuque/images/a.png?kind=image&name=%E6%88%AA%E5%9B%BE.png&type=image%2Fpng";
+  const editor = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn((type: string) => (
+      type === "text/html" ? `<p><img src="${imageRef}" alt="截图.png"></p>` : "<p>图片</p>"
+    )),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [{ id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" }],
+    order: ["document:a.lake"],
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "a" }));
+  await user.click(screen.getByRole("button", { name: "导出文档" }));
+  await user.click(screen.getByRole("menuitem", { name: "HTML" }));
+
+  await waitFor(() => {
+    expect(saveTextExport).toHaveBeenCalledWith(
+      "a.html",
+      expect.stringContaining("src=\"data:image/png;base64,AQID\""),
+      [{ name: "HTML", extensions: ["html"] }],
+    );
+    expect(saveBinaryExport).not.toHaveBeenCalled();
+  });
+});
+
 test("短时签名链接导出无本地资源时保持单个 HTML 文件", async () => {
   const user = userEvent.setup();
   const editor = {
@@ -1227,6 +1265,81 @@ test("关闭活动未锁定标签后切换到相邻标签", async () => {
     expect(screen.getAllByRole("tab")).toHaveLength(1);
     expect(screen.getByRole("tab", { name: "a，已锁定" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("current-path")).toHaveTextContent("a.lake");
+  });
+});
+
+test("关闭其他标签时保留目标标签和锁定标签", async () => {
+  const user = userEvent.setup();
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [
+      { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+      { id: "b.lake", path: "b.lake", name: "b", parentPath: "", size: 1, kind: "lake" },
+      { id: "c.lake", path: "c.lake", name: "c", parentPath: "", size: 1, kind: "lake" },
+    ],
+    order: ["document:a.lake", "document:b.lake", "document:c.lake"],
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "a" }));
+  await user.pointer({ keys: "[MouseRight]", target: await screen.findByRole("tab", { name: "a" }) });
+  await user.click(screen.getByRole("menuitem", { name: "锁定标签" }));
+  await user.click(screen.getByRole("treeitem", { name: "b" }));
+  await user.pointer({ keys: "[MouseRight]", target: screen.getByRole("tab", { name: "b" }) });
+  await user.click(screen.getByRole("menuitem", { name: "锁定标签" }));
+  await user.click(screen.getByRole("treeitem", { name: "c" }));
+
+  await user.pointer({ keys: "[MouseRight]", target: screen.getByRole("tab", { name: "b，已锁定" }) });
+  await user.click(screen.getByRole("menuitem", { name: "关闭其他标签" }));
+
+  await waitFor(() => {
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+    expect(screen.getByRole("tab", { name: "a，已锁定" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "b，已锁定" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("current-path")).toHaveTextContent("b.lake");
+  });
+});
+
+test("关闭其他标签时保存失败会保留全部标签", async () => {
+  const user = userEvent.setup();
+  const editor = {
+    setDocument: vi.fn(),
+    getDocument: vi.fn(() => "<p>dirty</p>"),
+    on: vi.fn(),
+    destroy: vi.fn(),
+  };
+  window.Doc = {
+    createOpenEditor: vi.fn(() => editor),
+  };
+  getRecentWorkspace.mockResolvedValue({
+    root: "/tmp/kb",
+    directories: [],
+    documents: [
+      { id: "a.lake", path: "a.lake", name: "a", parentPath: "", size: 1, kind: "lake" },
+      { id: "b.lake", path: "b.lake", name: "b", parentPath: "", size: 1, kind: "lake" },
+    ],
+    order: ["document:a.lake", "document:b.lake"],
+  });
+
+  render(<AppController />);
+
+  await user.click(await screen.findByRole("treeitem", { name: "a" }));
+  await user.pointer({ keys: "[MouseRight]", target: screen.getByRole("tab", { name: "a" }) });
+  await user.click(screen.getByRole("menuitem", { name: "锁定标签" }));
+  await user.click(screen.getByRole("treeitem", { name: "b" }));
+  writeLakeDocument.mockRejectedValue(new Error("写入失败"));
+  await user.click(screen.getByRole("button", { name: "保存" }));
+  await screen.findByText("写入失败");
+
+  await user.pointer({ keys: "[MouseRight]", target: screen.getByRole("tab", { name: "a，已锁定" }) });
+  await user.click(screen.getByRole("menuitem", { name: "关闭其他标签" }));
+
+  await waitFor(() => {
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+    expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("当前文档保存失败，请先处理后再关闭其他标签")).toBeInTheDocument();
   });
 });
 

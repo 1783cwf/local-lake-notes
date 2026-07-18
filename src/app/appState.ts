@@ -101,6 +101,8 @@ export interface WebDavStorageSettings {
   storageId: string;
 }
 
+export type ImageOptimizationMode = "original" | "balanced" | "compact";
+
 export interface OssSettings {
   activeProvider: StorageProviderKind;
   endpoint: string;
@@ -118,6 +120,7 @@ export interface OssSettings {
   maxSignedUrlTtlSeconds: number;
   allowSignedUrlExport: boolean;
   resourcePreviewConcurrency: number;
+  imageOptimization: ImageOptimizationMode;
   local: LocalStorageSettings;
   webdav: WebDavStorageSettings;
 }

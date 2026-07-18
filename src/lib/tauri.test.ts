@@ -133,6 +133,7 @@ describe("tauri browser workspace fallback", () => {
         maxSignedUrlTtlSeconds: 604800,
         allowSignedUrlExport: true,
         resourcePreviewConcurrency: 6,
+        imageOptimization: "balanced",
       }),
     );
 
@@ -162,6 +163,7 @@ describe("tauri browser workspace fallback", () => {
       maxSignedUrlTtlSeconds: 604800,
       allowSignedUrlExport: true,
       resourcePreviewConcurrency: 6,
+      imageOptimization: "balanced",
       local: { rootDirectory: "/tmp/storage", storageId: "local" },
       webdav: { endpoint: "", username: "", password: "", rootPath: "", storageId: "webdav" },
     });
